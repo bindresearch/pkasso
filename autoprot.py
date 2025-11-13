@@ -26,10 +26,12 @@ class AutoProt:
         self.path_inp_qupkake = path_inp_qupkake
         self.path_out_qupkake = path_out_qupkake
         self.path_out_autoprot = path_out_autoprot
-        self.all_states = []
+        self.state_vecs = []
+        self.state_strs = []
+
         self.all_ps = {}
         self.all_smiles = {}
-        self.flagged_states = []
+        self.flagged_state_strs = []
         self.pH = pH
         self.cutoff = cutoff # frequency cutoff to consider for protonation/deprotonation
         self.ncycles = ncycles
@@ -63,9 +65,11 @@ class AutoProt:
 
         self.mol0 = Chem.MolFromSmiles(self.smiles_raw) # only for first qupkake run
 
-        self.all_states.append([state_str])
+        self.state_vecs.append(state_vec)
+        self.state_strs.append(state_str)
+
         if self.verbose:
-            print(self.all_states)
+            print(self.state_strs)
 
     @staticmethod
     def load_molecules(fname,removeHs=True):
@@ -86,10 +90,15 @@ class AutoProt:
         
     #########################################################
 
-    def prep_and_run(self,discard_cutoff=0.3):
+    def prep_and_run(self,new_states):
+
+    # def prep_and_run(self,discard_cutoff=0.3):
         # Prep, run, and analyse states
-        last_states_curated = []
-        for state_str in self.all_states[-1]:
+        # last_states_curated = []
+
+        ##### FIX THIS ######
+
+        for state_str in new_states:
             # Prep and run qupkake
             fname = f'{self.name}_{state_str}'
             if self.verbose:
@@ -101,7 +110,7 @@ class AutoProt:
             if ret != 0: # qupkake run failed
                 print(f'Qupkake run failed.')
                 print(f'Flagging state {state_str} for deletion.')       
-                self.flagged_states.append(state_str)
+                self.flagged_state_strs.append(state_str)
                 ps = np.zeros((2,self.N)) - 1 # blank state
                 # continue
             # analyze qupkake runs
@@ -128,47 +137,71 @@ class AutoProt:
                 print(f'Qupkake output smiles (tautomer search): {smiles}')
 
             self.all_ps[state_str] = list(ps)
-            last_states_curated.append(state_str)
-        if self.verbose:
-            print(f'Old last states: {self.all_states[-1]}')
-            print(f'Curated last states: {last_states_curated}')
-        self.all_states[-1] = last_states_curated
+            # last_states_curated.append(state_str)
+        # if self.verbose:
+            # print(f'Old last states: {self.state_strs[-1]}')
+            # print(f'Curated last states: {last_states_curated}')
+        # self.state_strs[-1] = last_states_curated
 
     def select_new_states(self):
-        # Select new states based on last runs
+        """ Only spawn new test states from states with sufficient frequency > cutoff """
         
-        new_states = self.add_states(self.all_states[-1])
-        if self.verbose:
-            print('Selecting new states.')
-            print(f'New states: {new_states}')
+        origin_states = []
+        for state_str, state_freq in zip(self.state_strs, self.state_freqs):
+            if state_freq > self.cutoff:
+                origin_states.append(state_str)
+            else:
+                print(f'Discarding {state_str} as origin; too low population.')
 
-        new_states_curated = []
-
+        print(f'Origin states:')
+        print(origin_states)
+        new_states = self.add_states(origin_states)
+        
         for state_str in new_states:
-            found = self.check_found(state_str)
-            # discarded = self.check_discarded(state_str)
-            if (not found):# and (not discarded):
-                new_states_curated.append(state_str)
-        if self.verbose:
-            print(f'New states curated: {new_states_curated}')
-        if len(new_states_curated) == 0:
-            if self.verbose:
-                print('No new states found. Exiting.')
-            return -1
-        else:
-            self.all_states.append(new_states_curated)
-        return 0
+            self.state_strs.append(state_str)
+            self.state_vecs.append(self.unpack_vec(state_str))
+
+        # new_states = self.add_states(self.state_strs[-1])
+        print('Selecting new states.')
+        print(f'New states: {new_states}')
+        return new_states
+
+        # new_states_curated = []
+
+        # for state_str in new_states:
+        #     found = self.check_found(state_str)
+        #     # discarded = self.check_discarded(state_str)
+        #     if (not found):# and (not discarded):
+        #         new_states_curated.append(state_str)
+        # if self.verbose:
+        #     print(f'New states curated: {new_states_curated}')
+        
+    
+        # if len(new_states) == 0:
+        #     if self.verbose:
+        #         print('No new states found. Exiting.')
+        #     return -1
+        # else:
+        #     self.state_strs.append(new_states)
+        # return 0
 
     def run_predictions(self):
         print(f'='*50)
         print(self.name)
         self.read_input()
+        new_states = [self.state_strs[0]] # starting 111111...
         for cycle in range(self.ncycles):
             print('-'*50)
             print(f'CYCLE {cycle}')
-            self.prep_and_run()
-            ret = self.select_new_states()
-            if ret != 0: # return code
+            self.prep_and_run(new_states)
+
+            self.run_state_analysis()
+            print('states freq:')
+            for st_str, st_freq in zip(self.state_strs, self.state_freqs):
+                print(f'{st_str} {st_freq:.2f}')
+            # print(self.state_freqs)
+            new_states = self.select_new_states()
+            if len(new_states) == 0:
                 break
         self.dump_results()
 
@@ -298,19 +331,24 @@ class AutoProt:
 
     #########################################################
 
-    def add_states(self,last_states):
+    def add_states(self,origin_states):
         new_states = []
-        if self.verbose:
-            print(f'Last states: {last_states}')
-        for state_str in last_states:
+        # if self.verbose:
+            # print(f'Last states: {last_states}')
+        for state_str in origin_states:
             ps = self.all_ps[state_str]
             state_vec = self.unpack_vec(state_str)
             for idx, p_up in enumerate(ps[0]): # up because basic
                 if (p_up > self.cutoff) and (state_vec[idx] < 2):
                     state_new_str = self.add_new_state(state_vec,idx,1)
+                    
                     if state_new_str in new_states:
                         if self.verbose:
                             print(f'{state_new_str} already in new_states {new_states}.')
+                    elif state_new_str in self.state_strs:
+                        print(f'{state_new_str} values already predicted.')
+                    elif state_new_str in self.flagged_state_strs:
+                        print(f'{state_new_str} values already discarded.')
                     else:
                         new_states.append(state_new_str)
             for idx, p_down in enumerate(ps[1]): # down because acidic
@@ -319,6 +357,10 @@ class AutoProt:
                     if state_new_str in new_states:
                         if self.verbose:
                             print(f'{state_new_str} already in new_states {new_states}.')
+                    elif state_new_str in self.state_strs:
+                        print(f'{state_new_str} values already predicted.')
+                    elif state_new_str in self.flagged_state_strs:
+                        print(f'{state_new_str} values already discarded.')
                     else:
                         new_states.append(state_new_str)
         return new_states
@@ -331,17 +373,17 @@ class AutoProt:
     
     def check_found(self,state_str):
         found = False
-        for states in self.all_states:
-            if state_str in states:
-                found = True
-                if self.verbose:
-                    print(f'State {state_str} already found.')
+        # for states in self.state_strs:
+        if state_str in self.state_strs:
+            found = True
+            if self.verbose:
+                print(f'State {state_str} already found.')
         return found
     
     def check_discarded(self,state_str):
         # print(f'Checking {state_str} for discarded.')
         discarded = False
-        if state_str in self.flagged_states:
+        if state_str in self.flagged_state_strs:
             discarded = True
             if self.verbose:
                 print(f'State {state_str} already discarded.')
@@ -350,7 +392,7 @@ class AutoProt:
     def dump_results(self,path='autoprot_cache'):
         os.makedirs(path,exist_ok=True)
         with open(f'{path}/{self.name}_states.yaml','w') as stream:
-            yaml.dump(self.all_states,stream)
+            yaml.dump(self.state_strs,stream)
         np.savez(f'{path}/{self.name}_ps.npz', **self.all_ps)
 
     def load_results(self,path='autoprot_cache'):
@@ -364,33 +406,39 @@ class AutoProt:
     def run_state_analysis(self):
         self.prep_state_selection()
         self.calc_tmatrix()
-        self.simulate_state_traj()
+        self.traj_states, self.traj = self.simulate_state_traj(self.state_vecs_short,self.tmatrix)
         self.calc_optimal_state()
-        self.plot_states_freq()
+
+    def export_results(self):
+        self.plot_state_freqs()
         self.export_optimal_state()
-        self.draw_all_states()
+        self.draw_state_strs()
         self.draw_labeled_state()
 
-    def prep_state_selection(self):
+    def prep_state_selection(self,load_results=False):
 
-        self.all_ps = self.load_results()
+        if load_results:
+            self.all_ps = self.load_results()
 
-        self.all_states_list = np.array([self.unpack_vec(state) for state in list(self.all_ps.keys())])
-        self.N_states = len(self.all_states_list)
-        self.relevant_indices = np.unique(np.where(self.all_states_list != 1)[1]) # find indices that change between states
+        # self.state_strs_list = np.array([self.unpack_vec(state) for state in list(self.all_ps.keys())])
+        # self.state_strs_list_str = list(self.all_ps.keys())
+        # print(f'self.state_strs_list_str: {self.state_strs_list_str}')
+        self.N_states = len(self.state_strs)
+        self.relevant_indices = np.unique(np.where(np.array(self.state_vecs) != 1)[1]) # find indices that change between states
         
         if self.verbose:
-            print(self.all_states_list)
             print(f'N_states: {self.N_states}')
             print(f'relevant indices: {self.relevant_indices}')
+        
+        print(np.array(self.state_vecs).shape)
+        self.state_vecs_short = np.array(self.state_vecs)[:,self.relevant_indices] # (state,index)
+        self.state_strs_short = [self.pack_vec(state) for state in self.state_vecs_short]
 
-        self.states = self.all_states_list[:,self.relevant_indices] # (state,index)
-        self.states_str = [self.pack_vec(state) for state in self.states]
-
-        self.ps_list = np.array([self.all_ps[st] for st in self.all_ps.keys()])
-        self.ps_list = self.ps_list[:,:,self.relevant_indices] # states, up/down, indices
+        # ps list of relevant indices
+        self.ps_relevant = np.array([self.all_ps[st] for st in self.state_strs]) 
+        self.ps_relevant = self.ps_relevant[:,:,self.relevant_indices] # states, up/down, indices
         if self.verbose:
-            print(self.ps_list)
+            print(self.ps_relevant)
 
     def get_s_idx(self,state,states_str):
         return states_str.index(self.pack_vec(state))
@@ -398,14 +446,14 @@ class AutoProt:
     def calc_tmatrix(self):
         """ Transition matrix between molecule protonation states"""
 
-        tmatrix_raw = [[[] for _ in range(len(self.states))] for _ in range(len(self.states))] # N_states x N_states (x duplicate predictions)
+        tmatrix_raw = [[[] for _ in range(self.N_states)] for _ in range(self.N_states)] # N_states x N_states (x duplicate predictions)
 
-        for s_idx, state in enumerate(self.states):
+        for s_idx, state_vec_short in enumerate(self.state_vecs_short):
             if self.verbose:
                 print('------')
-                print(s_idx, state)
-            ps_up = self.ps_list[s_idx,0]
-            ps_down = self.ps_list[s_idx,1]
+                print(s_idx, state_vec_short)
+            ps_up = self.ps_relevant[s_idx,0]
+            ps_down = self.ps_relevant[s_idx,1]
 
             recipes = [
                 [ps_up, 1],
@@ -419,16 +467,17 @@ class AutoProt:
                 for at_idx, p in enumerate(ps):
                     # print(at_idx, p)
                     if p > -1.:
-                        state_target = state.copy()
-                        state_target[at_idx] += dq
+                        state_target_vec = state_vec_short.copy()
+                        state_target_vec[at_idx] += dq
+                        state_target_str = self.pack_vec(state_target_vec)
                         if self.verbose:
-                            print(f'target: {state_target}')
-                        if self.pack_vec(state_target) in self.states_str:
-                            c_target_idx = self.get_s_idx(state_target,self.states_str)
+                            print(f'target: {state_target_vec}')
+                            print(f'target str: {state_target_str}')
+                        if state_target_str in self.state_strs_short:
+                            c_target_idx = self.state_strs_short.index(state_target_str)
+                            # c_target_idx = self.get_s_idx(state_target,self.state_strs_short)
                             tmatrix_raw[c_target_idx][s_idx].append(p) # to, from
                             tmatrix_raw[s_idx][c_target_idx].append(1-p)
-
-        # print('='*50)
 
         tmatrix_mean = np.zeros((self.N_states,self.N_states)) # N_states x N_states, average over predictions per ij
 
@@ -446,75 +495,78 @@ class AutoProt:
         self.tmatrix /= np.sum(self.tmatrix,axis=0) 
 
         if self.verbose:
-            print(self.states_str)
+            print(self.state_strs_short)
             print(self.tmatrix)
 
     #########################################################
 
-    def simulate_state_traj(self,nsteps=1000000):
+    @staticmethod
+    def simulate_state_traj(state_vecs,tmatrix,nsteps=100000):
         """ Simulate evolution according to transition matrix """
 
-        choice0 = np.random.randint(len(self.states))
+        choice0 = np.random.randint(len(state_vecs))
 
-        self.traj = [choice0]
-        self.traj_states = [self.states[choice0]]
+        traj = [choice0]
+        traj_states = [state_vecs[choice0]]
 
         for t in range(1,nsteps):
-            trans = self.tmatrix.T[self.traj[t-1]]
-            choice = np.random.choice(np.arange(self.N_states),p=trans)
+            trans = tmatrix.T[traj[t-1]]
+            choice = np.random.choice(np.arange(len(state_vecs)),p=trans)
             # print(traj[t-1], trans, choice)
-            self.traj.append(choice)
-            self.traj_states.append(self.states[choice])
+            traj.append(choice)
+            traj_states.append(state_vecs[choice])
 
-        self.traj_states = np.array(self.traj_states)
-        self.traj = np.array(self.traj)
+        traj_states = np.array(traj_states)
+        traj = np.array(traj)
 
-        # eigenvalues, eigenvectors = np.linalg.eig(tmatrix)
-        # print(eigenvalues)
+        return traj_states, traj
 
     #########################################################
 
     def calc_optimal_state(self):
-        self.states_mean = np.mean(self.traj_states,axis=0)
+        self.state_vecs_mean = np.mean(self.traj_states,axis=0)
 
-        self.states_freq = np.zeros((self.N_states))
+        self.state_freqs = np.zeros((self.N_states))
 
         for idx in range(self.N_states):
-            self.states_freq[idx] = len(np.where(self.traj == idx)[0])
-        self.states_freq /= np.sum(self.states_freq)
-        self.states_freq *= 100
-        # print(self.states_freq)
+            self.state_freqs[idx] = len(np.where(self.traj == idx)[0])
+        self.state_freqs /= np.sum(self.state_freqs)
+        # self.state_freqs *= 100
+        # print(self.state_freqs)
 
-        print('State | Occupancy')
-        for state_str, freq in zip(self.states_str, self.states_freq):
-            print(f'{state_str} | {freq:.2f}%')
+        print('State | State (relevant) | Occupancy')
+        for state_str, state_str_short, freq in zip(self.state_strs, self.state_strs_short, self.state_freqs):
+            print(f'{state_str} | {state_str_short} | {freq:.2f}%')
 
-        idx_max = np.argmax(self.states_freq)
+        idx_max = np.argmax(self.state_freqs)
 
-        self.state_vec_opti = self.reconstruct_full_state(self.unpack_vec(self.states_str[idx_max]))
-        self.state_str_opti = self.pack_vec(self.state_vec_opti)
+        self.state_vec_opti = self.state_vecs[idx_max]
+        self.state_str_opti = self.state_strs[idx_max]
 
-        print(f'Most likely state: {self.state_vec_opti} at {self.states_freq[idx_max]:.2f}%')
+        # self.state_vec_opti = self.reconstruct_full_state(self.unpack_vec(self.states_str[idx_max]))
+        # self.state_str_opti = self.pack_vec(self.state_vec_opti)
 
-    def reconstruct_full_state(self,state):
-        """ Reconstruct full state vector from state vector of relevant indices"""
-        state_vec = np.ones((self.N),dtype=int)
-        for idx, st in zip(self.relevant_indices, state):
-            state_vec[idx] = st # np.round(st) # Should be int now
-        return state_vec
+        print(f'Most likely state: {self.state_str_opti} at {self.state_freqs[idx_max]*100:.2f}%')
+
+    # def reconstruct_full_state(self,state):
+    #     """ Reconstruct full state vector from state vector of relevant indices"""
+    #     state_vec = np.ones((self.N),dtype=int)
+    #     for idx, st in zip(self.relevant_indices, state):
+    #         state_vec[idx] = st # np.round(st) # Should be int now
+    #     return state_vec
 
     #########################################################
 
-    def plot_states_freq(self):
+    def plot_state_freqs(self):
         print(f'N_states: {self.N_states}')
         fig, ax = plt.subplots(figsize=(self.N_states/3.,3.5))
         xs = np.arange(self.N_states)
-        ax.bar(xs, self.states_freq)
+        ax.bar(xs, self.state_freqs*100)
         ax.set_xticks(xs)
-        ax.set_xticklabels(self.states_str,rotation=-45)
+        ax.set_xticklabels(self.state_strs_short,rotation=-45)
         ax.set(xlabel='States',ylabel='Occupancy [%]')
 
-        for idx, st in zip(self.relevant_indices, self.states_mean):
+        for idx, st in zip(self.relevant_indices, self.state_vecs_mean):
             print(f'Atom {idx}: Charge: {st-1:.2f}')
         fig.savefig(f'{self.path_out_autoprot}/{self.name}_state_freqs.pdf')
         return fig
@@ -548,10 +600,10 @@ class AutoProt:
         img.save(f'{self.path_out_autoprot}/{fname}.pdf')
         return img
     
-    def draw_all_states(self):
+    def draw_state_strs(self):
         ms = []
-        for state_vec in self.all_states_list:
-            state_str = self.pack_vec(state_vec)
+        for state_str in self.state_strs:
+            # state_str = self.pack_vec(state_vec)
             sdf = f'qupkake_output/{self.name}_{state_str}.sdf'
             with Chem.SDMolSupplier(sdf) as suppl:
                 tmp = [x for x in suppl if x is not None]
@@ -559,13 +611,13 @@ class AutoProt:
             mol = tmp[0]
             ms.append(mol)
         img=Draw.MolsToGridImage(ms,molsPerRow=5,subImgSize=(200,200),
-                                 legends=[f'{self.states_freq[idx]:.1f}%' for idx in range(len(ms))],
+                                 legends=[f'{self.state_freqs[idx]*100:.1f}%' for idx in range(len(ms))],
                                  returnPNG=False,useSVG=True)
 
-        with open(f'{self.path_out_autoprot}/{self.name}_all_states.svg','w') as f:
+        with open(f'{self.path_out_autoprot}/{self.name}_state_strs.svg','w') as f:
             f.write(img.data)
-        cairosvg.svg2pdf(url=f'{self.path_out_autoprot}/{self.name}_all_states.svg',
-                 write_to=f'{self.path_out_autoprot}/{self.name}_all_states.pdf')
+        cairosvg.svg2pdf(url=f'{self.path_out_autoprot}/{self.name}_state_strs.svg',
+                 write_to=f'{self.path_out_autoprot}/{self.name}_state_strs.pdf')
 
     def draw_labeled_state(self):
         sdf = f'{self.path_out_autoprot}/{self.name}.sdf'
@@ -629,14 +681,14 @@ class AutoProt:
                      
             f.write(f'Relevant atoms: {self.relevant_indices}\n')
             f.write(f'Average charge per relevant atoms:\n')
-            for idx, st in zip(self.relevant_indices, self.states_mean):
+            for idx, st in zip(self.relevant_indices, self.state_vecs_mean):
                 f.write(f'Atom {idx}: Charge: {st-1:.2f}\n')
             f.write('\n')
 
             f.write(f'Protonation state occupancies:\n')
             f.write('State | Occupancy\n')
-            for state_str, freq in zip(self.states_str, self.states_freq):
-                f.write(f'{state_str} | {freq:.2f}%\n')
+            for state_str, freq in zip(self.state_strs, self.state_freqs):
+                f.write(f'{state_str} | {freq*100:.2f}%\n')
             f.write('\n')
 
             f.write(f'Smiles of optimal protonation state: {self.smiles_optimal}\n')
