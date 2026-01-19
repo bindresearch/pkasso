@@ -20,7 +20,8 @@ class AutoProt:
                  path_out_autoprot = 'path_out_autoprot',
                  pH = 7.,
                  cutoff=0.05,ncycles=10,
-                 verbose=False):
+                 verbose=False,
+                 mp = 2):
         self.name = name
         self.f_input = f_input
         self.path_inp_qupkake = path_inp_qupkake
@@ -36,6 +37,7 @@ class AutoProt:
         self.cutoff = cutoff # frequency cutoff to consider for protonation/deprotonation
         self.ncycles = ncycles
         self.verbose = verbose
+        self.mp = mp
 
         os.makedirs(path_out_autoprot,exist_ok=True)
         os.makedirs(path_out_qupkake,exist_ok=True)
@@ -61,7 +63,7 @@ class AutoProt:
                     self.smiles_raw = spl[0]
                     break
 
-        self.log(f'Raw input smiles: {self.smiles_raw}')
+        # self.log(f'Raw input smiles: {self.smiles_raw}')
         self.log(f'Raw input smiles: {self.smiles_raw}')
         self.mol0_raw = Chem.MolFromSmiles(self.smiles_raw)
         
@@ -82,8 +84,14 @@ class AutoProt:
         self.clear_qupkake_output(fname)
         self.prep_qupkake_input(state_str,fname)
         ret = self.run_qupkake(fname)
-        ms = self.load_molecules(f'{self.path_out_qupkake}/{fname}.sdf')
-        self.mol0 = ms[0]
+        if os.path.isfile(f'{self.path_out_qupkake}/{fname}.sdf'):
+            ms = self.load_molecules(f'{self.path_out_qupkake}/{fname}.sdf')
+            self.mol0 = ms[0]
+            return_code = 0
+        else: # Write sdf from input smi. Prevents error exit.
+            print(f'Writing sdf from input smi to {self.path_out_qupkake}/{fname}.')
+            self.write_molecule(self.mol0,self.path_out_qupkake,fname)
+            return_code = 1
         self.smiles_input = Chem.MolToSmiles(self.mol0,canonical=False)
 
         self.state_vecs.append(state_vec)
@@ -91,6 +99,7 @@ class AutoProt:
 
         if self.verbose:
             self.log(self.state_strs)
+        return return_code
 
     @staticmethod
     def load_molecules(fname,removeHs=True):
@@ -211,7 +220,7 @@ class AutoProt:
     def run_predictions(self):
         self.log(f'='*50)
         self.log(self.name)
-        self.read_input()
+        ret = self.read_input()
         new_states = [self.state_strs[0]] # starting 111111...
         for cycle in range(self.ncycles):
             self.log('-'*50)
@@ -223,7 +232,8 @@ class AutoProt:
             # for st_str, st_freq in zip(self.state_strs, self.state_freqs):
             #     self.log(f'{st_str} {st_freq:.2f}')
             # self.log(self.state_freqs)
-            new_states = self.select_new_states()
+            if cycle < self.ncycles - 1: # not last cycle
+                new_states = self.select_new_states()
             if len(new_states) == 0:
                 break
         self.dump_results()
@@ -289,7 +299,7 @@ class AutoProt:
             self.write_molecule(mol_new,self.path_inp_qupkake,fname)
         elif output == 'smiles':
             self.write_smiles(mol_new,self.path_inp_qupkake,fname)
-        self.clear_qupkake_output(fname)
+        # self.clear_qupkake_output(fname)
 
     def run_qupkake(self,fname,input='smiles'):
         if input == 'sdf':
@@ -303,12 +313,12 @@ class AutoProt:
             self.log(f'{fname} {smiles}')
             # if os.path.isfile(f'{self.path_out_qupkake}/{fname}.sdf'):
             #     os.remove(f'{self.path_out_qupkake}/{fname}.sdf')
-            os.system(f'qupkake smiles -r data -o {fname}.sdf "{smiles}"') # -t
-        if not os.path.isfile(f'data/output/{fname}.sdf'):
+            os.system(f'qupkake smiles -r data/{self.name} -o {fname}.sdf -mp {self.mp} "{smiles}"') # -t
+        if not os.path.isfile(f'data/{self.name}/output/{fname}.sdf'):
             return -1
         else:
-            os.system(f'cp data/output/{fname}.sdf {self.path_out_qupkake}/')
-            os.system(f'rm -r data')
+            os.system(f'cp data/{self.name}/output/{fname}.sdf {self.path_out_qupkake}/')
+            os.system(f'rm -r data/{self.name}')
             return 0
 
     #########################################################
@@ -330,9 +340,24 @@ class AutoProt:
                 # self.log(qs)
             elif pka_type == 'acidic':
                 ps[1,at_idx] = p_down
+        ps_fixed = self.fix_ps(ps,self.cutoff)
         if self.verbose:
             self.log(ps)
-        return ps
+            self.log('ps_fixed:')
+            self.log(ps_fixed)
+        return ps_fixed
+    
+    def fix_ps(self,ps,cutoff): # Hopefully fixes weird qupkake behaviour
+        self.log(f'cutoff: {cutoff}')
+        ps_T = ps.T
+        ps_T_fixed = copy.deepcopy(ps_T)
+        for at_idx, (p_up, p_down) in enumerate(ps_T):
+            self.log(f'{at_idx}, {p_up}, {p_down}')
+            if (p_up > cutoff) and (p_down > -1):
+                self.log('fixing p_down')
+                ps_T_fixed[at_idx,1] = -1 # reset p_down to -1
+        ps_fixed = ps_T_fixed.T
+        return ps_fixed
 
     @staticmethod
     def get_at_props(mol):
@@ -630,7 +655,7 @@ class AutoProt:
         ms = []
         for state_str in self.state_strs:
             # state_str = self.pack_vec(state_vec)
-            sdf = f'qupkake_output/{self.name}_{state_str}.sdf'
+            sdf = f'{self.path_out_qupkake}/{self.name}_{state_str}.sdf'
             with Chem.SDMolSupplier(sdf) as suppl:
                 tmp = [x for x in suppl if x is not None]
             for m in tmp: _=AllChem.Compute2DCoords(m)
