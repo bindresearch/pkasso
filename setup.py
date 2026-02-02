@@ -24,4 +24,6 @@ setup(
         'Operating System :: POSIX :: Linux',
         'Programming Language :: Python :: 3>=3.7,<3.11',
     ],
+
+    package_data={'' : ['data/*.csv']},
 )

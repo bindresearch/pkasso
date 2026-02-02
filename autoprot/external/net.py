@@ -1,13 +1,10 @@
 import torch.nn.functional as F
 
 from torch import nn
-from torch.nn import Linear, Sequential, ReLU, GRU
+from torch.nn import Linear
 from torch.nn import BatchNorm1d
 from .gcn_conv import GCNConv
-from torch_geometric.nn import GATConv, NNConv, Set2Set, AttentionalAggregation
-from torch_geometric.nn import global_add_pool
-
-
+from torch_geometric.nn import AttentionalAggregation
 n_features = 29
 hidden = 1024
 
@@ -24,7 +21,7 @@ class GCNNet(nn.Module):
         self.bn4 = BatchNorm1d(512)
         self.conv5 = GCNConv(512, 1024, cached=False)
         self.bn5 = BatchNorm1d(1024)
-        
+
         self.att = AttentionalAggregation(Linear(hidden, 1))
         self.fc2 = Linear(1024, 128)
         self.fc3 = Linear(128, 16)
@@ -60,70 +57,3 @@ class GCNNet(nn.Module):
         x = F.relu(self.fc3(x))
         x = self.fc4(x)
         return x
-
-class GATNet(nn.Module):
-    def __init__(self):
-        super(GATNet, self).__init__()
-        self.conv1 = GATConv(n_features, 1024, heads=1) # if you defined cache=True, the shape of batch must be same!
-        self.bn1 = BatchNorm1d(1024)
-        self.conv2 = GATConv(1024, 512, heads=1)
-        self.bn2 = BatchNorm1d(512)
-        self.conv3 = GATConv(512, 256, heads=1)
-        self.bn3 = BatchNorm1d(256)
-        self.conv4 = GATConv(256, 516, heads=1)
-        self.bn4 = BatchNorm1d(516)
-        self.conv5 = GATConv(516, 1024, heads=1)
-        self.bn5 = BatchNorm1d(1024)
-
-        self.fc2 = Linear(1024, 128)
-        self.fc3 = Linear(128, 16)
-        self.fc4 = Linear(16, 1)
-
-    def forward(self, x, edge_index, batch):
-
-        x = F.relu(self.conv1(x, edge_index))
-        x = self.bn1(x)
-        x = F.relu(self.conv2(x, edge_index))
-        x = self.bn2(x)
-        x = F.relu(self.conv3(x, edge_index))
-        x = self.bn3(x)
-        x = F.relu(self.conv4(x, edge_index))
-        x = self.bn4(x)
-        x = F.relu(self.conv5(x, edge_index))
-        x = self.bn5(x)
-        x = global_add_pool(x, batch)
-
-        x = F.relu(self.fc2(x))
-        x = F.dropout(x, p=0.2, training=self.training)
-        x = F.relu(self.fc3(x))
-        x = F.dropout(x, p=0.2, training=self.training)
-        x = self.fc4(x)
-        return x
-
-dim = 64
-class MPNNNet(nn.Module):
-    def __init__(self):
-        super(MPNNNet, self).__init__()
-        self.lin0 = Linear(n_features, dim)
-
-        nn = Sequential(Linear(6, 128), ReLU(), Linear(128, dim * dim))
-        self.conv = NNConv(dim, dim, nn, aggr='mean')
-        self.gru = GRU(dim, dim)
-
-        self.set2set = Set2Set(dim, processing_steps=3)
-        self.lin1 = Linear(2 * dim, dim)
-        self.lin2 = Linear(dim, 1)
-
-    def forward(self, x, edge_index, edge_attr, batch):
-        out = F.relu(self.lin0(x))
-        h = out.unsqueeze(0)
-
-        for i in range(6):
-            m = F.relu(self.conv(out, edge_index, edge_attr))
-            out, h = self.gru(m.unsqueeze(0), h)
-            out = out.squeeze(0)
-
-        out = self.set2set(out, batch)
-        out = F.relu(self.lin1(out))
-        out = self.lin2(out)
-        return out
