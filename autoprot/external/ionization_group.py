@@ -3,12 +3,17 @@
 
 from __future__ import division
 from __future__ import unicode_literals
+import numpy as np
 from rdkit import Chem
 
 import os
 import pandas as pd
 
-root = os.path.abspath(os.path.dirname(__file__))
+from importlib import resources
+pkg_base = resources.files('autoprot')
+root = f'{pkg_base}/data'
+
+# root = os.path.abspath("")
 smarts_file = os.path.join(root, "smarts_pattern.tsv")
 
 def split_acid_base_pattern(smarts_file):
@@ -70,7 +75,7 @@ def get_ionization_aid(mol, acid_or_base=None):
     df_smarts_acid, df_smarts_base = split_acid_base_pattern(smarts_file)
 
     if mol == None:
-        raise RuntimeError("read mol error")
+        raise RuntimeError("No mol found for get_ionization_aid")
     acid_matches = match_acid(df_smarts_acid, mol)
     base_matches = match_base(df_smarts_base, mol)
     if acid_or_base == None:

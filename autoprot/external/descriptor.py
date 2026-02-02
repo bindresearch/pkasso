@@ -2,8 +2,10 @@ from rdkit import Chem
 from rdkit.Chem import AllChem
 from rdkit import RDLogger
 RDLogger.DisableLog('rdApp.*')
+from rdkit.Chem import rdmolops
 
 import numpy as np
+from .ionization_group import get_ionization_aid
 
 import torch
 from torch_geometric.data import Data
@@ -101,5 +103,6 @@ def mol2vec(mol, atom_idx, evaluation=True, pka=None):
                     edge_index=torch.tensor(edge_index, dtype=torch.long),
                     pka=torch.tensor([[pka]], dtype=torch.float))
     return data
+
 
 
