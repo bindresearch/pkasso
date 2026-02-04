@@ -3,26 +3,32 @@ import subprocess
 
 setup(
     name='autoprot',
-    version='0.1.0',
+    version='0.2.0',
     description='Automatic selection of protonation states for small molecules',
     url='.',
     authors=[
-        {'name':'Soren von Bulow', 'email':'soeren.buelow@bindresearch.org'},
+        {'name':'Soeren von Buelow', 'email':'soeren.buelow@bindresearch.org'},
     ],
-    license='GNU GPL3',
+    license='MIT',
     packages=find_packages(),
     install_requires=[
         'rdkit',
         'numpy',
+        'scipy',
         'pyyaml',
         'cairosvg',
+        'svgutils',
         'matplotlib',
+        'torch',
+        'torch_geometric',
+        'pandas',
+        'pytest'
     ],
 
     classifiers=[
         'Intended Audience :: Science/Research',
         'Operating System :: POSIX :: Linux',
-        'Programming Language :: Python :: 3>=3.7,<3.11',
+        'Programming Language :: Python :: 3>=3.7',
     ],
 
     package_data={'' : ['data/*.csv']},
