@@ -22,7 +22,8 @@ setup(
         'torch',
         'torch_geometric',
         'pandas',
-        'pytest'
+        'pytest',
+        'pytest-cov',
     ],
 
     classifiers=[
