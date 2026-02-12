@@ -62,9 +62,7 @@ def preprocess(smiles_raw,verbose=False):
     mol_h = Chem.rdmolops.AddHs(mol)
     for at_idx, q in enumerate(q0s):
         if q != 0.:
-            print('####')
-            print(f'WARNING: Input molecule is charged at idx {at_idx}!')
-            print('####')
+            print(f'NOTE: Input molecule is charged at idx {at_idx}!')
             exclude_indices.append(at_idx)
         else:
             atom = mol_h.GetAtomWithIdx(at_idx)
@@ -263,7 +261,7 @@ def sort_string(string,ps):
     return s
 
 def combine_clusters(state_strs_clusters, state_freqs_clusters, indices_clusters, state_freqs_all, pH_idx, pHs, 
-                     sfreq_cutoff_individual=0.01,sfreq_cutoff_combined=0.001):
+                     sfreq_cutoff_individual=0.01,sfreq_cutoff_combined=0.001,verbose=False):
     """ 
     Combine state frequency results from independent pKa clusters in molecule. 
     The combined probability for microstate A in cluster 1 and B in cluster 2 is:
@@ -282,7 +280,8 @@ def combine_clusters(state_strs_clusters, state_freqs_clusters, indices_clusters
 
     # cluster_state_idxs = [list(range(len(state_strs))) for state_strs in state_strs_clusters]
     combinations = list(itertools.product(*cluster_state_ids))
-    print(f'N microstate combinations from clusters: {len(combinations)}')
+    if verbose:
+        print(f'N microstate combinations from clusters: {len(combinations)}')
     # print(state_freqs_clusters)
 
     state_strs = []
@@ -307,7 +306,8 @@ def combine_clusters(state_strs_clusters, state_freqs_clusters, indices_clusters
         state_strs.append(state_str)
         state_freqs.append(state_freq)
 
-    print(f'N chosen microstate combinations: {len(state_strs)}')
+    if verbose:
+        print(f'N chosen microstate combinations: {len(state_strs)}')
     # Correct freqs for removal of very unlikely states
     state_freqs = np.array(state_freqs)
     state_freqs /= np.sum(state_freqs)
@@ -319,7 +319,7 @@ def combine_clusters(state_strs_clusters, state_freqs_clusters, indices_clusters
     
     return indices, state_strs, state_freqs_all
 
-def calc_relevant_states(state_freqs_all, mols_lib, max_states=18):
+def calc_relevant_states(state_freqs_all, mols_lib, max_states=18,verbose=False):
     """ Reduce number of states to max_states for plotting """
 
     cutoff = 0.05
@@ -341,7 +341,8 @@ def calc_relevant_states(state_freqs_all, mols_lib, max_states=18):
         else:
             sfreqs_not_relevant.append(sfreqs)
     N_relevant_states = len(state_strs_relevant)
-    print(f'Initial N relevant states: {N_relevant_states} with cutoff {cutoff}')
+    if verbose:
+        print(f'Initial N relevant states: {N_relevant_states} with cutoff {cutoff}')
     while N_relevant_states > max_states:
         state_strs_relevant = []
         sfreqs_relevant = []
@@ -364,8 +365,8 @@ def calc_relevant_states(state_freqs_all, mols_lib, max_states=18):
     state_strs_relevant = [state_strs_relevant[p] for p in ps]
     sfreqs_relevant = [sfreqs_relevant[p] for p in ps]
     mols_relevant = [mols_relevant[p] for p in ps]
-
-    print(f'Final N relevant states: {N_relevant_states} with cutoff {cutoff}')
+    if verbose:
+        print(f'Final N relevant states: {N_relevant_states} with cutoff {cutoff}')
     return N_relevant_states, state_strs_relevant, sfreqs_relevant, mols_relevant, sfreqs_not_relevant
 
 def screen_clusters(indices0, q_options0, mol0, mols_lib, smiles_lib, 
@@ -375,7 +376,8 @@ def screen_clusters(indices0, q_options0, mol0, mols_lib, smiles_lib,
     accept_clusters = False
     coupling_cutoff = 0.0
     while not accept_clusters:
-        print(f'coupling cutoff: {coupling_cutoff}')
+        if verbose:
+            print(f'coupling cutoff: {coupling_cutoff}')
         accept_clusters = True
         clusters, mols_lib, base_lib, acid_lib = coupling_assay(indices0, q_options0, mol0, mols_lib, smiles_lib, 
                                             model_base, model_acid, base_lib, acid_lib, coupling_cutoff=coupling_cutoff, device=device,
@@ -396,10 +398,16 @@ def screen_clusters(indices0, q_options0, mol0, mols_lib, smiles_lib,
 def run_pipeline(name,smiles_raw,pH_output=7,cutoff_states=4000,device='cpu',
                  pH_band=8.,pHs = np.arange(0,14.1,0.5),
                  path_out='output',path_figs='figures',
-                 verbose=False,
-                 write_all_relevant=False):
-    print(name)
-    print(smiles_raw, flush=True)
+                 verbose=False,cutoff_export=0.5,
+                 fout_csv='out.csv',append=True,notebook=False,
+                 except_optimize_error=False):
+                #  write_all_relevant=False):
+    if verbose:
+        print(name)
+        print(smiles_raw, flush=True)
+
+    os.makedirs(path_out,exist_ok=True)
+    os.makedirs(path_figs,exist_ok=True)
 
     # molgpka ML models
     model_file_base = f'{ROOT}/weight_base.pth'
@@ -422,17 +430,19 @@ def run_pipeline(name,smiles_raw,pH_output=7,cutoff_states=4000,device='cpu',
     mol0, exclude_indices = preprocess(smiles_raw)
     mol0_h = Chem.rdmolops.AddHs(mol0)
 
-    base0, acid0 = predict_acid_base(mol0_h,model_base,model_acid,device=device,verbose=True)
+    base0, acid0 = predict_acid_base(mol0_h,model_base,model_acid,device=device,verbose=verbose)
         
     for pH_idx, pH in enumerate(pHs): #,total=len(pHs)):#,total=len(pHs)):
-        print('='*50)
-        print(f'pH: {pH}')
+        if verbose:
+            print('='*50)
+            print(f'pH: {pH}',flush=True)
         indices0, q_options0 = find_candidate_sites(base0, acid0, exclude_indices,pH,pH_band=pH_band,verbose=False)
 
         clusters, mols_lib, base_lib, acid_lib = screen_clusters(indices0, q_options0, mol0, mols_lib, smiles_lib, 
                                             model_base, model_acid, base_lib, acid_lib, cutoff_states, device='cpu',
                                             verbose=verbose)
-        print(f'Clusters: {clusters}')
+        if verbose:
+            print(f'Clusters: {clusters}')
         state_freqs_clusters = []
         state_strs_clusters = []
         indices_clusters = []
@@ -476,26 +486,51 @@ def run_pipeline(name,smiles_raw,pH_output=7,cutoff_states=4000,device='cpu',
             indices_clusters.append(indices)
 
         indices, state_strs, state_freqs_all = combine_clusters(
-            state_strs_clusters, state_freqs_clusters, indices_clusters, state_freqs_all, pH_idx, pHs)
+            state_strs_clusters, state_freqs_clusters, indices_clusters, state_freqs_all, pH_idx, pHs,verbose=verbose)
 
         state_vecs = [unpack_vec(state_str) for state_str in state_strs]
         mols_lib, smiles_lib = construct_mols(mol0, state_strs, state_vecs, indices, mols_lib, smiles_lib) # pH independent
         state_freq_max = 0.
         net_charge = 0.
+        
+        state_qs = {}
+
         for state_str, state_freq in state_freqs_all.items():
             if state_freq[pH_idx] > state_freq_max:
                 state_str_opti = state_str
                 state_freq_max = state_freq[pH_idx]
-            net_charge += Chem.GetFormalCharge(mols_lib[state_str]) * state_freq[pH_idx]
+            state_q = Chem.GetFormalCharge(mols_lib[state_str]) 
+            state_qs[state_str] = state_q
+            net_charge += state_q * state_freq[pH_idx]
+
+        state_strs_export = []
+        state_freqs_export = []
+
+        for state_str, state_freq in state_freqs_all.items():
+            if state_freq[pH_idx] > cutoff_export * state_freq_max: # Include all high prob states
+                state_strs_export.append(state_str)
+                state_freqs_export.append(state_freq[pH_idx])
+
+        state_freqs_export = np.array(state_freqs_export)
+        ps = np.argsort(state_freqs_export)[::-1] # Sort by highest probability
+
+        state_freqs_export = state_freqs_export[ps]
+        state_strs_export = [state_strs_export[p] for p in ps]
 
         net_charges.append(net_charge)
 
         if pH == pH_output:
-            mol = mols_lib[state_str_opti]
-            export_sdf(name,mol,path=path_out)
-            export_smi(name,smiles_lib[state_str_opti],path=path_out)
-            plot_optimal_state(name,mol,path=path_figs)
-            print(f'Optimal smiles for pH {pH}: {smiles_lib[state_str_opti]}')
+            if verbose:
+                print(f'Export at pH {pH_output}:',flush=True)
+                for e_idx, (state_str, sfreq) in enumerate(zip(state_strs_export, state_freqs_export)):
+                    print(e_idx, state_str, sfreq)
+            # export_smi(name,state_strs_export,smiles_lib,state_freqs_export,path=path_out,fout_smi=fout_smi,append=append)
+            export_csv(name,state_strs_export,smiles_lib,state_freqs_export,state_qs,path=path_out,fout_csv=fout_csv,append=append)
+            return_code = export_sdf(name,state_strs_export,mols_lib,path=path_out,except_optimize_error=except_optimize_error)
+            # export_smi(name_state,smiles_lib[state_str_opti],path=path_out)
+            plot_optimal_state(name,mols_lib[state_strs_export[0]],path=path_figs)
+            if verbose:
+                print(f'Optimal smiles for pH {pH}: {smiles_lib[state_str_opti]}')
 
     net_charges = np.round(np.array(net_charges),decimals=4)
 
@@ -504,14 +539,15 @@ def run_pipeline(name,smiles_raw,pH_output=7,cutoff_states=4000,device='cpu',
             # f.write(f'{pH:.2f} {net_charge:.3f}\n')
 
     # reduce number of microstates for plotting
-    N_relevant_states, state_strs_relevant, sfreqs_relevant, mols_relevant, sfreqs_not_relevant = calc_relevant_states(state_freqs_all, mols_lib)
+    N_relevant_states, state_strs_relevant, sfreqs_relevant, mols_relevant, sfreqs_not_relevant = calc_relevant_states(state_freqs_all, mols_lib,verbose=verbose)
 
     if N_relevant_states > 0:
-        plot_pH_scan(name, indices, state_strs_relevant, sfreqs_relevant, pHs, net_charges, sfreqs_not_relevant, path=path_figs)
-        plot_relevant_states(name, mols_relevant, path=path_figs)
+        plot_pH_scan(name, indices, state_strs_relevant, sfreqs_relevant, pHs, net_charges, sfreqs_not_relevant, path=path_figs,verbose=verbose)
+        plot_relevant_states(name, mols_relevant, path=path_figs,notebook=notebook)
         compose_image(name,N_relevant_states, path=path_figs)
-        if write_all_relevant:
-            for state_str, mol in zip(state_strs_relevant, mols_relevant):
-                export_sdf(f'{name}_{state_str}',mol,path=path_out)
-                export_smi(f'{name}_{state_str}',smiles_lib[state_str],path=path_out)
+    return return_code
+        # if write_all_relevant:
+        #     for state_str, mol in zip(state_strs_relevant, mols_relevant):
+        #         export_sdf(f'{name}_{state_str}',mol,path=path_out)
+        #         export_smi(f'{name}_{state_str}',smiles_lib[state_str],path=path_out)
 

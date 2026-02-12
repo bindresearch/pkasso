@@ -25,40 +25,48 @@ import os
 #     return state_strs_relevant, sfreqs_relevant, mols_relevant
 
 def plot_pH_scan(name, indices, state_strs_relevant, sfreqs_relevant, pHs, net_charges, sfreqs_not_relevant, cmap=plt.cm.Spectral,
-                 path='figures'):
+                 path='figures',verbose=False):
+    
     cmap = plt.cm.Spectral_r
+    if len(pHs) == 1:
+        style = 'o'
+    else:
+        style = '-'
 
     fsave = f'{path}/{name}_ph_scan.svg'
 
-    print(f'Indices: {indices}')
+    if verbose:
+        print(f'Indices: {indices}')
     px = 1/plt.rcParams['figure.dpi']
 
     fig, ax = plt.subplots(2,1,figsize=(700*px,500*px),height_ratios=[0.6,0.4])
 
     for idx, sfreq in enumerate(sfreqs_not_relevant):
-        ax[0].plot(pHs,sfreq*100,color='gray',lw=1.,alpha=0.3)
+        ax[0].plot(pHs,sfreq*100,style,color='gray',lw=1.,alpha=0.3)
 
     for idx, (state_str, sfreq) in enumerate(zip(state_strs_relevant,sfreqs_relevant)):
         if len(state_strs_relevant) > 1:
             color = cmap(idx/(len(state_strs_relevant)-1))
         else:
             color = cmap(0)
-        ax[0].plot(pHs,sfreq*100,label=state_str,color=color)
+        ax[0].plot(pHs,sfreq*100,style,label=state_str,color=color)
     if len(state_strs_relevant) > 10:
         ax[0].legend(ncol=2,fontsize=6)
     else:
         ax[0].legend(ncol=1,fontsize=8)
     ax[0].set(xlabel='pH',ylabel='Distribution %')
-    ax[0].set(xlim=(pHs[0],pHs[-1]))
+
     ax[0].set_title(name)
-    ax[0].set_xticks(np.arange(pHs[0],pHs[-1],1))
     ax[0].grid(alpha=0.3)
 
-    ax[1].plot(pHs,net_charges,color='black')
+    ax[1].plot(pHs,net_charges,style,color='black')
     ax[1].set(xlabel='pH', ylabel='Net charge')
-    ax[1].set(xlim=(pHs[0],pHs[-1]))
     ax[1].grid(alpha=0.3)
-    ax[1].set_xticks(np.arange(pHs[0],pHs[-1],1))
+
+    if len(pHs) > 1:
+        for idx in range(2):
+            ax[idx].set(xlim=(pHs[0],pHs[-1]))
+            ax[idx].set_xticks(np.arange(pHs[0],pHs[-1],1))
 
     fig.tight_layout()
     if fsave != '':
@@ -66,17 +74,51 @@ def plot_pH_scan(name, indices, state_strs_relevant, sfreqs_relevant, pHs, net_c
     plt.close()
     # return fig
 
-def export_sdf(name,mol_h,path='output'):
-    AllChem.EmbedMolecule(mol_h, randomSeed=1, useRandomCoords=True)
-    AllChem.UFFOptimizeMolecule(mol_h)
+def export_sdf(name,state_strs,mols_lib,path='output',except_optimize_error=False):
+    return_code = 0
     with Chem.SDWriter(f'{path}/{name}.sdf') as f:
-        f.write(mol_h)
+        for e_idx, state_str in enumerate(state_strs):
+            mol = mols_lib[state_str]
+            mol_h = Chem.AddHs(mol)
+            if except_optimize_error:
+                try:
+                    AllChem.EmbedMolecule(mol_h, randomSeed=1, useRandomCoords=True)
+                    AllChem.UFFOptimizeMolecule(mol_h)
+                    mol_h.SetProp("_Name", f'{name}_{e_idx}')
+                    f.write(mol_h)
+                except:
+                    print(f'!!! WARNING: Could not rdkit optimize mol {name} {state_str} !!!')
+                    return_code = -1
+            else:
+                AllChem.EmbedMolecule(mol_h, randomSeed=1, useRandomCoords=True)
+                AllChem.UFFOptimizeMolecule(mol_h)
+                mol_h.SetProp("_Name", f'{name}_{e_idx}')
+                f.write(mol_h)
+    return return_code
 
-def export_smi(name,smiles,path='output'):
-    with open(f'{path}/{name}.smi','w') as f:
-        f.write(f'{smiles} {name}\n')
+def export_smi(name,state_strs,smiles_lib,sfreqs,path='output',fout_smi='out.smi',append=True):
+    if append:
+        action = 'a'
+    else:
+        action = 'w'
+    with open(f'{path}/{fout_smi}',action) as f:
+        for e_idx, (state_str, sfreq) in enumerate(zip(state_strs, sfreqs)):
+            smiles = smiles_lib[state_str]
+            f.write(f'{smiles} {name}_{e_idx} {sfreq/np.sum(sfreqs):.3f}\n')
 
-def plot_relevant_states(name, mols_relevant,path='figures'):
+def export_csv(name,state_strs,smiles_lib,sfreqs,state_qs,path='output',fout_csv='out.csv',append=True):
+    if append:
+        action = 'a'
+    else:
+        action = 'w'
+    with open(f'{path}/{fout_csv}',action) as f:
+        if action == 'w':
+            f.write(f'name,name_state,SMILES,frequency,charge\n')
+        for e_idx, (state_str, sfreq) in enumerate(zip(state_strs, sfreqs)):
+            smiles = smiles_lib[state_str]
+            f.write(f'{name},{name}_{e_idx},{smiles},{sfreq/np.sum(sfreqs):.5f},{state_qs[state_str]}\n')
+
+def plot_relevant_states(name, mols_relevant,path='figures',notebook=False):
 
     for mol in mols_relevant: tmp=AllChem.Compute2DCoords(mol)
     
@@ -84,7 +126,10 @@ def plot_relevant_states(name, mols_relevant,path='figures'):
 
     with open(f'{path}/{name}_relevant_states.svg','w') as f:
         # f.write(img.data)
-        f.write(img)
+        if notebook:
+            f.write(img.data)
+        else:
+            f.write(img)
 
 def plot_optimal_state(name, mol, path='figures'):
     tmp=AllChem.Compute2DCoords(mol)
