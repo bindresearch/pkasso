@@ -93,8 +93,7 @@ def preprocess(smiles_raw,verbose=False):
     if verbose:
         print('Processed:')
         print(smiles)
-    
-    print(f'exclude indices: {exclude_indices}')
+        print(f'exclude indices: {exclude_indices}')
 
     return mol, exclude_indices, phosphate_ohs
 
@@ -484,7 +483,7 @@ def calc_hashes(state_strs,mols_lib):
         hashes.append(hash)
     return hashes
 
-def calc_symmetry(state_strs, state_freqs_lib, mols_lib):
+def calc_symmetry(state_strs, state_freqs_lib, mols_lib,verbose=False):
     state_hashes = calc_hashes(state_strs,mols_lib)
     state_dict = {}
 
@@ -494,7 +493,8 @@ def calc_symmetry(state_strs, state_freqs_lib, mols_lib):
         else:
             state_dict[state_hash] = [state_str]
 
-    print(state_dict)
+    if verbose:
+        print(state_dict)
 
     state_strs_symm = []
     state_freqs_symm = []
@@ -659,8 +659,9 @@ def run_pipeline(name,smiles_raw,pH_output=7,cutoff_states=4000,device='cpu',
                 for jdx, oh_id in enumerate(oh_ids):
                     acid_lib_poh[key][oh_id] = val[jdx]
 
-            print(oh_ids)
-            print(acid_lib_poh)
+            if verbose:
+                print(oh_ids)
+                print(acid_lib_poh)
             
             ps_all = calc_state_pkas(state_strs, state_vecs, base_lib_poh, acid_lib_poh, oh_ids, pH=pH,verbose=verbose)
             N_states = len(state_vecs)
@@ -673,17 +674,17 @@ def run_pipeline(name,smiles_raw,pH_output=7,cutoff_states=4000,device='cpu',
         indices, state_strs, state_freqs_lib = combine_clusters(
             state_strs_clusters, state_freqs_clusters, indices_clusters, verbose=verbose)
 
-        print(state_strs)
-        print([state_freqs_lib[state_str] for state_str in state_strs])
+        # print(state_strs)
+        # print([state_freqs_lib[state_str] for state_str in state_strs])
 
         state_vecs = [unpack_vec(state_str) for state_str in state_strs]
         mols_lib, smiles_lib = construct_mols(mol0, state_strs, state_vecs, indices, mols_lib, smiles_lib) # pH independent
 
         # Symmetry
-        state_strs, state_freqs = calc_symmetry(state_strs, state_freqs_lib, mols_lib)
+        state_strs, state_freqs = calc_symmetry(state_strs, state_freqs_lib, mols_lib,verbose=verbose)
         
-        print(state_strs)
-        print(state_freqs)
+        # print(state_strs)
+        # print(state_freqs)
 
         # Max freq
         idx_max = np.argmax(state_freqs)
