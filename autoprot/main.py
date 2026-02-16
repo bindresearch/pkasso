@@ -1,6 +1,7 @@
 from rdkit import Chem
 
 from rdkit.Chem.MolStandardize import rdMolStandardize
+from rdkit.Chem import RegistrationHash
 
 from .external.pka import predict_acid_base, load_model
 from .transition_matrix import calc_tmatrix, calc_state_freqs_sparse
@@ -70,13 +71,85 @@ def preprocess(smiles_raw,verbose=False):
                 if atom.GetIsAromatic():
                     if atom.GetDegree() == 3: # arom. N with lone pair needed for ring
                         exclude_indices.append(at_idx)
+    
+    phosphate_found, phosphate_ohs = has_phosphate(mol)
+
+    # deprotonate_ohs = []
+
+    if phosphate_found:
+        # ids_phosphate = phosphate_matches(mol)
+        print(f'phosphate ids: {phosphate_ohs}')
+        for p_idx, oh_ids in phosphate_ohs.items():
+            oh_ids = sorted(oh_ids)
+            # deprotonate_ohs.append(oh_ids[0])
+            for at_idx in oh_ids:
+                if at_idx not in exclude_indices:
+                    exclude_indices.append(at_idx)
+    # print(f'deprotonate ids: {deprotonate_ohs}')
+
+    exclude_indices = sorted(exclude_indices)
 
     smiles = Chem.MolToSmiles(mol,canonical=True)
     if verbose:
         print('Processed:')
-        print(smiles)    
+        print(smiles)
     
-    return mol, exclude_indices
+    print(f'exclude indices: {exclude_indices}')
+
+    return mol, exclude_indices, phosphate_ohs
+
+def has_phosphate(mol):
+
+    # patterns = [
+        # Chem.MolFromSmarts("P(=O)(O)(O)"),
+        # Chem.MolFromSmarts("P(=O)(O)(O)O"),
+        # Chem.MolFromSmarts("P(=O)(O)([O-])"),
+        # Chem.MolFromSmarts("P(=O)(O)([O-])O"),
+        # Chem.MolFromSmarts("P(=O)([O-])([O-])"),
+        # Chem.MolFromSmarts("P(=O)([O-])([O-])O"),
+    # ]
+
+    pattern = Chem.MolFromSmarts("P(=O)(O)(O)")
+
+    # found = any(mol.HasSubstructMatch(p) for p in patterns)
+    # matches = [mol.GetSubstructMatches(p) for p in patterns]
+
+    found = mol.HasSubstructMatch(pattern)
+    matches = mol.GetSubstructMatches(pattern)
+
+    print(f'matches: ', matches)
+
+    phosphate_ohs = {}
+
+    for match in matches:
+        poh_indices = []
+        # Find central P of phosphate
+        for idx in match:
+            atom = mol.GetAtomWithIdx(idx)
+            if atom.GetSymbol() == "P":
+                p_idx = idx
+                if p_idx not in phosphate_ohs:
+                    phosphate_ohs[p_idx] = []
+        # Find protonable O of phosphate
+        for idx in match:
+            atom = mol.GetAtomWithIdx(idx)
+            if atom.GetSymbol() == "O" and atom.GetTotalNumHs() > 0:
+                if idx not in phosphate_ohs[p_idx]:
+                    phosphate_ohs[p_idx].append(idx)
+
+    return found, phosphate_ohs
+
+# def calc_phosphate_ids(mol):#: str) -> bool:
+
+#     patterns = [
+#         Chem.MolFromSmarts("P(=O)(O)(O)"),
+#         Chem.MolFromSmarts("P(=O)(O)([O-])"),
+#         Chem.MolFromSmarts("P(=O)([O-])(O)"),
+#         Chem.MolFromSmarts("P(=O)([O-])([O-])")
+#     ]
+
+#     return 
+
 
 def find_candidate_sites(base,acid,exclude_indices,pH,pH_band=6.,
                          verbose=False):
@@ -188,7 +261,9 @@ def run_acid_base_calc(state_strs,mols_lib,model_base,model_acid,base_lib,acid_l
 
 ###################################################################################
 
-def calc_state_pkas(state_strs, state_vecs, base_lib, acid_lib,indices,pH=7.,
+# def calc_phosphate_pkas()
+
+def calc_state_pkas(state_strs, state_vecs, base_lib, acid_lib, indices, pH=7.,
                 verbose=False):
     """ Calc state probabilities from acid/base pka values for given pH """
     
@@ -260,7 +335,7 @@ def sort_string(string,ps):
     s = "".join(s)
     return s
 
-def combine_clusters(state_strs_clusters, state_freqs_clusters, indices_clusters, state_freqs_all, pH_idx, pHs, 
+def combine_clusters(state_strs_clusters, state_freqs_clusters, indices_clusters, 
                      sfreq_cutoff_individual=0.01,sfreq_cutoff_combined=0.001,verbose=False):
     """ 
     Combine state frequency results from independent pKa clusters in molecule. 
@@ -299,12 +374,10 @@ def combine_clusters(state_strs_clusters, state_freqs_clusters, indices_clusters
         for c_idx, s_idx in enumerate(s_idxs):
             state_str += state_strs_clusters[c_idx][s_idx]
             state_freq *= state_freqs_clusters[c_idx][s_idx]                   
-        if state_freq < sfreq_cutoff_combined:
-            # combination of microstates very unlikely
-            continue
-        state_str = sort_string(state_str,ps)
-        state_strs.append(state_str)
-        state_freqs.append(state_freq)
+        if state_freq >= sfreq_cutoff_combined:
+            state_str = sort_string(state_str,ps)
+            state_strs.append(state_str)
+            state_freqs.append(state_freq)
 
     if verbose:
         print(f'N chosen microstate combinations: {len(state_strs)}')
@@ -312,12 +385,12 @@ def combine_clusters(state_strs_clusters, state_freqs_clusters, indices_clusters
     state_freqs = np.array(state_freqs)
     state_freqs /= np.sum(state_freqs)
 
+    state_freqs_lib = {}
+
     for state_str, state_freq in zip(state_strs, state_freqs):
-        if state_str not in state_freqs_all:
-            state_freqs_all[state_str] = np.zeros(len(pHs))
-        state_freqs_all[state_str][pH_idx] = state_freq
-    
-    return indices, state_strs, state_freqs_all
+        state_freqs_lib[state_str] = state_freq
+
+    return indices, state_strs, state_freqs_lib
 
 def calc_relevant_states(state_freqs_all, mols_lib, max_states=18,verbose=False):
     """ Reduce number of states to max_states for plotting """
@@ -395,6 +468,50 @@ def screen_clusters(indices0, q_options0, mol0, mols_lib, smiles_lib,
         print(f'Coupling cutoff high: {coupling_cutoff}')
     return clusters, mols_lib, base_lib, acid_lib
 
+def smiles2hash(smiles: str | None) -> str | None:
+    if smiles is None:
+        return None
+    return RegistrationHash.GetMolHash(RegistrationHash.GetMolLayers(Chem.MolFromSmiles(smiles)))
+
+def mol2hash(mol):
+    return RegistrationHash.GetMolHash(RegistrationHash.GetMolLayers(mol))
+
+def calc_hashes(state_strs,mols_lib):
+    hashes = []
+    for state_str in state_strs:
+        mol = mols_lib[state_str]
+        hash = mol2hash(mol)
+        hashes.append(hash)
+    return hashes
+
+def calc_symmetry(state_strs, state_freqs_lib, mols_lib):
+    state_hashes = calc_hashes(state_strs,mols_lib)
+    state_dict = {}
+
+    for state_str, state_hash in zip(state_strs,state_hashes):
+        if state_hash in state_dict:
+            state_dict[state_hash].append(state_str)
+        else:
+            state_dict[state_hash] = [state_str]
+
+    print(state_dict)
+
+    state_strs_symm = []
+    state_freqs_symm = []
+
+    for state_hash, state_strs_per_hash in state_dict.items():
+        state_strs_sorted = sorted(state_strs_per_hash)
+        state_strs_symm.append(state_strs_sorted[0])
+        state_freq = 0.
+        for state_str in state_strs_per_hash:
+            state_freq += state_freqs_lib[state_str]
+        state_freqs_symm.append(state_freq)
+    
+    state_strs = state_strs_symm
+    state_freqs = state_freqs_symm
+
+    return state_strs, state_freqs
+
 def run_pipeline(name,smiles_raw,pH_output=7,cutoff_states=4000,device='cpu',
                  pH_band=8.,pHs = np.arange(0,14.1,0.5),
                  path_out='output',path_figs='figures',
@@ -427,7 +544,7 @@ def run_pipeline(name,smiles_raw,pH_output=7,cutoff_states=4000,device='cpu',
     base_frag_lib = {}
     acid_frag_lib = {}
 
-    mol0, exclude_indices = preprocess(smiles_raw)
+    mol0, exclude_indices, phosphate_ohs = preprocess(smiles_raw,verbose=verbose)
     mol0_h = Chem.rdmolops.AddHs(mol0)
 
     base0, acid0 = predict_acid_base(mol0_h,model_base,model_acid,device=device,verbose=verbose)
@@ -437,7 +554,10 @@ def run_pipeline(name,smiles_raw,pH_output=7,cutoff_states=4000,device='cpu',
             print('='*50)
             print(f'pH: {pH}',flush=True)
         indices0, q_options0 = find_candidate_sites(base0, acid0, exclude_indices,pH,pH_band=pH_band,verbose=False)
+        if verbose:
+            print(f'indices0: {indices0}')
 
+        # Screen coupling between residues
         clusters, mols_lib, base_lib, acid_lib = screen_clusters(indices0, q_options0, mol0, mols_lib, smiles_lib, 
                                             model_base, model_acid, base_lib, acid_lib, cutoff_states, device='cpu',
                                             verbose=verbose)
@@ -451,10 +571,12 @@ def run_pipeline(name,smiles_raw,pH_output=7,cutoff_states=4000,device='cpu',
 
             smiles_frag_lib = {}
 
+            # atom indices for cluster
             indices = [indices0[c] for c in cluster] # indices0[cluster]
             indices_str = ''
             for id in indices:
                 indices_str += f'{id},'
+            # indices_str shows what atoms the cluster state_vec and state_str refer to
             indices_str = indices_str[:-1]
 
             if indices_str not in mols_frag_lib:
@@ -470,9 +592,12 @@ def run_pipeline(name,smiles_raw,pH_output=7,cutoff_states=4000,device='cpu',
 
             state_strs = calc_state_strs(state_vecs)
 
-            mols_frag_lib[indices_str], smiles_frag_lib = construct_mols(mol0, state_strs, state_vecs, indices, mols_frag_lib[indices_str], smiles_frag_lib) # pH independent
+            mols_frag_lib[indices_str], smiles_frag_lib = construct_mols(
+                mol0, state_strs, state_vecs, indices, mols_frag_lib[indices_str], smiles_frag_lib) # pH independent
+
             base_frag_lib[indices_str], acid_frag_lib[indices_str] = run_acid_base_calc(state_strs,mols_frag_lib[indices_str],model_base,model_acid,
-                                                                                        base_frag_lib[indices_str],acid_frag_lib[indices_str],device=device) # pH independent
+                                                                                        base_frag_lib[indices_str],acid_frag_lib[indices_str],
+                                                                                        device=device,verbose=verbose) # pH independent
 
             ps_all = calc_state_pkas(state_strs, state_vecs, base_frag_lib[indices_str], acid_frag_lib[indices_str], indices, pH=pH,
                                                         verbose=False)
@@ -485,31 +610,108 @@ def run_pipeline(name,smiles_raw,pH_output=7,cutoff_states=4000,device='cpu',
             state_freqs_clusters.append(state_freqs)
             indices_clusters.append(indices)
 
-        indices, state_strs, state_freqs_all = combine_clusters(
-            state_strs_clusters, state_freqs_clusters, indices_clusters, state_freqs_all, pH_idx, pHs,verbose=verbose)
+        # Inject phosphate clusters:
+        
+        pka1 = 2.0
+        pka2 = 6.5
+
+        poh_acid_pkas_single = {
+            '0' : [pka1],
+            '1' : [pka1],
+        }
+
+        base_lib_poh_single = {
+            '0': {},
+            '1': {},
+        }
+
+        poh_acid_pkas_double = {
+            '00' : [pka2, pka2],
+            '01' : [pka1, pka2],
+            '10' : [pka2, pka1],
+            '11' : [pka1, pka1],
+        }
+
+        base_lib_poh_double = {
+            '00': {},
+            '01': {},
+            '10': {},
+            '11': {},
+        }
+
+        for p_idx, oh_ids in phosphate_ohs.items():
+            if len(oh_ids) == 1:
+                state_strs = ['0','1']
+                state_vecs = [unpack_vec(state_str) for state_str in state_strs]
+                poh_acid_pkas = poh_acid_pkas_single
+                base_lib_poh = base_lib_poh_single
+            elif len(oh_ids) == 2:
+                state_strs = ['00','01','10','11']
+                state_vecs = [unpack_vec(state_str) for state_str in state_strs]
+                poh_acid_pkas = poh_acid_pkas_double
+                base_lib_poh = base_lib_poh_double
+            else:
+                print(f'Did not find protonable O for phosphate {p_idx}')
+                continue
+            acid_lib_poh = {}
+            for key, val in poh_acid_pkas.items():
+                acid_lib_poh[key] = {}
+                for jdx, oh_id in enumerate(oh_ids):
+                    acid_lib_poh[key][oh_id] = val[jdx]
+
+            print(oh_ids)
+            print(acid_lib_poh)
+            
+            ps_all = calc_state_pkas(state_strs, state_vecs, base_lib_poh, acid_lib_poh, oh_ids, pH=pH,verbose=verbose)
+            N_states = len(state_vecs)
+            tmatrix = calc_tmatrix(state_vecs, state_strs,ps_all, N_states)
+            state_freqs = calc_state_freqs_sparse(tmatrix)
+            state_strs_clusters.append(state_strs)
+            state_freqs_clusters.append(state_freqs)
+            indices_clusters.append(oh_ids)
+
+        indices, state_strs, state_freqs_lib = combine_clusters(
+            state_strs_clusters, state_freqs_clusters, indices_clusters, verbose=verbose)
+
+        print(state_strs)
+        print([state_freqs_lib[state_str] for state_str in state_strs])
 
         state_vecs = [unpack_vec(state_str) for state_str in state_strs]
         mols_lib, smiles_lib = construct_mols(mol0, state_strs, state_vecs, indices, mols_lib, smiles_lib) # pH independent
-        state_freq_max = 0.
-        net_charge = 0.
+
+        # Symmetry
+        state_strs, state_freqs = calc_symmetry(state_strs, state_freqs_lib, mols_lib)
         
+        print(state_strs)
+        print(state_freqs)
+
+        # Max freq
+        idx_max = np.argmax(state_freqs)
+        state_freq_max = np.max(state_freqs)
+        state_str_opti = state_strs[idx_max]
+
+        # Net charge as weighted sum over microstate charges
         state_qs = {}
-
-        for state_str, state_freq in state_freqs_all.items():
-            if state_freq[pH_idx] > state_freq_max:
-                state_str_opti = state_str
-                state_freq_max = state_freq[pH_idx]
-            state_q = Chem.GetFormalCharge(mols_lib[state_str]) 
+        net_charge = 0.       
+        for state_str, state_freq in zip(state_strs, state_freqs):
+            state_q = Chem.GetFormalCharge(mols_lib[state_str])
             state_qs[state_str] = state_q
-            net_charge += state_q * state_freq[pH_idx]
+            net_charge += state_q * state_freq
+        net_charges.append(net_charge)
 
+        # Add to results for pH scan
+        for state_str, state_freq in zip(state_strs,state_freqs):
+            if state_str not in state_freqs_all:
+                state_freqs_all[state_str] = np.zeros(len(pHs))
+            state_freqs_all[state_str][pH_idx] = state_freq
+
+        # Select states for pH-specific export
         state_strs_export = []
         state_freqs_export = []
-
-        for state_str, state_freq in state_freqs_all.items():
-            if state_freq[pH_idx] > cutoff_export * state_freq_max: # Include all high prob states
+        for state_str, state_freq in zip(state_strs, state_freqs):
+            if state_freq > cutoff_export * state_freq_max: # Include all high prob states
                 state_strs_export.append(state_str)
-                state_freqs_export.append(state_freq[pH_idx])
+                state_freqs_export.append(state_freq)
 
         state_freqs_export = np.array(state_freqs_export)
         ps = np.argsort(state_freqs_export)[::-1] # Sort by highest probability
@@ -517,8 +719,7 @@ def run_pipeline(name,smiles_raw,pH_output=7,cutoff_states=4000,device='cpu',
         state_freqs_export = state_freqs_export[ps]
         state_strs_export = [state_strs_export[p] for p in ps]
 
-        net_charges.append(net_charge)
-
+        # Output pH-specific results for pH_output
         if pH == pH_output:
             if verbose:
                 print(f'Export at pH {pH_output}:',flush=True)
@@ -532,6 +733,7 @@ def run_pipeline(name,smiles_raw,pH_output=7,cutoff_states=4000,device='cpu',
             if verbose:
                 print(f'Optimal smiles for pH {pH}: {smiles_lib[state_str_opti]}')
 
+    # Plotting of pH scan
     net_charges = np.round(np.array(net_charges),decimals=4)
 
     # with open(f'output/{name}_net_charges.txt','w') as f:
@@ -539,7 +741,7 @@ def run_pipeline(name,smiles_raw,pH_output=7,cutoff_states=4000,device='cpu',
             # f.write(f'{pH:.2f} {net_charge:.3f}\n')
 
     # reduce number of microstates for plotting
-    N_relevant_states, state_strs_relevant, sfreqs_relevant, mols_relevant, sfreqs_not_relevant = calc_relevant_states(state_freqs_all, mols_lib,verbose=verbose)
+    N_relevant_states, state_strs_relevant, sfreqs_relevant, mols_relevant, sfreqs_not_relevant = calc_relevant_states(state_freqs_all, mols_lib, verbose=verbose)
 
     if N_relevant_states > 0:
         plot_pH_scan(name, indices, state_strs_relevant, sfreqs_relevant, pHs, net_charges, sfreqs_not_relevant, path=path_figs,verbose=verbose)
