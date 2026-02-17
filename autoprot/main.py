@@ -78,7 +78,8 @@ def preprocess(smiles_raw,verbose=False):
 
     if phosphate_found:
         # ids_phosphate = phosphate_matches(mol)
-        print(f'phosphate ids: {phosphate_ohs}')
+        if verbose:
+            print(f'phosphate ids: {phosphate_ohs}')
         for p_idx, oh_ids in phosphate_ohs.items():
             oh_ids = sorted(oh_ids)
             # deprotonate_ohs.append(oh_ids[0])
@@ -116,7 +117,7 @@ def has_phosphate(mol):
     found = mol.HasSubstructMatch(pattern)
     matches = mol.GetSubstructMatches(pattern)
 
-    print(f'matches: ', matches)
+    # print(f'matches: ', matches)
 
     phosphate_ohs = {}
 
@@ -262,93 +263,120 @@ def run_acid_base_calc(state_strs,mols_lib,model_base,model_acid,base_lib,acid_l
 
 # def calc_phosphate_pkas()
 
-def calc_state_pkas(state_strs, state_vecs, base_lib, acid_lib, indices, pH=7.,
+# def calc_state_pkas(state_strs, state_vecs, base_lib, acid_lib, indices, pH=7.,
+#                 verbose=False):
+#     """ Calc state probabilities from acid/base pka values for given pH """
+    
+#     ps_all = [] # pH specific
+
+#     for state_str, state_vec in zip(state_strs, state_vecs):
+#         if verbose:
+#             print('='*20)
+#         ps_up = np.zeros((len(state_vec))) - 1
+#         ps_down = np.zeros((len(state_vec))) - 1
+#         base = base_lib[state_str]
+#         acid = acid_lib[state_str]
+#         for at_idx, pka in base.items():
+#             if at_idx not in indices: # Excluded at the start
+#                 continue
+#             rel_idx = indices.index(at_idx)
+#             p_up = calc_charge(pka,pH=pH) # probability for higher + state
+#             p_down = 1 - p_up
+#             if verbose:
+#                 print(f'at_idx:{at_idx} | rel_idx:{rel_idx} | base {pka} up:{p_up:.2f} stay:{p_down:.2f}')
+#             if state_vec[rel_idx] <= 1:
+#                 ps_up[rel_idx] = p_up
+#             else: # already protonated
+#                 ps_down[rel_idx] = p_down
+#         for at_idx, pka in acid.items():
+#             if at_idx not in indices: # Excluded at the start
+#                 continue
+#             rel_idx = indices.index(at_idx)
+#             p_up = calc_charge(pka,pH=pH)
+#             p_down = 1. - p_up
+#             if verbose:
+#                 print(f'at_idx:{at_idx} | rel_idx:{rel_idx} | acid {pka} stay:{p_up:.2f} down:{p_down:.2f}')
+#             if state_vec[rel_idx] >= 1:
+#                 ps_down[rel_idx] = p_down
+#             else: # already deprotonated
+#                 ps_up[rel_idx] = p_up
+
+#         ps = np.vstack([ps_up,ps_down]) # (up/down, state_idx)
+#         ps_all.append(ps)
+
+#     ps_all = np.array(ps_all)
+#     return ps_all
+
+def calc_state_pkas(state_strs, state_vecs, base_lib, acid_lib, indices, pH=7.,matrix_def='dG',
                 verbose=False):
     """ Calc state probabilities from acid/base pka values for given pH """
-    
+
     ps_all = [] # pH specific
 
     for state_str, state_vec in zip(state_strs, state_vecs):
         if verbose:
             print('='*20)
-        ps_up = np.zeros((len(state_vec))) - 1
-        ps_down = np.zeros((len(state_vec))) - 1
+            print(f'{state_str}')
+        ps_up = {}
+        ps_down = {}
+        # ps_up = np.empty((len(state_vec)))
+        # ps_up.fill(np.nan)
+        # ps_down = np.empty((len(state_vec)))
+        # ps_down.fill(np.nan)
+        # ps_up = np.zeros((len(state_vec))) - 1
+        # ps_down = np.zeros((len(state_vec))) - 1
         base = base_lib[state_str]
         acid = acid_lib[state_str]
         for at_idx, pka in base.items():
             if at_idx not in indices: # Excluded at the start
                 continue
             rel_idx = indices.index(at_idx)
-            p_up = calc_charge(pka,pH=pH) # probability for higher + state
-            p_down = 1 - p_up
+            if matrix_def == 'msm':
+                p_up = calc_charge(pka,pH=pH) # probability for higher + state
+                p_down = 1 - p_up
+            elif matrix_def == 'dG':
+                p_up = np.log(10) * (pH - pka) # -ln(p+/p0)
+                p_down = np.log(10) * (pka - pH) # -ln(p0/p+)
+            else:
+                raise
             if verbose:
-                print(f'at_idx:{at_idx} | rel_idx:{rel_idx} | base {pka} up:{p_up:.2f} stay:{p_down:.2f}')
+                print(f'rel_idx:{rel_idx} | at_idx:{at_idx} | base {pka} up:{p_up:.2f} stay:{p_down:.2f}')
             if state_vec[rel_idx] <= 1:
                 ps_up[rel_idx] = p_up
-            else: # already protonated
-                ps_down[rel_idx] = p_down
+            # else:
+                # if verbose:
+                    # print('already protonated')
+            # else: # already protonated
+                # ps_down[rel_idx] = p_down
         for at_idx, pka in acid.items():
             if at_idx not in indices: # Excluded at the start
                 continue
             rel_idx = indices.index(at_idx)
-            p_up = calc_charge(pka,pH=pH)
-            p_down = 1. - p_up
+            if matrix_def == 'msm':
+                p_up = calc_charge(pka,pH=pH) # probability for higher + state
+                p_down = 1 - p_up
+            elif matrix_def == 'dG':
+                p_up = np.log(10) * (pH - pka) # -ln(p+/p0)
+                p_down = np.log(10) * (pka - pH) # -ln(p0/p+)
+            else:
+                raise
             if verbose:
-                print(f'at_idx:{at_idx} | rel_idx:{rel_idx} | acid {pka} stay:{p_up:.2f} down:{p_down:.2f}')
+                print(f'rel_idx:{rel_idx} | at_idx:{at_idx} | acid {pka} stay:{p_up:.2f} down:{p_down:.2f}')
             if state_vec[rel_idx] >= 1:
                 ps_down[rel_idx] = p_down
-            else: # already deprotonated
-                ps_up[rel_idx] = p_up
-
-        ps = np.vstack([ps_up,ps_down]) # (up/down, state_idx)
+            # else:
+                # if verbose:
+                    # print('already deprotonated')
+            # else: # already deprotonated
+                # ps_up[rel_idx] = p_up
+        ps = {
+            'up' : ps_up,
+            'down' : ps_down,
+        }
+        # ps = np.vstack([ps_up,ps_down]) # (up/down, state_idx)
         ps_all.append(ps)
 
-    ps_all = np.array(ps_all)
-    return ps_all
-
-def calc_state_pkas(state_strs, state_vecs, base_lib, acid_lib, indices, pH=7.,
-                verbose=False):
-    """ Calc state probabilities from acid/base pka values for given pH """
-    
-    ps_all = [] # pH specific
-
-    for state_str, state_vec in zip(state_strs, state_vecs):
-        if verbose:
-            print('='*20)
-        ps_up = np.zeros((len(state_vec))) - 1
-        ps_down = np.zeros((len(state_vec))) - 1
-        base = base_lib[state_str]
-        acid = acid_lib[state_str]
-        for at_idx, pka in base.items():
-            if at_idx not in indices: # Excluded at the start
-                continue
-            rel_idx = indices.index(at_idx)
-            p_up = pka - pH # log10(p+/p0) # probability for higher + state
-            p_down = pH - pka # -log10(p+/p0)
-
-            if verbose:
-                print(f'at_idx:{at_idx} | rel_idx:{rel_idx} | base {pka} up:{p_up:.2f} stay:{p_down:.2f}')
-            if state_vec[rel_idx] <= 1:
-                ps_up[rel_idx] = p_up
-            else: # already protonated
-                ps_down[rel_idx] = p_down
-        for at_idx, pka in acid.items():
-            if at_idx not in indices: # Excluded at the start
-                continue
-            rel_idx = indices.index(at_idx)
-            p_up = calc_charge(pka,pH=pH)
-            p_down = 1. - p_up
-            if verbose:
-                print(f'at_idx:{at_idx} | rel_idx:{rel_idx} | acid {pka} stay:{p_up:.2f} down:{p_down:.2f}')
-            if state_vec[rel_idx] >= 1:
-                ps_down[rel_idx] = p_down
-            else: # already deprotonated
-                ps_up[rel_idx] = p_up
-
-        ps = np.vstack([ps_up,ps_down]) # (up/down, state_idx)
-        ps_all.append(ps)
-
-    ps_all = np.array(ps_all)
+    # ps_all = np.array(ps_all)
     return ps_all
 
 #############################################################################################
@@ -562,7 +590,8 @@ def run_pipeline(name,smiles_raw,pH_output=7,cutoff_states=4000,device='cpu',
                  path_out='output',path_figs='figures',
                  verbose=False,cutoff_export=0.5,
                  fout_csv='out.csv',append=True,notebook=False,
-                 except_optimize_error=False):
+                 except_optimize_error=False,
+                 matrix_def='msm'):
                 #  write_all_relevant=False):
     if verbose:
         print(name)
@@ -595,6 +624,8 @@ def run_pipeline(name,smiles_raw,pH_output=7,cutoff_states=4000,device='cpu',
     base0, acid0 = predict_acid_base(mol0_h,model_base,model_acid,device=device,verbose=verbose)
         
     for pH_idx, pH in enumerate(pHs): #,total=len(pHs)):#,total=len(pHs)):
+        print('='*50)
+        print(f'pH: {pH}',flush=True)
         if verbose:
             print('='*50)
             print(f'pH: {pH}',flush=True)
@@ -644,16 +675,20 @@ def run_pipeline(name,smiles_raw,pH_output=7,cutoff_states=4000,device='cpu',
                                                                                         base_frag_lib[indices_str],acid_frag_lib[indices_str],
                                                                                         device=device,verbose=verbose) # pH independent
 
-            ps_all = calc_state_pkas(state_strs, state_vecs, base_frag_lib[indices_str], acid_frag_lib[indices_str], indices, pH=pH,
-                                                        verbose=False)
+            ps_all = calc_state_pkas(state_strs, state_vecs, base_frag_lib[indices_str], acid_frag_lib[indices_str], indices, pH=pH,matrix_def=matrix_def,
+                                                        verbose=verbose)
             N_states = len(state_vecs)
 
-            # tmatrix = calc_tmatrix(state_vecs,state_strs,ps_all,N_states)
-            dGmatrix = calc_dGmatrix(state_vecs,state_strs,ps_all,N_states)
-            Fs = calc_Fs(dGmatrix)
-            print(Fs)
+            if matrix_def == 'msm':
+                tmatrix = calc_tmatrix(state_vecs,state_strs,ps_all,N_states)
+                state_freqs = calc_state_freqs_sparse(tmatrix)
+            elif matrix_def == 'dG':
+                dGmatrix = calc_dGmatrix(state_vecs,state_strs,ps_all,N_states)
+                Fs = calc_Fs(dGmatrix)
+                state_freqs = calc_populations(Fs)
+                # print(state_strs)
+                # print(Fs)
             # state_freqs = calc_state_freqs_sparse(tmatrix)
-            state_freqs = calc_populations(Fs)
             
             state_strs_clusters.append(state_strs)
             state_freqs_clusters.append(state_freqs)
@@ -712,10 +747,19 @@ def run_pipeline(name,smiles_raw,pH_output=7,cutoff_states=4000,device='cpu',
                 print(oh_ids)
                 print(acid_lib_poh)
             
-            ps_all = calc_state_pkas(state_strs, state_vecs, base_lib_poh, acid_lib_poh, oh_ids, pH=pH,verbose=verbose)
+            ps_all = calc_state_pkas(state_strs, state_vecs, base_lib_poh, acid_lib_poh, oh_ids, pH=pH,matrix_def=matrix_def,verbose=verbose)
             N_states = len(state_vecs)
-            tmatrix = calc_tmatrix(state_vecs, state_strs,ps_all, N_states)
-            state_freqs = calc_state_freqs_sparse(tmatrix)
+            if matrix_def == 'msm':
+                tmatrix = calc_tmatrix(state_vecs,state_strs,ps_all,N_states)
+                state_freqs = calc_state_freqs_sparse(tmatrix)
+            elif matrix_def == 'dG':
+                dGmatrix = calc_dGmatrix(state_vecs,state_strs,ps_all,N_states)
+                Fs = calc_Fs(dGmatrix)
+                print(Fs)
+                state_freqs = calc_populations(Fs)
+            # tmatrix = calc_tmatrix(state_vecs, state_strs,ps_all, N_states)
+            # state_freqs = calc_state_freqs_sparse(tmatrix)
+
             state_strs_clusters.append(state_strs)
             state_freqs_clusters.append(state_freqs)
             indices_clusters.append(oh_ids)
