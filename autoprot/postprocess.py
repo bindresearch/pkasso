@@ -52,8 +52,9 @@ def plot_pH_scan(name, indices, state_strs_relevant, sfreqs_relevant, pHs, net_c
         ax[0].plot(pHs,sfreq*100,style,label=state_str,color=color)
     if len(state_strs_relevant) > 10:
         ax[0].legend(ncol=2,fontsize=6)
-    else:
+    elif len(state_strs_relevant) > 1:
         ax[0].legend(ncol=1,fontsize=8)
+
     ax[0].set(xlabel='pH',ylabel='Distribution %')
 
     ax[0].set_title(name)
