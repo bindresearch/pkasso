@@ -243,17 +243,50 @@ def calc_charge(pka,pH=7.):
     ppos = 1. / ( 1 + 10**(pH-pka) ) # fraction of more positively charged res
     return ppos
 
-def run_acid_base_calc(state_strs,mols_lib,model_base,model_acid,base_lib,acid_lib,device='cpu',verbose=False):
+def run_acid_base_calc(state_strs,state_vecs,indices,mols_lib,model_base,model_acid,base_lib,acid_lib,device='cpu',verbose=False):
     """ Add base and acid calculation results for all state_strs into base_lib and acid_lib """
-
-    for state_str in state_strs:
+    print(indices)
+    for state_str, state_vec in zip(state_strs,state_vecs):
         if state_str not in base_lib:
             if verbose:
                 print(state_str)
 
-            mol = mols_lib[state_str]
-            mol_h = Chem.rdmolops.AddHs(mol)
-            base, acid = predict_acid_base(mol_h,model_base,model_acid,device=device,verbose=verbose)
+            state_vec_base = np.maximum(state_vec,1)
+            state_str_base = pack_vec(state_vec_base)
+
+            # print(f'Using base state_str: {state_str_base}')
+
+            mol_base = mols_lib[state_str_base]
+            mol_base_h = Chem.rdmolops.AddHs(mol_base)
+
+            base_tmp, _ = predict_acid_base(mol_base_h,model_base,model_acid,device=device,
+                                        pred_acid=False,verbose=verbose)
+            base = {}
+            for at_idx, b in base_tmp.items():
+                rel_idx = indices.index(at_idx)
+                if state_vec[rel_idx] == 1:
+                    base[at_idx] = b
+
+            state_vec_acid = np.minimum(state_vec,1)
+            state_str_acid = pack_vec(state_vec_acid)
+
+            # print(f'Using acid state_str: {state_str_acid}')
+
+            mol_acid = mols_lib[state_str_acid]
+            mol_acid_h = Chem.rdmolops.AddHs(mol_acid)
+
+            _, acid_tmp = predict_acid_base(mol_acid_h,model_base,model_acid,device=device,
+                                           pred_base=False,verbose=verbose)
+            
+            acid = {}
+            for at_idx, a in acid_tmp.items():
+                rel_idx = indices.index(at_idx)
+                if state_vec[rel_idx] == 1:
+                    acid[at_idx] = a
+            # mol = mols_lib[state_str]
+            # mol_h = Chem.rdmolops.AddHs(mol)
+            # base, acid = predict_acid_base(mol_h,model_base,model_acid,device=device,
+            #                                verbose=verbose)
             base_lib[state_str] = base
             acid_lib[state_str] = acid
 
@@ -388,7 +421,7 @@ def coupling_assay(indices,q_options, mol0, mols_lib, smiles_lib, model_base, mo
     state_vecs = construct_state_vectors_single(indices, q_options)
     state_strs = calc_state_strs(state_vecs)
     mols_lib, smiles_lib = construct_mols(mol0, state_strs, state_vecs, indices, mols_lib, smiles_lib) # pH independent
-    base_lib, acid_lib = run_acid_base_calc(state_strs,mols_lib,model_base,model_acid,base_lib,acid_lib,device=device,verbose=verbose) # pH independent
+    base_lib, acid_lib = run_acid_base_calc(state_strs,state_vecs,indices,mols_lib,model_base,model_acid,base_lib,acid_lib,device=device,verbose=verbose) # pH independent
 
     state_str0 = state_strs[0]
     base_pka_diffs = {}
@@ -419,6 +452,9 @@ def combine_clusters(state_strs_clusters, state_freqs_clusters, indices_clusters
     # This is quite conservative (everything with at least 1% freq in that cluster)
 
     cluster_state_ids = []
+
+    # print(state_freqs_clusters)
+
     for state_freqs in state_freqs_clusters:
         cluster_state_ids.append([])
         for s_idx, s_freq in enumerate(state_freqs):
@@ -600,6 +636,8 @@ def run_pipeline(name,smiles_raw,pH_output=7,cutoff_states=4000,device='cpu',
     os.makedirs(path_out,exist_ok=True)
     os.makedirs(path_figs,exist_ok=True)
 
+    return_code = 0
+
     # molgpka ML models
     model_file_base = f'{ROOT}/weight_base.pth'
     model_file_acid = f'{ROOT}/weight_acid.pth'
@@ -624,8 +662,8 @@ def run_pipeline(name,smiles_raw,pH_output=7,cutoff_states=4000,device='cpu',
     base0, acid0 = predict_acid_base(mol0_h,model_base,model_acid,device=device,verbose=verbose)
         
     for pH_idx, pH in enumerate(pHs): #,total=len(pHs)):#,total=len(pHs)):
-        print('='*50)
-        print(f'pH: {pH}',flush=True)
+        # print('='*50)
+        # print(f'pH: {pH}',flush=True)
         if verbose:
             print('='*50)
             print(f'pH: {pH}',flush=True)
@@ -671,7 +709,7 @@ def run_pipeline(name,smiles_raw,pH_output=7,cutoff_states=4000,device='cpu',
             mols_frag_lib[indices_str], smiles_frag_lib = construct_mols(
                 mol0, state_strs, state_vecs, indices, mols_frag_lib[indices_str], smiles_frag_lib) # pH independent
 
-            base_frag_lib[indices_str], acid_frag_lib[indices_str] = run_acid_base_calc(state_strs,mols_frag_lib[indices_str],model_base,model_acid,
+            base_frag_lib[indices_str], acid_frag_lib[indices_str] = run_acid_base_calc(state_strs,state_vecs,indices,mols_frag_lib[indices_str],model_base,model_acid,
                                                                                         base_frag_lib[indices_str],acid_frag_lib[indices_str],
                                                                                         device=device,verbose=verbose) # pH independent
 
@@ -683,11 +721,15 @@ def run_pipeline(name,smiles_raw,pH_output=7,cutoff_states=4000,device='cpu',
                 tmatrix = calc_tmatrix(state_vecs,state_strs,ps_all,N_states)
                 state_freqs = calc_state_freqs_sparse(tmatrix)
             elif matrix_def == 'dG':
+                print(state_strs)
                 dGmatrix = calc_dGmatrix(state_vecs,state_strs,ps_all,N_states)
+                # print(dGmatrix)
                 Fs = calc_Fs(dGmatrix)
+                print(Fs)
                 state_freqs = calc_populations(Fs)
                 # print(state_strs)
                 # print(Fs)
+            # print(state_freqs)
             # state_freqs = calc_state_freqs_sparse(tmatrix)
             
             state_strs_clusters.append(state_strs)
@@ -764,6 +806,9 @@ def run_pipeline(name,smiles_raw,pH_output=7,cutoff_states=4000,device='cpu',
             state_freqs_clusters.append(state_freqs)
             indices_clusters.append(oh_ids)
 
+        print(state_strs_clusters)
+        print(state_freqs_clusters)
+
         indices, state_strs, state_freqs_lib = combine_clusters(
             state_strs_clusters, state_freqs_clusters, indices_clusters, verbose=verbose)
 
@@ -776,8 +821,8 @@ def run_pipeline(name,smiles_raw,pH_output=7,cutoff_states=4000,device='cpu',
         # Symmetry
         state_strs, state_freqs = calc_symmetry(state_strs, state_freqs_lib, mols_lib,verbose=verbose)
         
-        # print(state_strs)
-        # print(state_freqs)
+        print(state_strs)
+        print(state_freqs)
 
         # Max freq
         idx_max = np.argmax(state_freqs)

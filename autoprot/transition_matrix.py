@@ -118,7 +118,7 @@ def calc_dGmatrix(state_vecs,state_strs,ps_all,N_states):
         matrix_mean[idx,jdx] = np.mean(matrix_raw[idx][jdx])
     return matrix_mean
 
-def calc_Fs(matrix,max_visited=5):
+def calc_Fs(matrix,max_visited=10):
     N_states = matrix.shape[0]
     # print(f'N_states: {N_states}')
     visited_counter = np.zeros((N_states))
@@ -156,12 +156,21 @@ def calc_Fs(matrix,max_visited=5):
                 ids_origins.append(idx)
         ids_origins = np.array(ids_origins,dtype=int)
         # print(f'New origins: {ids_origins}')
-    # print(f'Visited: {visited_counter}')
+    print(f'Visited: {visited_counter}')
     # print(f'Fs: {Fs}')
+    Fs_completed = []
+    for idx, F in enumerate(Fs):
+        if len(F) > 0:
+            Fs_completed.append(F)
+        else:
+            print(f'completing F for idx {idx}')
+            Fs_completed.append(1e6)
+    Fs = Fs_completed
+    # print(f'Fs completed: {Fs}')
     Fs_m = np.array([np.mean(F) for F in Fs])
     Fs_stds = np.array([np.std(F) for F in Fs])
-    # print(f'Fs_means: {Fs_m}')
-    # print(f'Fs_stds: {Fs_stds}')
+    print(f'Fs_means: {Fs_m}')
+    print(f'Fs_stds: {Fs_stds}')
     Fs_m -= np.min(Fs_m)
     # print(Fs)
     # print(Fs)
