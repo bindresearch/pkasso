@@ -4,7 +4,7 @@ from rdkit.Chem.MolStandardize import rdMolStandardize
 from rdkit.Chem import RegistrationHash
 
 from .external.pka import predict_acid_base, load_model
-from .transition_matrix import calc_tmatrix, calc_state_freqs_sparse
+from .transition_matrix import *
 from .postprocess import *
 from .utils import *
 from .coupling import *
@@ -281,6 +281,51 @@ def calc_state_pkas(state_strs, state_vecs, base_lib, acid_lib, indices, pH=7.,
             rel_idx = indices.index(at_idx)
             p_up = calc_charge(pka,pH=pH) # probability for higher + state
             p_down = 1 - p_up
+            if verbose:
+                print(f'at_idx:{at_idx} | rel_idx:{rel_idx} | base {pka} up:{p_up:.2f} stay:{p_down:.2f}')
+            if state_vec[rel_idx] <= 1:
+                ps_up[rel_idx] = p_up
+            else: # already protonated
+                ps_down[rel_idx] = p_down
+        for at_idx, pka in acid.items():
+            if at_idx not in indices: # Excluded at the start
+                continue
+            rel_idx = indices.index(at_idx)
+            p_up = calc_charge(pka,pH=pH)
+            p_down = 1. - p_up
+            if verbose:
+                print(f'at_idx:{at_idx} | rel_idx:{rel_idx} | acid {pka} stay:{p_up:.2f} down:{p_down:.2f}')
+            if state_vec[rel_idx] >= 1:
+                ps_down[rel_idx] = p_down
+            else: # already deprotonated
+                ps_up[rel_idx] = p_up
+
+        ps = np.vstack([ps_up,ps_down]) # (up/down, state_idx)
+        ps_all.append(ps)
+
+    ps_all = np.array(ps_all)
+    return ps_all
+
+def calc_state_pkas(state_strs, state_vecs, base_lib, acid_lib, indices, pH=7.,
+                verbose=False):
+    """ Calc state probabilities from acid/base pka values for given pH """
+    
+    ps_all = [] # pH specific
+
+    for state_str, state_vec in zip(state_strs, state_vecs):
+        if verbose:
+            print('='*20)
+        ps_up = np.zeros((len(state_vec))) - 1
+        ps_down = np.zeros((len(state_vec))) - 1
+        base = base_lib[state_str]
+        acid = acid_lib[state_str]
+        for at_idx, pka in base.items():
+            if at_idx not in indices: # Excluded at the start
+                continue
+            rel_idx = indices.index(at_idx)
+            p_up = pka - pH # log10(p+/p0) # probability for higher + state
+            p_down = pH - pka # -log10(p+/p0)
+
             if verbose:
                 print(f'at_idx:{at_idx} | rel_idx:{rel_idx} | base {pka} up:{p_up:.2f} stay:{p_down:.2f}')
             if state_vec[rel_idx] <= 1:
@@ -603,8 +648,12 @@ def run_pipeline(name,smiles_raw,pH_output=7,cutoff_states=4000,device='cpu',
                                                         verbose=False)
             N_states = len(state_vecs)
 
-            tmatrix = calc_tmatrix(state_vecs,state_strs,ps_all,N_states)
-            state_freqs = calc_state_freqs_sparse(tmatrix)
+            # tmatrix = calc_tmatrix(state_vecs,state_strs,ps_all,N_states)
+            dGmatrix = calc_dGmatrix(state_vecs,state_strs,ps_all,N_states)
+            Fs = calc_Fs(dGmatrix)
+            print(Fs)
+            # state_freqs = calc_state_freqs_sparse(tmatrix)
+            state_freqs = calc_populations(Fs)
             
             state_strs_clusters.append(state_strs)
             state_freqs_clusters.append(state_freqs)
