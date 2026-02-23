@@ -245,7 +245,7 @@ def calc_charge(pka,pH=7.):
 
 def run_acid_base_calc(state_strs,state_vecs,indices,mols_lib,model_base,model_acid,base_lib,acid_lib,device='cpu',verbose=False):
     """ Add base and acid calculation results for all state_strs into base_lib and acid_lib """
-    print(indices)
+    # print(indices)
     for state_str, state_vec in zip(state_strs,state_vecs):
         if state_str not in base_lib:
             if verbose:
@@ -263,6 +263,8 @@ def run_acid_base_calc(state_strs,state_vecs,indices,mols_lib,model_base,model_a
                                         pred_acid=False,verbose=verbose)
             base = {}
             for at_idx, b in base_tmp.items():
+                if at_idx not in indices:
+                    continue
                 rel_idx = indices.index(at_idx)
                 if state_vec[rel_idx] == 1:
                     base[at_idx] = b
@@ -280,6 +282,8 @@ def run_acid_base_calc(state_strs,state_vecs,indices,mols_lib,model_base,model_a
             
             acid = {}
             for at_idx, a in acid_tmp.items():
+                if at_idx not in indices:
+                    continue
                 rel_idx = indices.index(at_idx)
                 if state_vec[rel_idx] == 1:
                     acid[at_idx] = a
@@ -289,7 +293,10 @@ def run_acid_base_calc(state_strs,state_vecs,indices,mols_lib,model_base,model_a
             #                                verbose=verbose)
             base_lib[state_str] = base
             acid_lib[state_str] = acid
-
+        # print('base')
+        # print(base_lib[state_str])
+        # print('acid')
+        # print(acid_lib[state_str])
     return base_lib, acid_lib
 
 ###################################################################################
@@ -627,7 +634,7 @@ def run_pipeline(name,smiles_raw,pH_output=7,cutoff_states=4000,device='cpu',
                  verbose=False,cutoff_export=0.5,
                  fout_csv='out.csv',append=True,notebook=False,
                  except_optimize_error=False,
-                 matrix_def='msm'):
+                 matrix_def='msm',export_opti_sdf=False):
                 #  write_all_relevant=False):
     if verbose:
         print(name)
@@ -651,6 +658,7 @@ def run_pipeline(name,smiles_raw,pH_output=7,cutoff_states=4000,device='cpu',
 
     net_charges = []
     state_freqs_all = {}
+    freqs_macro_all = []
 
     mols_frag_lib = {}
     base_frag_lib = {}
@@ -721,11 +729,20 @@ def run_pipeline(name,smiles_raw,pH_output=7,cutoff_states=4000,device='cpu',
                 tmatrix = calc_tmatrix(state_vecs,state_strs,ps_all,N_states)
                 state_freqs = calc_state_freqs_sparse(tmatrix)
             elif matrix_def == 'dG':
-                print(state_strs)
+                # print(state_strs)
                 dGmatrix = calc_dGmatrix(state_vecs,state_strs,ps_all,N_states)
                 # print(dGmatrix)
-                Fs = calc_Fs(dGmatrix)
-                print(Fs)
+                # Fs = calc_Fs(dGmatrix)
+                # print(dGmatrix)
+                dG_clusters = find_dGclusters(dGmatrix)
+                # print(dG_clusters)
+                state_strs, dGmatrix = remove_orphans(dG_clusters, state_strs, dGmatrix)
+                # print(state_strs, dGmatrix)
+                is_connected = check_connectivity(dGmatrix)
+                if not is_connected:
+                    raise ValueError('Matrix not connected')
+                Fs = reconstruct_free_energies_incomplete_half(dGmatrix)
+                # print(Fs)
                 state_freqs = calc_populations(Fs)
                 # print(state_strs)
                 # print(Fs)
@@ -796,8 +813,18 @@ def run_pipeline(name,smiles_raw,pH_output=7,cutoff_states=4000,device='cpu',
                 state_freqs = calc_state_freqs_sparse(tmatrix)
             elif matrix_def == 'dG':
                 dGmatrix = calc_dGmatrix(state_vecs,state_strs,ps_all,N_states)
-                Fs = calc_Fs(dGmatrix)
-                print(Fs)
+                # print(dGmatrix)
+                # Fs = calc_Fs(dGmatrix)
+                # print(dGmatrix)
+                dG_clusters = find_dGclusters(dGmatrix)
+                # print(dG_clusters)
+                state_strs, dGmatrix = remove_orphans(dG_clusters, state_strs, dGmatrix)
+                # print(state_strs, dGmatrix)
+                is_connected = check_connectivity(dGmatrix)
+                if not is_connected:
+                    raise ValueError('Matrix not connected')
+                Fs = reconstruct_free_energies_incomplete_half(dGmatrix)
+                # print(Fs)
                 state_freqs = calc_populations(Fs)
             # tmatrix = calc_tmatrix(state_vecs, state_strs,ps_all, N_states)
             # state_freqs = calc_state_freqs_sparse(tmatrix)
@@ -806,8 +833,8 @@ def run_pipeline(name,smiles_raw,pH_output=7,cutoff_states=4000,device='cpu',
             state_freqs_clusters.append(state_freqs)
             indices_clusters.append(oh_ids)
 
-        print(state_strs_clusters)
-        print(state_freqs_clusters)
+        # print(state_strs_clusters)
+        # print(state_freqs_clusters)
 
         indices, state_strs, state_freqs_lib = combine_clusters(
             state_strs_clusters, state_freqs_clusters, indices_clusters, verbose=verbose)
@@ -821,8 +848,8 @@ def run_pipeline(name,smiles_raw,pH_output=7,cutoff_states=4000,device='cpu',
         # Symmetry
         state_strs, state_freqs = calc_symmetry(state_strs, state_freqs_lib, mols_lib,verbose=verbose)
         
-        print(state_strs)
-        print(state_freqs)
+        # print(state_strs)
+        # print(state_freqs)
 
         # Max freq
         idx_max = np.argmax(state_freqs)
@@ -831,12 +858,20 @@ def run_pipeline(name,smiles_raw,pH_output=7,cutoff_states=4000,device='cpu',
 
         # Net charge as weighted sum over microstate charges
         state_qs = {}
+        freqs_macro = {}
         net_charge = 0.       
         for state_str, state_freq in zip(state_strs, state_freqs):
             state_q = Chem.GetFormalCharge(mols_lib[state_str])
             state_qs[state_str] = state_q
+            if state_q in freqs_macro:
+                freqs_macro[state_q] += state_freq
+            else:
+                freqs_macro[state_q] = state_freq
             net_charge += state_q * state_freq
         net_charges.append(net_charge)
+
+        freqs_macro_all.append(freqs_macro)
+
 
         # Add to results for pH scan
         for state_str, state_freq in zip(state_strs,state_freqs):
@@ -868,12 +903,49 @@ def run_pipeline(name,smiles_raw,pH_output=7,cutoff_states=4000,device='cpu',
             export_csv(name,state_strs_export,smiles_lib,state_freqs_export,state_qs,path=path_out,fout_csv=fout_csv,append=append)
             return_code = export_sdf(name,state_strs_export,mols_lib,path=path_out,except_optimize_error=except_optimize_error)
             # export_smi(name_state,smiles_lib[state_str_opti],path=path_out)
-            plot_optimal_state(name,mols_lib[state_strs_export[0]],path=path_figs)
+            if export_opti_sdf:
+                plot_optimal_state(name,mols_lib[state_strs_export[0]],path=path_figs)
             if verbose:
                 print(f'Optimal smiles for pH {pH}: {smiles_lib[state_str_opti]}')
 
     # Plotting of pH scan
     net_charges = np.round(np.array(net_charges),decimals=4)
+
+    pkas_macro = {}
+    pkas_weights = {}
+
+    for pH, freqs_macro in zip(pHs,freqs_macro_all):
+        qs_sorted = sorted(freqs_macro.keys())
+        # print(qs_sorted)
+        # print(pH, freqs_macro)
+        for q in qs_sorted:
+            if q+1 in qs_sorted:
+                freq1 = freqs_macro[q]
+                freq2 = freqs_macro[q+1]
+                pka_macro = np.log10(freq2/freq1) + pH
+                pka_weight = 1./(freq1**2 + freq2**2)
+                if q in pkas_macro:
+                    pkas_macro[q].append(pka_macro)
+                    pkas_weights[q].append(pka_weight)
+                else:
+                    pkas_macro[q] = [pka_macro]
+                    pkas_weights[q] = [pka_weight]
+                # print(q, q+1, pka_macro, pka_weight)
+    
+    pkas_combined = {}
+
+    for q, pkas in pkas_macro.items():
+        ws = pkas_weights[q]
+        pka_comb = float(np.average(pkas,weights=ws))
+        pkas_combined[q] = pka_comb
+
+    for idx, (q, pka) in enumerate(pkas_combined.items()):
+        print(f'pKa{idx+1} | {q+1} --> {q} | {pka:.3f}')
+
+    if len(pkas_combined) > 0:
+        export_macro_pkas(name,pkas_combined,path=path_out)
+
+    # print(pkas_combined)
 
     # with open(f'output/{name}_net_charges.txt','w') as f:
         # for pH, net_charge in zip(pHs, net_charges):
