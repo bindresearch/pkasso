@@ -3,6 +3,8 @@ from scipy.sparse import csr_matrix
 
 from .utils import pack_vec
 
+MISSING = -1000.
+
 def calc_state_freqs(tmatrix):
     w, v = np.linalg.eig(tmatrix.T)
     idx = np.argmin(np.abs(w - 1))
@@ -118,7 +120,119 @@ def calc_dGmatrix(state_vecs,state_strs,ps_all,N_states):
         matrix_mean[idx,jdx] = np.mean(matrix_raw[idx][jdx])
     return matrix_mean
 
-def calc_Fs(matrix,max_visited=5):
+# def least_squares(Fi, Fj, dFij):
+    # ls = (Fj - Fi - dFij)**2
+    # return ls
+
+import networkx as nx
+
+# def find_orphans_graph(deltaF):
+#     N = deltaF.shape[0]
+#     G = nx.Graph()
+#     G.add_nodes_from(range(N))
+
+#     for i in range(N):
+#         for j in range(i+1, N):
+#             if deltaF[i, j] != MISSING:
+#                 G.add_edge(i, j)
+
+#     # Nodes with degree 0 are orphans
+#     return [n for n, d in G.degree() if d == 0]
+
+def find_dGclusters(deltaF):
+    """
+    Identify all clusters (connected components) in a deltaF matrix.
+
+    Parameters
+    ----------
+    deltaF : (N, N) ndarray
+        deltaF[i, j] ≈ F_j - F_i, or MISSING if unavailable
+
+    Returns
+    -------
+    clusters : list of lists
+        Each sublist contains the indices of states in that connected cluster
+    """
+    deltaF = np.asarray(deltaF)
+    N = deltaF.shape[0]
+
+    # Build undirected graph
+    G = nx.Graph()
+    G.add_nodes_from(range(N))
+
+    for i in range(N):
+        for j in range(i+1, N):
+            if deltaF[i, j] != MISSING:
+                G.add_edge(i, j)
+
+    # Extract connected components
+    clusters = [list(c) for c in nx.connected_components(G)]
+    return clusters
+
+def remove_orphans(dG_clusters, state_strs, deltaF):
+    nmax = 0
+    # print(deltaF.shape)
+    for idx, cluster in enumerate(dG_clusters):
+        # print(idx, cluster)
+        if len(cluster) > nmax:
+            keep_idx = idx
+            nmax = len(cluster)
+    keep_ids = np.array(dG_clusters[keep_idx])
+    # print(keep_ids)
+
+    state_strs_keep = [state_strs[idx] for idx in keep_ids]
+    deltaF_keep = deltaF[np.ix_(keep_ids, keep_ids)]
+    # print(deltaF_keep)
+    return state_strs_keep, deltaF_keep
+
+def check_connectivity(deltaF):
+    N = deltaF.shape[0]
+    G = nx.Graph()
+
+    if N == 1:
+        return True
+
+    for i in range(N):
+        for j in range(N):
+            if deltaF[i, j] != MISSING and i != j:
+                G.add_edge(i, j)
+
+    return nx.is_connected(G)
+
+
+def reconstruct_free_energies_incomplete_half(deltaF):
+    # print(deltaF)
+    N = deltaF.shape[0]
+    rows, rhs = [], []
+
+    if N == 1:
+        return np.array([0.])
+
+    for i in range(N):
+        for j in range(i+1, N):
+            if deltaF[i, j] == MISSING:
+                continue
+
+            row = np.zeros(N)
+            row[i] = -1.0
+            row[j] =  1.0
+            rows.append(row)
+            rhs.append(deltaF[i, j])
+
+    if not rows:
+        raise ValueError("No valid transitions found.")
+
+    A = np.vstack(rows)
+    b = np.array(rhs)
+
+    A = A[:, 1:]
+    F_reduced, *_ = np.linalg.lstsq(A, b, rcond=None)
+
+    F = np.zeros(N)
+    F[1:] = F_reduced
+    return F
+
+def calc_Fs(matrix,max_visited=10):
     N_states = matrix.shape[0]
     # print(f'N_states: {N_states}')
     visited_counter = np.zeros((N_states))
@@ -158,6 +272,15 @@ def calc_Fs(matrix,max_visited=5):
         # print(f'New origins: {ids_origins}')
     # print(f'Visited: {visited_counter}')
     # print(f'Fs: {Fs}')
+    Fs_completed = []
+    for idx, F in enumerate(Fs):
+        if len(F) > 0:
+            Fs_completed.append(F)
+        else:
+            # print(f'completing F for idx {idx}')
+            Fs_completed.append(1e6)
+    Fs = Fs_completed
+    # print(f'Fs completed: {Fs}')
     Fs_m = np.array([np.mean(F) for F in Fs])
     Fs_stds = np.array([np.std(F) for F in Fs])
     # print(f'Fs_means: {Fs_m}')

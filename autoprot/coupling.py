@@ -34,8 +34,8 @@ def construct_coupling_matrix(indices, state_strs, state_vecs, base_pka_diffs, a
     # print(indices)
     for state_str, state_vec in zip(state_strs[1:], state_vecs[1:]):
         changed_rel_idx = np.where(state_vec != 1)[0][0]
-        coupling_matrix[changed_rel_idx] += np.where(base_pka_diffs[state_str] > coupling_cutoff, 1, 0)
-        coupling_matrix[changed_rel_idx] += np.where(acid_pka_diffs[state_str] > coupling_cutoff, 1, 0)
+        coupling_matrix[changed_rel_idx] += np.where(base_pka_diffs[state_str] >= coupling_cutoff, 1, 0)
+        coupling_matrix[changed_rel_idx] += np.where(acid_pka_diffs[state_str] >= coupling_cutoff, 1, 0)
     return coupling_matrix
 
 def cluster_coupling_matrix(M):

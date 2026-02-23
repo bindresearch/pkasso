@@ -20,6 +20,7 @@ def model_pred(m2, aid, model, device="cpu"):
     return pka
 
 def predict_acid(mol,model_acid, device="cpu"):
+
     acid_idxs= get_ionization_aid(mol, acid_or_base="acid")
     acid_res = {}
     for aid in acid_idxs:
@@ -36,22 +37,29 @@ def predict_base(mol,model_base, device="cpu"):
         base_res.update({aid:bpka})
     return base_res
 
-def predict_acid_base(mol_h,model_base,model_acid,device='cpu',verbose=False):
+def predict_acid_base(mol_h,model_base,model_acid,device='cpu',verbose=False,
+                      pred_acid=True, pred_base=True):
 
-    base = predict_base(mol_h,model_base,device=device)
-    acid = predict_acid(mol_h,model_acid,device=device)
+    if pred_base:
+        base = predict_base(mol_h,model_base,device=device)
+    else:
+        base = {}
 
-    if verbose:
-        print('base')
-        print(base)
-        print('acid H')
-        print(acid)
+    if pred_acid:
+        acid = predict_acid(mol_h,model_acid,device=device)
+        if verbose:
+            print('base')
+            print(base)
+            print('acid H')
+            print(acid)
 
-    acid = get_acid_neighbors(mol_h, acid)
+        acid = get_acid_neighbors(mol_h, acid)
 
-    if verbose:
-        print('acid heavy')
-        print(acid)
+        if verbose:
+            print('acid heavy')
+            print(acid)
+    else:
+        acid = {}
     return base, acid
 
 def get_acid_neighbors(mol_h, acid, verbose=False):
