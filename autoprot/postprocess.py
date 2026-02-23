@@ -119,6 +119,12 @@ def export_csv(name,state_strs,smiles_lib,sfreqs,state_qs,path='output',fout_csv
             smiles = smiles_lib[state_str]
             f.write(f'{name},{name}_{e_idx},{smiles},{sfreq/np.sum(sfreqs):.5f},{state_qs[state_str]}\n')
 
+def export_macro_pkas(name,pkas_combined,path='output'):
+    with open(f'{path}/{name}_pkas.csv','w') as f:
+        f.write('idx,q0,q1,pka\n')
+        for idx, (q, pka) in enumerate(pkas_combined.items()):
+            f.write(f'pKa{idx+1},{q},{q+1},{pka:.5f}\n')
+
 def plot_relevant_states(name, mols_relevant,path='figures',notebook=False):
 
     for mol in mols_relevant: tmp=AllChem.Compute2DCoords(mol)
