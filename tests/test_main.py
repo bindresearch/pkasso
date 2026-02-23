@@ -17,7 +17,7 @@ from rdkit import Chem
 )
 def test_preprocess(smiles_raw,net_charge):
 
-    mol, exclude_indices = main.preprocess(smiles_raw,verbose=False)
+    mol, exclude_indices, phosphate_ohs = main.preprocess(smiles_raw,verbose=False)
     qs = [at.GetFormalCharge() for at in mol.GetAtoms()]
     print(qs)
     for at_idx, q in enumerate(qs):

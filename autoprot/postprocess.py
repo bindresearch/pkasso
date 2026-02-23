@@ -52,8 +52,9 @@ def plot_pH_scan(name, indices, state_strs_relevant, sfreqs_relevant, pHs, net_c
         ax[0].plot(pHs,sfreq*100,style,label=state_str,color=color)
     if len(state_strs_relevant) > 10:
         ax[0].legend(ncol=2,fontsize=6)
-    else:
+    elif len(state_strs_relevant) > 1:
         ax[0].legend(ncol=1,fontsize=8)
+
     ax[0].set(xlabel='pH',ylabel='Distribution %')
 
     ax[0].set_title(name)
@@ -117,6 +118,12 @@ def export_csv(name,state_strs,smiles_lib,sfreqs,state_qs,path='output',fout_csv
         for e_idx, (state_str, sfreq) in enumerate(zip(state_strs, sfreqs)):
             smiles = smiles_lib[state_str]
             f.write(f'{name},{name}_{e_idx},{smiles},{sfreq/np.sum(sfreqs):.5f},{state_qs[state_str]}\n')
+
+def export_macro_pkas(name,pkas_combined,path='output'):
+    with open(f'{path}/{name}_pkas.csv','w') as f:
+        f.write('idx,q0,q1,pka\n')
+        for idx, (q, pka) in enumerate(pkas_combined.items()):
+            f.write(f'pKa{idx+1},{q},{q+1},{pka:.5f}\n')
 
 def plot_relevant_states(name, mols_relevant,path='figures',notebook=False):
 

@@ -3,7 +3,7 @@ import subprocess
 
 setup(
     name='autoprot',
-    version='0.2.1',
+    version='0.2.2',
     description='Automatic selection of protonation states for small molecules',
     url='.',
     authors=[
