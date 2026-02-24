@@ -42,6 +42,20 @@ def predict_acid_base(mol_h,model_base,model_acid,device='cpu',verbose=False,
 
     if pred_base:
         base = predict_base(mol_h,model_base,device=device)
+
+        base_curated = {} # atom mapping
+
+        for at_idx, pka in base.items():
+            atom = mol_h.GetAtomWithIdx(at_idx) 
+            map_idx = atom.GetAtomMapNum()
+            print(at_idx, map_idx)
+            base_curated[map_idx] = pka
+
+        print('base')
+        print(base)
+        print('base curated')
+        print(base_curated)
+        base = base_curated
     else:
         base = {}
 
@@ -58,6 +72,20 @@ def predict_acid_base(mol_h,model_base,model_acid,device='cpu',verbose=False,
         if verbose:
             print('acid heavy')
             print(acid)
+
+        acid_curated = {} # atom mapping
+
+        for at_idx, pka in acid.items():
+            atom = mol_h.GetAtomWithIdx(at_idx) 
+            map_idx = atom.GetAtomMapNum()
+            print(at_idx, map_idx)
+            acid_curated[map_idx] = pka
+
+        print('acid')
+        print(acid)
+        print('acid curated')
+        print(acid_curated)
+        acid = acid_curated
     else:
         acid = {}
     return base, acid

@@ -17,13 +17,13 @@ from rdkit import Chem
 )
 def test_preprocess(smiles_raw,net_charge):
 
-    mol, exclude_indices, phosphate_ohs = main.preprocess(smiles_raw,verbose=False)
+    mol, exclude_base_indices, exclude_acid_indices, phosphate_ohs = main.preprocess(smiles_raw,verbose=False)
     qs = [at.GetFormalCharge() for at in mol.GetAtoms()]
     print(qs)
     for at_idx, q in enumerate(qs):
         print(at_idx, q)
         if q != 0:
-            assert at_idx in exclude_indices
+            assert (at_idx in exclude_base_indices) and (at_idx in exclude_acid_indices)
     assert Chem.GetFormalCharge(mol) == net_charge
 
 
@@ -65,9 +65,10 @@ def test_find_candidate_sites(pH,pH_band,expected_indices,expected_q_options):
         0: 4.0,
         3: 12.0
     }
-    exclude_indices = []
+    exclude_base_indices = []
+    exclude_acid_indices = []
     indices, q_options = main.find_candidate_sites(
-        base, acid, exclude_indices,pH, pH_band=pH_band)
+        base, acid, exclude_base_indices, exclude_acid_indices, pH, pH_band=pH_band)
     assert (np.allclose(indices,expected_indices)) and (np.allclose(q_options,expected_q_options))
 
 def test_construct_state_vectors():
