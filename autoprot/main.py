@@ -46,11 +46,36 @@ def preprocess(smiles_raw,verbose=False):
 
     mol = rdMolStandardize.Cleanup(mol)
 
-    reionizer = rdMolStandardize.Reionizer()
-    mol = reionizer.reionize(mol)
+    # reionizer = rdMolStandardize.Reionizer()
+    # mol = reionizer.reionize(mol)
 
     uncharger = rdMolStandardize.Uncharger()
     mol = uncharger.uncharge(mol)
+    smiles = Chem.MolToSmiles(mol,canonical=True)
+    print(smiles)
+
+    mol = Chem.RemoveHs(mol)
+
+    smiles = Chem.MolToSmiles(mol,canonical=True)
+    print(smiles)
+    mol = Chem.MolFromSmiles(smiles, sanitize=True)
+    print([at.GetSymbol() for at in mol.GetAtoms()])
+
+    smiles = Chem.MolToSmiles(mol,canonical=True)
+    print(smiles)
+    mol = Chem.MolFromSmiles(smiles, sanitize=True)
+    print([at.GetSymbol() for at in mol.GetAtoms()])
+
+    for atom in mol.GetAtoms():
+        atom.SetAtomMapNum(atom.GetIdx() + 1)
+
+    # for atom in mol.GetAtoms():
+        # print(atom.GetIdx(), atom.GetAtomMapNum())
+
+    # smiles = Chem.MolToSmiles(mol,canonical=True)
+    # print(smiles)
+    # mol = Chem.MolFromSmiles(smiles, sanitize=True)
+    # print([at.GetSymbol() for at in mol.GetAtoms()])
 
     if verbose:
         print('Formal charges after cleanup')
@@ -59,20 +84,35 @@ def preprocess(smiles_raw,verbose=False):
 
     q0s = np.array([at.GetFormalCharge() for at in mol.GetAtoms()])
 
-    exclude_indices = []
+    exclude_acid_indices = []
+    exclude_base_indices = []
+    # exclude_indices = []
+    # print([at.GetSymbol() for at in mol.GetAtoms()])
     mol_h = Chem.rdmolops.AddHs(mol)
+
+    for atom in mol_h.GetAtoms():
+        print(atom.GetSymbol(), atom.GetIdx(), atom.GetAtomMapNum())
+
+    # print([at.GetSymbol() for at in mol.GetAtoms()])
+    # print([at.GetSymbol() for at in mol_h.GetAtoms()])
+
     for at_idx, q in enumerate(q0s):
+        atom = mol_h.GetAtomWithIdx(at_idx) 
+        map_idx = atom.GetAtomMapNum()
         if q != 0.:
             print(f'NOTE: Input molecule is charged at idx {at_idx}!')
-            exclude_indices.append(at_idx)
+            exclude_acid_indices.append(map_idx)
+            exclude_base_indices.append(map_idx)
         else:
-            atom = mol_h.GetAtomWithIdx(at_idx)
+            # atom = mol_h.GetAtomWithIdx(at_idx)
             if atom.GetSymbol() == 'N':
                 if atom.GetIsAromatic():
                     if atom.GetDegree() == 3: # arom. N with lone pair needed for ring
-                        exclude_indices.append(at_idx)
+                        exclude_base_indices.append(map_idx)
     
-    phosphate_found, phosphate_ohs = has_phosphate(mol)
+    # print([at.GetSymbol() for at in mol.GetAtoms()])
+    phosphate_found, phosphate_ohs = has_phosphate(mol) # returns map indices
+    # print([at.GetSymbol() for at in mol.GetAtoms()])
 
     # deprotonate_ohs = []
 
@@ -83,20 +123,32 @@ def preprocess(smiles_raw,verbose=False):
         for p_idx, oh_ids in phosphate_ohs.items():
             oh_ids = sorted(oh_ids)
             # deprotonate_ohs.append(oh_ids[0])
-            for at_idx in oh_ids:
-                if at_idx not in exclude_indices:
-                    exclude_indices.append(at_idx)
+            for map_idx in oh_ids:
+                if map_idx not in exclude_acid_indices:
+                    exclude_acid_indices.append(map_idx)
+                if map_idx not in exclude_base_indices:
+                    exclude_base_indices.append(map_idx)
     # print(f'deprotonate ids: {deprotonate_ohs}')
 
-    exclude_indices = sorted(exclude_indices)
+    exclude_base_indices = sorted(exclude_base_indices)
+    exclude_acid_indices = sorted(exclude_acid_indices)
 
-    smiles = Chem.MolToSmiles(mol,canonical=True)
+    # print([at.GetSymbol() for at in mol.GetAtoms()])
+
+    # smiles = Chem.MolToSmiles(mol,canonical=True)
+    # mol = Chem.MolFromSmiles(smiles, sanitize=True)
+    # print([at.GetSymbol() for at in mol.GetAtoms()])
+
+    for atom in mol.GetAtoms():
+        print(atom.GetSymbol(), atom.GetIdx(), atom.GetAtomMapNum())
+
     if verbose:
         print('Processed:')
         print(smiles)
-        print(f'exclude indices: {exclude_indices}')
+        print(f'exclude base indices: {exclude_base_indices}')
+        print(f'exclude acid indices: {exclude_acid_indices}')
 
-    return mol, exclude_indices, phosphate_ohs
+    return mol, exclude_base_indices, exclude_acid_indices, phosphate_ohs
 
 def has_phosphate(mol):
 
@@ -122,20 +174,22 @@ def has_phosphate(mol):
     phosphate_ohs = {}
 
     for match in matches:
-        poh_indices = []
+        # poh_indices = []
         # Find central P of phosphate
         for idx in match:
             atom = mol.GetAtomWithIdx(idx)
             if atom.GetSymbol() == "P":
-                p_idx = idx
-                if p_idx not in phosphate_ohs:
-                    phosphate_ohs[p_idx] = []
+                p_map_idx = atom.GetAtomMapNum()
+                # p_idx = idx
+                if p_map_idx not in phosphate_ohs:
+                    phosphate_ohs[p_map_idx] = []
         # Find protonable O of phosphate
         for idx in match:
             atom = mol.GetAtomWithIdx(idx)
             if atom.GetSymbol() == "O" and atom.GetTotalNumHs() > 0:
-                if idx not in phosphate_ohs[p_idx]:
-                    phosphate_ohs[p_idx].append(idx)
+                oh_map_idx = atom.GetAtomMapNum()
+                if idx not in phosphate_ohs[p_map_idx]:
+                    phosphate_ohs[p_map_idx].append(oh_map_idx)
 
     return found, phosphate_ohs
 
@@ -151,32 +205,34 @@ def has_phosphate(mol):
 #     return 
 
 
-def find_candidate_sites(base,acid,exclude_indices,pH,pH_band=6.,
+def find_candidate_sites(base,acid,exclude_base_indices,exclude_acid_indices,pH,pH_band=6.,
                          verbose=False):
     """ Find possible (de-)protonation sites """
 
-    prot_candidates = list(base.keys())
+    prot_candidates = list(base.keys()) # should be map idx
     deprot_candidates = list(acid.keys())
 
     indices = list(sorted(set(prot_candidates + deprot_candidates)))
     if verbose:
         print(f'relevant indices: {indices}')
 
-    for idx in exclude_indices:
-        if idx in indices:
-            indices.remove(idx)
+    # for idx in exclude_indices:
+        # if idx in indices:
+            # indices.remove(idx)
     if verbose:
         print(f'relevant indices (after exclusion): {indices}')
 
     q_options = np.zeros((3,len(indices))) # deprot=0, stay=1, prot=2
     q_options[1] = 1 # always allow stay
-    for rel_idx, at_idx in enumerate(indices):
-        if at_idx in prot_candidates:
-            if base[at_idx] >= pH - pH_band:
-                q_options[2,rel_idx] = 1 # allow protonation
-        if at_idx in deprot_candidates:
-            if acid[at_idx] <= pH + pH_band:
-                q_options[0,rel_idx] = 1 # allow deprotonation
+    for rel_idx, map_idx in enumerate(indices):
+        if map_idx in prot_candidates:
+            if map_idx not in exclude_base_indices:
+                if base[map_idx] >= pH - pH_band:
+                    q_options[2,rel_idx] = 1 # allow protonation
+        if map_idx in deprot_candidates:
+            if map_idx not in exclude_acid_indices:
+                if acid[map_idx] <= pH + pH_band:
+                    q_options[0,rel_idx] = 1 # allow deprotonation
 
     return indices, q_options
 
@@ -203,16 +259,31 @@ def construct_state_vectors(q_options, cutoff_states, verbose=False):
         state_vecs = np.array(list(itertools.product(*q_options_nonzero)))#[0,1,2], repeat=len(indices))
         return state_vecs
 
+def get_atom_with_map_idx(mol, map_idx):
+    for atom in mol.GetAtoms():
+        if atom.GetAtomMapNum() == map_idx:
+            return atom
+    return None
+
 def construct_mol(mol0, indices, state_vec):
     """ Make single rdkit mol object from 'neutral' mol0 and state vector """
 
     mol_cand = copy.deepcopy(mol0)
+
+    smiles_cand = Chem.MolToSmiles(mol_cand, canonical=False)
+
     qs = state_vec - 1
     
     rw = Chem.RWMol(Chem.AddHs(mol_cand))
 
-    for at_idx, q in zip(indices,qs):
-        atom = rw.GetAtomWithIdx(at_idx)
+    print(indices)
+    print(qs)
+
+    print(smiles_cand)
+    print([at.GetSymbol() for at in mol_cand.GetAtoms()])
+    for map_idx, q in zip(indices,qs):
+        atom = get_atom_with_map_idx(rw, map_idx)
+        # atom = rw.GetAtomWithIdx(at_idx)
         atom.SetFormalCharge(int(q))
         if q == -1:
             for nbr in atom.GetNeighbors():
@@ -220,10 +291,21 @@ def construct_mol(mol0, indices, state_vec):
                     rw.RemoveAtom(nbr.GetIdx())
                     break
 
+    # print(Chem.MolToSmiles(rw))
+
     mol_cand = Chem.RemoveHs(rw)
     Chem.SanitizeMol(mol_cand)
-    smiles_cand = Chem.MolToSmiles(mol_cand, canonical=False)  
-    mol_cand = Chem.MolFromSmiles(smiles_cand, sanitize=True)
+    smiles_cand = Chem.MolToSmiles(mol_cand, canonical=False)
+    print(smiles_cand)
+    # mol_cand = Chem.MolFromSmiles(smiles_cand, sanitize=True)
+    # print([at.GetSymbol() for at in mol_cand.GetAtoms()])
+    # smiles_cand = Chem.MolToSmiles(mol_cand, canonical=False)
+    # mol_cand = Chem.MolFromSmiles(smiles_cand, sanitize=True)
+    # print([at.GetSymbol() for at in mol_cand.GetAtoms()])
+    
+    for atom in mol_cand.GetAtoms():
+        print(atom.GetSymbol(), atom.GetIdx(), atom.GetAtomMapNum())
+
     return mol_cand, smiles_cand
     
 def construct_mols(mol0, state_strs, state_vecs, indices, mols_lib, smiles_lib):
@@ -262,12 +344,12 @@ def run_acid_base_calc(state_strs,state_vecs,indices,mols_lib,model_base,model_a
             base_tmp, _ = predict_acid_base(mol_base_h,model_base,model_acid,device=device,
                                         pred_acid=False,verbose=verbose)
             base = {}
-            for at_idx, b in base_tmp.items():
-                if at_idx not in indices:
+            for map_idx, b in base_tmp.items():
+                if map_idx not in indices:
                     continue
-                rel_idx = indices.index(at_idx)
+                rel_idx = indices.index(map_idx)
                 if state_vec[rel_idx] == 1:
-                    base[at_idx] = b
+                    base[map_idx] = b
 
             state_vec_acid = np.minimum(state_vec,1)
             state_str_acid = pack_vec(state_vec_acid)
@@ -281,12 +363,12 @@ def run_acid_base_calc(state_strs,state_vecs,indices,mols_lib,model_base,model_a
                                            pred_base=False,verbose=verbose)
             
             acid = {}
-            for at_idx, a in acid_tmp.items():
-                if at_idx not in indices:
+            for map_idx, a in acid_tmp.items():
+                if map_idx not in indices:
                     continue
-                rel_idx = indices.index(at_idx)
+                rel_idx = indices.index(map_idx)
                 if state_vec[rel_idx] == 1:
-                    acid[at_idx] = a
+                    acid[map_idx] = a
             # mol = mols_lib[state_str]
             # mol_h = Chem.rdmolops.AddHs(mol)
             # base, acid = predict_acid_base(mol_h,model_base,model_acid,device=device,
@@ -367,10 +449,10 @@ def calc_state_pkas(state_strs, state_vecs, base_lib, acid_lib, indices, pH=7.,m
         # ps_down = np.zeros((len(state_vec))) - 1
         base = base_lib[state_str]
         acid = acid_lib[state_str]
-        for at_idx, pka in base.items():
-            if at_idx not in indices: # Excluded at the start
+        for map_idx, pka in base.items():
+            if map_idx not in indices: # Excluded at the start
                 continue
-            rel_idx = indices.index(at_idx)
+            rel_idx = indices.index(map_idx)
             if matrix_def == 'msm':
                 p_up = calc_charge(pka,pH=pH) # probability for higher + state
                 p_down = 1 - p_up
@@ -380,7 +462,7 @@ def calc_state_pkas(state_strs, state_vecs, base_lib, acid_lib, indices, pH=7.,m
             else:
                 raise
             if verbose:
-                print(f'rel_idx:{rel_idx} | at_idx:{at_idx} | base {pka} up:{p_up:.2f} stay:{p_down:.2f}')
+                print(f'rel_idx:{rel_idx} | map_idx:{map_idx} | base {pka} up:{p_up:.2f} stay:{p_down:.2f}')
             if state_vec[rel_idx] <= 1:
                 ps_up[rel_idx] = p_up
             # else:
@@ -388,10 +470,10 @@ def calc_state_pkas(state_strs, state_vecs, base_lib, acid_lib, indices, pH=7.,m
                     # print('already protonated')
             # else: # already protonated
                 # ps_down[rel_idx] = p_down
-        for at_idx, pka in acid.items():
-            if at_idx not in indices: # Excluded at the start
+        for map_idx, pka in acid.items():
+            if map_idx not in indices: # Excluded at the start
                 continue
-            rel_idx = indices.index(at_idx)
+            rel_idx = indices.index(map_idx)
             if matrix_def == 'msm':
                 p_up = calc_charge(pka,pH=pH) # probability for higher + state
                 p_down = 1 - p_up
@@ -401,7 +483,7 @@ def calc_state_pkas(state_strs, state_vecs, base_lib, acid_lib, indices, pH=7.,m
             else:
                 raise
             if verbose:
-                print(f'rel_idx:{rel_idx} | at_idx:{at_idx} | acid {pka} stay:{p_up:.2f} down:{p_down:.2f}')
+                print(f'rel_idx:{rel_idx} | map_idx:{map_idx} | acid {pka} stay:{p_up:.2f} down:{p_down:.2f}')
             if state_vec[rel_idx] >= 1:
                 ps_down[rel_idx] = p_down
             # else:
@@ -421,7 +503,7 @@ def calc_state_pkas(state_strs, state_vecs, base_lib, acid_lib, indices, pH=7.,m
 
 #############################################################################################
 
-def coupling_assay(indices,q_options, mol0, mols_lib, smiles_lib, model_base, model_acid, base_lib, acid_lib, coupling_cutoff=1.0, 
+def coupling_assay(indices, q_options, mol0, mols_lib, smiles_lib, model_base, model_acid, base_lib, acid_lib, coupling_cutoff=1.0, 
                    device='cpu', verbose=False):
     """ Sensitivity analysis. (De-)protonate every site one by one and assess if pKa values of other sites change """
 
@@ -664,10 +746,17 @@ def run_pipeline(name,smiles_raw,pH_output=7,cutoff_states=4000,device='cpu',
     base_frag_lib = {}
     acid_frag_lib = {}
 
-    mol0, exclude_indices, phosphate_ohs = preprocess(smiles_raw,verbose=verbose)
+    mol0, exclude_base_indices, exclude_acid_indices, phosphate_ohs = preprocess(smiles_raw,verbose=verbose)
+
+    if len(phosphate_ohs) > 0:
+        print(phosphate_ohs)
+
     mol0_h = Chem.rdmolops.AddHs(mol0)
 
-    base0, acid0 = predict_acid_base(mol0_h,model_base,model_acid,device=device,verbose=verbose)
+    for atom in mol0_h.GetAtoms():
+        print(atom.GetSymbol(), atom.GetIdx(), atom.GetAtomMapNum())
+
+    base0, acid0 = predict_acid_base(mol0_h,model_base,model_acid,device=device,verbose=verbose) # returns pkas for map indices
         
     for pH_idx, pH in enumerate(pHs): #,total=len(pHs)):#,total=len(pHs)):
         # print('='*50)
@@ -675,7 +764,7 @@ def run_pipeline(name,smiles_raw,pH_output=7,cutoff_states=4000,device='cpu',
         if verbose:
             print('='*50)
             print(f'pH: {pH}',flush=True)
-        indices0, q_options0 = find_candidate_sites(base0, acid0, exclude_indices,pH,pH_band=pH_band,verbose=False)
+        indices0, q_options0 = find_candidate_sites(base0, acid0, exclude_base_indices, exclude_acid_indices, pH,pH_band=pH_band,verbose=False)
         if verbose:
             print(f'indices0: {indices0}')
 
@@ -846,7 +935,7 @@ def run_pipeline(name,smiles_raw,pH_output=7,cutoff_states=4000,device='cpu',
         mols_lib, smiles_lib = construct_mols(mol0, state_strs, state_vecs, indices, mols_lib, smiles_lib) # pH independent
 
         # Symmetry
-        state_strs, state_freqs = calc_symmetry(state_strs, state_freqs_lib, mols_lib,verbose=verbose)
+        state_strs, state_freqs = calc_symmetry(state_strs, state_freqs_lib, mols_lib, verbose=verbose)
         
         # print(state_strs)
         # print(state_freqs)

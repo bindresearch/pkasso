@@ -5,7 +5,7 @@ def construct_state_vectors_single(indices, q_options, verbose=False):
     state_vec = np.ones((len(indices)),dtype=int) #[1 for _ in indices]
     state_vecs.append(state_vec)
 
-    for rel_idx, at_idx in enumerate(indices):
+    for rel_idx, map_idx in enumerate(indices):
         for q in [0,2]:
             if q_options[q][rel_idx] == 1:
                 state_vec = np.ones((len(indices)),dtype=int) #[1 for _ in indices]
