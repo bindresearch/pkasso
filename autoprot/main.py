@@ -77,6 +77,11 @@ def preprocess(smiles_raw,verbose=False):
 
     return mol, smiles
 
+def match_pattern(mol,pattern):
+    found = mol.HasSubstructMatch(pattern)
+    matches = mol.GetSubstructMatches(pattern)
+    return found, matches
+
 def add_exclusions(mol,verbose=False):
     """ Exclusions act on the q_options level. Exclusions are removed from consideration
     for protonation/deprotonation. This is specified separately for acids and bases.
@@ -97,6 +102,12 @@ def add_exclusions(mol,verbose=False):
     # print([at.GetSymbol() for at in mol.GetAtoms()])
     # print([at.GetSymbol() for at in mol_h.GetAtoms()])
 
+
+    pattern_carbonyl = Chem.MolFromSmarts("NC(=O)")
+    found_carbonyl, matches_carbonyl = match_pattern(mol,pattern_carbonyl)
+    pattern_imine = Chem.MolFromSmarts("NC(=N)")
+    found_imine, matches_imine = match_pattern(mol,pattern_imine)
+
     for at_idx, q in enumerate(q0s):
         atom = mol_h.GetAtomWithIdx(at_idx) 
         map_idx = atom.GetAtomMapNum()
@@ -110,6 +121,24 @@ def add_exclusions(mol,verbose=False):
                 if atom.GetIsAromatic():
                     if atom.GetDegree() == 3: # arom. N with lone pair needed for ring
                         exclude_base_indices.append(map_idx)
+                else:
+                    for match in matches_carbonyl: # ...N-C(=O)...
+                        if atom.GetIdx() in match:
+                            print('Excluding N next to carbonyl as base')
+                            if map_idx not in exclude_base_indices:
+                                exclude_base_indices.append(map_idx)
+                            print(at_idx, map_idx)
+                    for match in matches_imine: # ...N-C(=N)...
+                        if atom.GetIdx() in match:
+                            accept = True
+                            for bond in atom.GetBonds(): # Find the correct of the two Ns
+                                if bond.GetBondType() == Chem.BondType.DOUBLE:
+                                    accept = False
+                            if accept:
+                                print('Excluding N next to imine as base')
+                                if map_idx not in exclude_base_indices:
+                                    exclude_base_indices.append(map_idx)
+                                print(at_idx, map_idx)
 
     exclude_base_indices = sorted(exclude_base_indices)
     exclude_acid_indices = sorted(exclude_acid_indices)
