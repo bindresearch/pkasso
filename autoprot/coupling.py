@@ -7,7 +7,7 @@ def construct_state_vectors_single(indices, q_options, verbose=False):
 
     for rel_idx, map_idx in enumerate(indices):
         for q in [0,2]:
-            if q_options[q][rel_idx] == 1:
+            if q_options[rel_idx][q] == 1:
                 state_vec = np.ones((len(indices)),dtype=int) #[1 for _ in indices]
                 state_vec[rel_idx] = q
                 state_vecs.append(state_vec)
@@ -17,12 +17,12 @@ def compare_pkas(indices, q_options, state_str0, state_str1, base_lib, acid_lib)
     base_pka_diff = np.zeros((len(indices)))
     acid_pka_diff = np.zeros((len(indices)))
     for rel_idx, at_idx in enumerate(indices):
-        if (q_options[2][rel_idx] == 1): # allowed for base
+        if (q_options[rel_idx][2] == 1): # allowed for base
             if (at_idx in base_lib[state_str0]) and (at_idx in base_lib[state_str1]):
                 base_pka_diff[rel_idx] = abs(base_lib[state_str1][at_idx] - base_lib[state_str0][at_idx])
             else:
                 base_pka_diff[rel_idx] = 10. # one disappeared
-        if (q_options[0][rel_idx] == 1): # allowed for acid
+        if (q_options[rel_idx][0] == 1): # allowed for acid
             if (at_idx in acid_lib[state_str0]) and (at_idx in acid_lib[state_str1]):
                 acid_pka_diff[rel_idx] = abs(acid_lib[state_str1][at_idx] - acid_lib[state_str0][at_idx])
             else:
