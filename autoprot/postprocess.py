@@ -8,6 +8,7 @@ from rdkit import Chem
 from rdkit.Chem import AllChem
 from rdkit.Chem.Draw import MolToFile, MolsToGridImage
 
+import copy
 import os
 
 # def get_relevant_states(state_strs, state_freqs_all, mols_lib, cutoff=0.05):
@@ -77,35 +78,51 @@ def plot_pH_scan(name, indices, state_strs_relevant, sfreqs_relevant, pHs, net_c
 
 def export_sdf(name,state_strs,mols_lib,path='output',except_optimize_error=False):
     return_code = 0
+    # params = AllChem.ETKDGv3()
     with Chem.SDWriter(f'{path}/{name}.sdf') as f:
         for e_idx, state_str in enumerate(state_strs):
+            # print(state_str)
             mol = mols_lib[state_str]
             mol_h = Chem.AddHs(mol)
-            if except_optimize_error:
-                try:
-                    AllChem.EmbedMolecule(mol_h, randomSeed=1, useRandomCoords=True)
-                    AllChem.UFFOptimizeMolecule(mol_h)
-                    mol_h.SetProp("_Name", f'{name}_{e_idx}')
-                    f.write(mol_h)
-                except:
-                    print(f'!!! WARNING: Could not rdkit optimize mol {name} {state_str} !!!')
-                    return_code = -1
-            else:
-                AllChem.EmbedMolecule(mol_h, randomSeed=1, useRandomCoords=True)
-                AllChem.UFFOptimizeMolecule(mol_h)
-                mol_h.SetProp("_Name", f'{name}_{e_idx}')
-                f.write(mol_h)
+
+            # if except_optimize_error:
+            #     try:
+            #         AllChem.EmbedMolecule(mol_h, randomSeed=1, useRandomCoords=True)
+            #         AllChem.UFFOptimizeMolecule(mol_h)
+            #         mol_h.SetProp("_Name", f'{name}_{e_idx}')
+            #         f.write(mol_h)
+            #     except:
+            #         print(f'!!! WARNING: Could not rdkit optimize mol {name} {state_str} !!!')
+            #         return_code = -1
+            # else:
+            # cid = AllChem.EmbedMolecule(
+            #     mol_h,
+            #     params)
+            # if cid != 0:
+            #     print(f'WARNING: Need to remove chirality for embedding for {name}_{state_str}!')
+            #     for atom in mol_h.GetAtoms():
+            #         atom.SetChiralTag(Chem.ChiralType.CHI_UNSPECIFIED)
+            # cid = AllChem.EmbedMolecule(
+                # mol_h,
+                # params)
+            cid = AllChem.EmbedMolecule(mol_h, randomSeed=1, useRandomCoords=True)
+            if cid != 0:
+                raise ValueError(f'{name}_{state_str} could not be embedded.')
+            # AllChem.EmbedMolecule(mol_h, randomSeed=1, useRandomCoords=True)
+            AllChem.UFFOptimizeMolecule(mol_h)
+            mol_h.SetProp("_Name", f'{name}_{e_idx}')
+            f.write(mol_h)
     return return_code
 
-def export_smi(name,state_strs,smiles_lib,sfreqs,path='output',fout_smi='out.smi',append=True):
-    if append:
-        action = 'a'
-    else:
-        action = 'w'
-    with open(f'{path}/{fout_smi}',action) as f:
-        for e_idx, (state_str, sfreq) in enumerate(zip(state_strs, sfreqs)):
-            smiles = smiles_lib[state_str]
-            f.write(f'{smiles} {name}_{e_idx} {sfreq/np.sum(sfreqs):.3f}\n')
+# def export_smi(name,state_strs,smiles_lib,sfreqs,path='output',fout_smi='out.smi',append=True):
+#     if append:
+#         action = 'a'
+#     else:
+#         action = 'w'
+#     with open(f'{path}/{fout_smi}',action) as f:
+#         for e_idx, (state_str, sfreq) in enumerate(zip(state_strs, sfreqs)):
+#             smiles = smiles_lib[state_str]
+#             f.write(f'{smiles} {name}_{e_idx} {sfreq/np.sum(sfreqs):.3f}\n')
 
 def export_csv(name,state_strs,smiles_lib,sfreqs,state_qs,path='output',fout_csv='out.csv',append=True):
     if append:
@@ -128,6 +145,10 @@ def export_macro_pkas(name,pkas_combined,path='output'):
 def plot_relevant_states(name, mols_relevant,path='figures',notebook=False):
 
     for mol in mols_relevant: tmp=AllChem.Compute2DCoords(mol)
+
+    # for mol in mols_relevant:
+    #     for atom in mol.GetAtoms():
+    #         atom.SetAtomMapNum(0)
     
     img=MolsToGridImage(mols_relevant,molsPerRow=4,subImgSize=(150,150),legends=[x.GetProp("_Name") for x in mols_relevant],returnPNG=False,useSVG=True)
 

@@ -172,11 +172,11 @@ def find_dGclusters(deltaF):
 def remove_orphans(dG_clusters, state_strs, deltaF):
     nmax = 0
     # print(deltaF.shape)
-    for idx, cluster in enumerate(dG_clusters):
+    for idx, dG_cluster in enumerate(dG_clusters):
         # print(idx, cluster)
-        if len(cluster) > nmax:
+        if len(dG_cluster) > nmax:
             keep_idx = idx
-            nmax = len(cluster)
+            nmax = len(dG_cluster)
     keep_ids = np.array(dG_clusters[keep_idx])
     # print(keep_ids)
 
