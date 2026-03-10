@@ -53,7 +53,7 @@ def preprocess(smiles_raw,verbose=False):
     uncharger = rdMolStandardize.Uncharger(force=True)
     mol = uncharger.uncharge(mol)
     smiles = Chem.MolToSmiles(mol,canonical=True)
-    print(f'after uncharge: {smiles}')
+    # print(f'after uncharge: {smiles}')
 
     mol = Chem.RemoveHs(mol)
 
@@ -420,8 +420,8 @@ def construct_mol(mol0, indices, state_vec):
     for map_idx, q in zip(indices,qs):
         atom = get_atom_with_map_idx(rw, map_idx)
         # atom = rw.GetAtomWithIdx(at_idx)
-        print(map_idx, q)
-        print(atom.GetFormalCharge())
+        # print(map_idx, q)
+        # print(atom.GetFormalCharge())
         atom.SetFormalCharge(int(q))
         if q == -1:
             for nbr in atom.GetNeighbors():
@@ -451,7 +451,7 @@ def construct_mols(mol0, state_strs, state_vecs, indices, mols_lib, smiles_lib):
 
     for state_str, state_vec in zip(state_strs, state_vecs):
         if state_str not in mols_lib:
-            print(indices,state_str,state_vec)
+            # print(indices,state_str,state_vec)
             mol_cand, smiles_cand = construct_mol(mol0, indices, state_vec)
             mol_cand.SetProp("_Name",state_str)
             mols_lib[state_str] = mol_cand
