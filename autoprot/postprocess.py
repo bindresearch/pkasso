@@ -25,7 +25,7 @@ import os
 
 #     return state_strs_relevant, sfreqs_relevant, mols_relevant
 
-def plot_pH_scan(name, indices, state_strs_relevant, sfreqs_relevant, pHs, net_charges, sfreqs_not_relevant, cmap=plt.cm.Spectral,
+def plot_pH_scan(name, indices, state_strs_relevant, sfreqs_relevant, pHs, net_charges, sfreqs_not_relevant, pkas_combined, cmap=plt.cm.Spectral,
                  path='figures',verbose=False):
     
     cmap = plt.cm.Spectral_r
@@ -56,23 +56,34 @@ def plot_pH_scan(name, indices, state_strs_relevant, sfreqs_relevant, pHs, net_c
     elif len(state_strs_relevant) > 1:
         ax[0].legend(ncol=1,fontsize=8)
 
-    ax[0].set(xlabel='pH',ylabel='Distribution %')
-
-    ax[0].set_title(name)
+    ax[0].set(xlabel='pH',ylabel='Distribution [%]')
+    
+    # ax[0].set_title(name)
     ax[0].grid(alpha=0.3)
 
     ax[1].plot(pHs,net_charges,style,color='black')
+
+    for idx, (q, pka) in enumerate(pkas_combined.items()):
+        x = np.argmin(np.abs(pHs-pka))
+        if q+1 > 0:
+            color = 'tab:blue'
+        else:
+            color = 'tab:red'
+        ax[1].plot(pHs[x],net_charges[x],'o',color=color,markersize=5)
+        ax[1].text(pHs[x]+0.1,net_charges[x]+0.05,f'{pka:.2f}')
+
+
     ax[1].set(xlabel='pH', ylabel='Net charge')
     ax[1].grid(alpha=0.3)
 
     if len(pHs) > 1:
         for idx in range(2):
             ax[idx].set(xlim=(pHs[0],pHs[-1]))
-            ax[idx].set_xticks(np.arange(pHs[0],pHs[-1],1))
+            ax[idx].set_xticks(np.arange(pHs[0],pHs[-1]+0.001,1))
 
     fig.tight_layout()
     if fsave != '':
-        fig.savefig(fsave)
+        fig.savefig(fsave, transparent=True)
     plt.close()
     # return fig
 
@@ -134,6 +145,11 @@ def export_csv(name,state_strs,smiles_lib,sfreqs,state_qs,path='output',fout_csv
             f.write(f'name,name_state,SMILES,frequency,charge\n')
         for e_idx, (state_str, sfreq) in enumerate(zip(state_strs, sfreqs)):
             smiles = smiles_lib[state_str]
+            # Remove labels
+            mol = Chem.MolFromSmiles(smiles)
+            for atom in mol.GetAtoms():
+                atom.SetAtomMapNum(0)
+            smiles = Chem.MolToSmiles(mol)
             f.write(f'{name},{name}_{e_idx},{smiles},{sfreq/np.sum(sfreqs):.5f},{state_qs[state_str]}\n')
 
 def export_macro_pkas(name,pkas_combined,path='output'):
@@ -146,11 +162,13 @@ def plot_relevant_states(name, mols_relevant,path='figures',notebook=False):
 
     for mol in mols_relevant: tmp=AllChem.Compute2DCoords(mol)
 
-    # for mol in mols_relevant:
-    #     for atom in mol.GetAtoms():
-    #         atom.SetAtomMapNum(0)
+    for mol in mols_relevant:
+        for atom in mol.GetAtoms():
+            atom.SetAtomMapNum(0)
     
     img=MolsToGridImage(mols_relevant,molsPerRow=4,subImgSize=(150,150),legends=[x.GetProp("_Name") for x in mols_relevant],returnPNG=False,useSVG=True)
+
+    img = img.replace('fill:#FFFFFF', 'fill:none')
 
     with open(f'{path}/{name}_relevant_states.svg','w') as f:
         # f.write(img.data)

@@ -48,23 +48,24 @@ def preprocess(smiles_raw,verbose=False):
 
     # reionizer = rdMolStandardize.Reionizer()
     # mol = reionizer.reionize(mol)
-
-    uncharger = rdMolStandardize.Uncharger()
+    # smiles = Chem.MolToSmiles(mol,canonical=True)
+    # print(f'after cleanup: {smiles}')
+    uncharger = rdMolStandardize.Uncharger(force=True)
     mol = uncharger.uncharge(mol)
     smiles = Chem.MolToSmiles(mol,canonical=True)
-    print(smiles)
+    print(f'after uncharge: {smiles}')
 
     mol = Chem.RemoveHs(mol)
 
-    smiles = Chem.MolToSmiles(mol,canonical=True)
-    print(smiles)
+    # smiles = Chem.MolToSmiles(mol,canonical=True)
+    # print(smiles)
     mol = Chem.MolFromSmiles(smiles, sanitize=True)
-    print([at.GetSymbol() for at in mol.GetAtoms()])
+    # print([at.GetSymbol() for at in mol.GetAtoms()])
 
     smiles = Chem.MolToSmiles(mol,canonical=True)
-    print(smiles)
+    # print(smiles)
     mol = Chem.MolFromSmiles(smiles, sanitize=True)
-    print([at.GetSymbol() for at in mol.GetAtoms()])
+    # print([at.GetSymbol() for at in mol.GetAtoms()])
     smiles = Chem.MolToSmiles(mol,canonical=True)
 
     for atom in mol.GetAtoms():
@@ -96,26 +97,28 @@ def add_exclusions(mol,verbose=False):
     # print([at.GetSymbol() for at in mol.GetAtoms()])
     mol_h = Chem.rdmolops.AddHs(mol)
 
-    for atom in mol_h.GetAtoms():
-        print(atom.GetSymbol(), atom.GetIdx(), atom.GetAtomMapNum())
+    # for atom in mol_h.GetAtoms():
+    #     print(atom.GetSymbol(), atom.GetIdx(), atom.GetAtomMapNum())
 
     # print([at.GetSymbol() for at in mol.GetAtoms()])
     # print([at.GetSymbol() for at in mol_h.GetAtoms()])
-
 
     pattern_carbonyl = Chem.MolFromSmarts("NC(=O)")
     found_carbonyl, matches_carbonyl = match_pattern(mol,pattern_carbonyl)
     pattern_imine = Chem.MolFromSmarts("NC(=N)")
     found_imine, matches_imine = match_pattern(mol,pattern_imine)
+    pattern_sulfonamide = Chem.MolFromSmarts("NS(=O)(=O)")
+    found_sulfonamide, matches_sulfonamide = match_pattern(mol,pattern_sulfonamide)
 
     for at_idx, q in enumerate(q0s):
         atom = mol_h.GetAtomWithIdx(at_idx) 
         map_idx = atom.GetAtomMapNum()
-        if q != 0.:
-            print(f'NOTE: Input molecule is charged at idx {at_idx}!')
-            exclude_acid_indices.append(map_idx)
-            exclude_base_indices.append(map_idx)
-        else:
+        # if q != 0.: # MOVE TO EXCEPTIONS
+        #     print(f'NOTE: Input molecule is charged at idx {at_idx}!')
+        #     exclude_acid_indices.append(map_idx)
+        #     exclude_base_indices.append(map_idx)
+        # else:
+        if q == 0.:
             # atom = mol_h.GetAtomWithIdx(at_idx)
             if atom.GetSymbol() == 'N':
                 if atom.GetIsAromatic():
@@ -139,6 +142,12 @@ def add_exclusions(mol,verbose=False):
                                 if map_idx not in exclude_base_indices:
                                     exclude_base_indices.append(map_idx)
                                 print(at_idx, map_idx)
+                    for match in matches_sulfonamide:
+                        if atom.GetIdx() in match:
+                            print('Excluding N next to sulfonamide as base')
+                            if map_idx not in exclude_base_indices:
+                                exclude_base_indices.append(map_idx)
+                            print(at_idx, map_idx)
 
     exclude_base_indices = sorted(exclude_base_indices)
     exclude_acid_indices = sorted(exclude_acid_indices)
@@ -150,12 +159,26 @@ def add_exceptions(mol,verbose=False):
     possibly with special rules (e.g. hard-coded phosphates).
     This does not remove (exclude) the (de)protonation per se."""
 
+    except_indices = []
+
+    # Except everything that couldn't be neutralized
+    q0s = np.array([at.GetFormalCharge() for at in mol.GetAtoms()])
+    for at_idx, q in enumerate(q0s):
+        atom = mol.GetAtomWithIdx(at_idx) 
+        map_idx = atom.GetAtomMapNum()
+        if q != 0.: # MOVE TO EXCEPTIONS
+            print(f'NOTE: Input molecule is charged at idx {at_idx}, map_idx {map_idx}!')
+            if map_idx not in except_indices:
+                except_indices.append(map_idx)
+
+        #     exclude_acid_indices.append(map_idx)
+        #     exclude_base_indices.append(map_idx)
+
     # print([at.GetSymbol() for at in mol.GetAtoms()])
     phosphate_found, phosphate_groups = has_phosphate(mol) # returns map indices
     # print([at.GetSymbol() for at in mol.GetAtoms()])
 
     # deprotonate_ohs = []
-    except_indices = []
 
     if phosphate_found:
         # ids_phosphate = phosphate_matches(mol)
@@ -168,8 +191,8 @@ def add_exceptions(mol,verbose=False):
                 if map_idx not in except_indices:
                     except_indices.append(map_idx)
 
-    for atom in mol.GetAtoms():
-        print(atom.GetSymbol(), atom.GetIdx(), atom.GetAtomMapNum())
+    # for atom in mol.GetAtoms():
+    #     print(atom.GetSymbol(), atom.GetIdx(), atom.GetAtomMapNum())
 
     return except_indices, phosphate_groups
 
@@ -389,14 +412,16 @@ def construct_mol(mol0, indices, state_vec):
     
     rw = Chem.RWMol(Chem.AddHs(mol_cand))
 
-    print(indices)
-    print(qs)
+    # print(indices)
+    # print(qs)
 
-    print(smiles_cand)
-    print([at.GetSymbol() for at in mol_cand.GetAtoms()])
+    # print(smiles_cand)
+    # print([at.GetSymbol() for at in mol_cand.GetAtoms()])
     for map_idx, q in zip(indices,qs):
         atom = get_atom_with_map_idx(rw, map_idx)
         # atom = rw.GetAtomWithIdx(at_idx)
+        print(map_idx, q)
+        print(atom.GetFormalCharge())
         atom.SetFormalCharge(int(q))
         if q == -1:
             for nbr in atom.GetNeighbors():
@@ -409,7 +434,7 @@ def construct_mol(mol0, indices, state_vec):
     mol_cand = Chem.RemoveHs(rw)
     Chem.SanitizeMol(mol_cand)
     smiles_cand = Chem.MolToSmiles(mol_cand, canonical=False)
-    print(smiles_cand)
+    # print(smiles_cand)
     # mol_cand = Chem.MolFromSmiles(smiles_cand, sanitize=True)
     # print([at.GetSymbol() for at in mol_cand.GetAtoms()])
     # smiles_cand = Chem.MolToSmiles(mol_cand, canonical=False)
@@ -426,6 +451,7 @@ def construct_mols(mol0, state_strs, state_vecs, indices, mols_lib, smiles_lib):
 
     for state_str, state_vec in zip(state_strs, state_vecs):
         if state_str not in mols_lib:
+            print(indices,state_str,state_vec)
             mol_cand, smiles_cand = construct_mol(mol0, indices, state_vec)
             mol_cand.SetProp("_Name",state_str)
             mols_lib[state_str] = mol_cand
@@ -656,9 +682,9 @@ def combine_clusters(state_strs_clusters, state_freqs_clusters, indices_clusters
     cluster_state_ids = []
 
     # print(state_freqs_clusters)
-
-    print(state_strs_clusters)
-    print(state_freqs_clusters)
+    if verbose:
+        print(state_strs_clusters)
+        print(state_freqs_clusters)
 
     for state_freqs in state_freqs_clusters:
         cluster_state_ids.append([])
@@ -710,7 +736,7 @@ def combine_clusters(state_strs_clusters, state_freqs_clusters, indices_clusters
 def calc_relevant_states(state_freqs_all, mols_lib, max_states=18,verbose=False):
     """ Reduce number of states to max_states for plotting """
 
-    cutoff = 0.05
+    cutoff = 0.01
     tries = 0
     if len(state_freqs_all.keys()) == 0:
         return 0, [], [], []
@@ -833,8 +859,8 @@ def check_chiral_consistency(state_strs,mols_lib,smiles_lib):
     # params = AllChem.ETKDGv3()
     for state_str in state_strs:
         mol = mols_lib[state_str]
-        print(state_str)
-        print(Chem.MolToSmiles(mol))
+        # print(state_str)
+        # print(Chem.MolToSmiles(mol))
         mol_h = Chem.AddHs(mol)
         # cid = AllChem.EmbedMolecule(
                 # mol_h,
@@ -854,7 +880,7 @@ def check_chiral_consistency(state_strs,mols_lib,smiles_lib):
             atom.SetChiralTag(Chem.ChiralType.CHI_UNSPECIFIED)
         
         smiles = Chem.MolToSmiles(mol)
-        print(smiles)
+        # print(smiles)
         mols_lib[state_str] = mol
         smiles_lib[state_str] = smiles
     return mols_lib, smiles_lib
@@ -865,6 +891,8 @@ def run_pipeline(name,smiles_raw,pH_output=7,cutoff_states=4000,device='cpu',
                  verbose=False,cutoff_export=0.5,
                  fout_csv='out.csv',append=True,notebook=False,
                  except_optimize_error=False,
+                 sfreq_cutoff_individual=0.01,
+                 sfreq_cutoff_combined=0.001,
                  matrix_def='msm',export_opti_sdf=False):
                 #  write_all_relevant=False):
     if verbose:
@@ -911,8 +939,8 @@ def run_pipeline(name,smiles_raw,pH_output=7,cutoff_states=4000,device='cpu',
 
     mol0_h = Chem.rdmolops.AddHs(mol0)
 
-    for atom in mol0_h.GetAtoms():
-        print(atom.GetSymbol(), atom.GetIdx(), atom.GetAtomMapNum())
+    # for atom in mol0_h.GetAtoms():
+    #     print(atom.GetSymbol(), atom.GetIdx(), atom.GetAtomMapNum())
 
     base0, acid0 = predict_acid_base(mol0_h,model_base,model_acid,device=device,verbose=verbose) # returns pkas for map indices
 
@@ -930,8 +958,9 @@ def run_pipeline(name,smiles_raw,pH_output=7,cutoff_states=4000,device='cpu',
 
         indices0, q_options0 = split_exceptions(indices0, q_options0, except_indices)
 
-        print(f'curated indices0: {indices0}')
-        print(f'curated q_options0: {q_options0}')
+        if verbose:
+            print(f'curated indices0: {indices0}')
+            print(f'curated q_options0: {q_options0}')
 
         # Screen coupling between residues
         clusters, mols_lib, base_lib, acid_lib = screen_clusters(indices0, q_options0, mol0, mols_lib, smiles_lib, 
@@ -985,12 +1014,12 @@ def run_pipeline(name,smiles_raw,pH_output=7,cutoff_states=4000,device='cpu',
             elif matrix_def == 'dG':
                 dGmatrix = calc_dGmatrix(state_vecs,state_strs,ps_all,N_states)
                 dG_clusters = find_dGclusters(dGmatrix)
-                print(dGmatrix)
-                print(f'state_strs before orphan state removal')
-                print(state_strs)
+                # print(dGmatrix)
+                # print(f'state_strs before orphan state removal')
+                # print(state_strs)
                 state_strs, dGmatrix = remove_orphans(dG_clusters, state_strs, dGmatrix)
-                print(f'state_strs after orphan state removal')
-                print(state_strs)
+                # print(f'state_strs after orphan state removal')
+                # print(state_strs)
                 is_connected = check_connectivity(dGmatrix)
                 if not is_connected:
                     raise ValueError('Matrix not connected')
@@ -1011,7 +1040,9 @@ def run_pipeline(name,smiles_raw,pH_output=7,cutoff_states=4000,device='cpu',
                 indices_clusters.append(oh_ids)
 
         indices, state_strs, state_freqs_lib = combine_clusters(
-            state_strs_clusters, state_freqs_clusters, indices_clusters, verbose=verbose)
+            state_strs_clusters, state_freqs_clusters, indices_clusters, 
+            sfreq_cutoff_individual=sfreq_cutoff_individual,sfreq_cutoff_combined=sfreq_cutoff_combined,
+            verbose=verbose)
 
         state_vecs = [unpack_vec(state_str) for state_str in state_strs]
         mols_lib, smiles_lib = construct_mols(mol0, state_strs, state_vecs, indices, mols_lib, smiles_lib) # pH independent
@@ -1071,9 +1102,9 @@ def run_pipeline(name,smiles_raw,pH_output=7,cutoff_states=4000,device='cpu',
                     print(e_idx, state_str, sfreq)
             # export_smi(name,state_strs_export,smiles_lib,state_freqs_export,path=path_out,fout_smi=fout_smi,append=append)
             export_csv(name,state_strs_export,smiles_lib,state_freqs_export,state_qs,path=path_out,fout_csv=fout_csv,append=append)
-            return_code = export_sdf(name,state_strs_export,mols_lib,path=path_out,except_optimize_error=except_optimize_error)
             # export_smi(name_state,smiles_lib[state_str_opti],path=path_out)
             if export_opti_sdf:
+                return_code = export_sdf(name,state_strs_export,mols_lib,path=path_out,except_optimize_error=except_optimize_error)
                 plot_optimal_state(name,mols_lib[state_strs_export[0]],path=path_figs)
             if verbose:
                 print(f'Optimal smiles for pH {pH}: {smiles_lib[state_str_opti]}')
@@ -1121,13 +1152,13 @@ def run_pipeline(name,smiles_raw,pH_output=7,cutoff_states=4000,device='cpu',
         # for pH, net_charge in zip(pHs, net_charges):
             # f.write(f'{pH:.2f} {net_charge:.3f}\n')
 
-    print(state_freqs_all)
+    # print(state_freqs_all)
 
     # reduce number of microstates for plotting
     N_relevant_states, state_strs_relevant, sfreqs_relevant, mols_relevant, sfreqs_not_relevant = calc_relevant_states(state_freqs_all, mols_lib, verbose=verbose)
 
     if N_relevant_states > 0:
-        plot_pH_scan(name, indices, state_strs_relevant, sfreqs_relevant, pHs, net_charges, sfreqs_not_relevant, path=path_figs,verbose=verbose)
+        plot_pH_scan(name, indices, state_strs_relevant, sfreqs_relevant, pHs, net_charges, sfreqs_not_relevant, pkas_combined, path=path_figs,verbose=verbose)
         plot_relevant_states(name, mols_relevant, path=path_figs,notebook=notebook)
         compose_image(name,N_relevant_states, path=path_figs)
     return return_code
