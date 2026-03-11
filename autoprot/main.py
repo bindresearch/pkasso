@@ -290,20 +290,6 @@ def calc_phosphate_clusters(phosphate_groups,pH,matrix_def,
         
         state_strs, state_freqs = calc_freqs_from_states(state_strs,state_vecs,ps_all,matrix_def)
 
-        # N_states = len(state_vecs)
-        # if matrix_def == 'msm':
-        #     tmatrix = calc_tmatrix(state_strs,state_vecs,ps_all,N_states)
-        #     state_freqs = calc_state_freqs_sparse(tmatrix)
-        # elif matrix_def == 'dG':
-        #     dGmatrix = calc_dGmatrix(state_strs,state_vecs,ps_all,N_states)
-        #     dG_clusters = find_dGclusters(dGmatrix)
-        #     state_strs, dGmatrix = remove_orphans(dG_clusters, state_strs, dGmatrix)
-        #     is_connected = check_connectivity(dGmatrix)
-        #     if not is_connected:
-        #         raise ValueError('Matrix not connected')
-        #     Fs = reconstruct_free_energies_incomplete_half(dGmatrix)
-        #     state_freqs = calc_populations(Fs)
-
         state_strs_poh.append(state_strs)
         state_freqs_poh.append(state_freqs)
         oh_ids_poh.append(oh_ids)
@@ -634,7 +620,7 @@ def screen_clusters(indices0, q_options0, mol0, mols_lib, smiles_lib,
             N_states = len(state_vecs)
             if N_states > cutoff_states: # This should never happen, as construct_state_vectors should return an empty list in that case.
                 raise
-            if (N_states == 0):# or (N_states > cutoff_states):
+            if (N_states == 0):
                 accept_clusters = False
                 coupling_cutoff += 0.2
     if coupling_cutoff > 1.5:
@@ -723,8 +709,8 @@ def calc_freqs_from_states(state_strs,state_vecs,ps_all,matrix_def):
         is_connected = check_connectivity(dGmatrix)
         if not is_connected:
             raise ValueError('Matrix not connected')
-        Fs = reconstruct_free_energies_incomplete_half(dGmatrix)
-        state_freqs = calc_populations(Fs)
+        Gs = reconstruct_free_energies_incomplete_half(dGmatrix)
+        state_freqs = calc_populations(Gs)
 
     return state_strs, state_freqs
 
@@ -945,37 +931,6 @@ def run_pipeline(
             make_pH_specific_output(state_strs, state_freqs, cutoff_export,pH,mols_lib,smiles_lib,
                             name, state_qs, path_out, fout_csv, append, export_opti_sdf, path_figs,
                             verbose=verbose)
-            # # Max freq
-            # idx_max = np.argmax(state_freqs)
-            # state_freq_max = np.max(state_freqs)
-            # state_str_opti = state_strs[idx_max]
-
-            # # Select states for pH-specific export
-            # state_strs_export = []
-            # state_freqs_export = []
-            # for state_str, state_freq in zip(state_strs, state_freqs):
-            #     if state_freq > cutoff_export * state_freq_max: # Include all high prob states
-            #         state_strs_export.append(state_str)
-            #         state_freqs_export.append(state_freq)
-
-            # state_freqs_export = np.array(state_freqs_export)
-            # ps = np.argsort(state_freqs_export)[::-1] # Sort by highest probability
-
-            # state_freqs_export = state_freqs_export[ps]
-            # state_strs_export = [state_strs_export[p] for p in ps]
-
-            # mols_lib, smiles_lib = check_chiral_consistency(state_strs_export,mols_lib,smiles_lib)
-
-            # if verbose:
-            #     print(f'Export at pH {pH_output}:',flush=True)
-            #     for e_idx, (state_str, sfreq) in enumerate(zip(state_strs_export, state_freqs_export)):
-            #         print(e_idx, state_str, sfreq)
-            # export_csv(name,state_strs_export,smiles_lib,state_freqs_export,state_qs,path=path_out,fout_csv=fout_csv,append=append)
-            # if export_opti_sdf:
-            #     return_code = export_sdf(name,state_strs_export,mols_lib,path=path_out,except_optimize_error=except_optimize_error)
-            #     plot_optimal_state(name,mols_lib[state_strs_export[0]],path=path_figs)
-            # if verbose:
-            #     print(f'Optimal smiles for pH {pH}: {smiles_lib[state_str_opti]}')
 
     # Plotting of pH scan
     net_charges = np.round(np.array(net_charges),decimals=4)
