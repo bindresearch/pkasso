@@ -11,20 +11,6 @@ from rdkit.Chem.Draw import MolToFile, MolsToGridImage
 import copy
 import os
 
-# def get_relevant_states(state_strs, state_freqs_all, mols_lib, cutoff=0.05):
-#     state_strs_relevant = []
-#     sfreqs = state_freqs_all.T
-#     sfreqs_relevant = []
-#     mols_relevant = []
-    
-#     for idx, (state_str, sfreq) in enumerate(zip(state_strs,sfreqs)):
-#         if np.max(sfreq) > cutoff:
-#             state_strs_relevant.append(state_str)
-#             sfreqs_relevant.append(sfreq)
-#             mols_relevant.append(mols_lib[state_str])
-
-#     return state_strs_relevant, sfreqs_relevant, mols_relevant
-
 def plot_pH_scan(name, indices, state_strs_relevant, sfreqs_relevant, pHs, net_charges, sfreqs_not_relevant, pkas_combined, cmap=plt.cm.Spectral,
                  path='figures',verbose=False):
     
@@ -58,7 +44,6 @@ def plot_pH_scan(name, indices, state_strs_relevant, sfreqs_relevant, pHs, net_c
 
     ax[0].set(xlabel='pH',ylabel='Distribution [%]')
     
-    # ax[0].set_title(name)
     ax[0].grid(alpha=0.3)
 
     ax[1].plot(pHs,net_charges,style,color='black')
@@ -87,53 +72,18 @@ def plot_pH_scan(name, indices, state_strs_relevant, sfreqs_relevant, pHs, net_c
     plt.close()
     # return fig
 
-def export_sdf(name,state_strs,mols_lib,path='output',except_optimize_error=False):
-    return_code = 0
-    # params = AllChem.ETKDGv3()
+def export_sdf(name,state_strs,mols_lib,path='output'):
     with Chem.SDWriter(f'{path}/{name}.sdf') as f:
         for e_idx, state_str in enumerate(state_strs):
-            # print(state_str)
             mol = mols_lib[state_str]
             mol_h = Chem.AddHs(mol)
 
-            # if except_optimize_error:
-            #     try:
-            #         AllChem.EmbedMolecule(mol_h, randomSeed=1, useRandomCoords=True)
-            #         AllChem.UFFOptimizeMolecule(mol_h)
-            #         mol_h.SetProp("_Name", f'{name}_{e_idx}')
-            #         f.write(mol_h)
-            #     except:
-            #         print(f'!!! WARNING: Could not rdkit optimize mol {name} {state_str} !!!')
-            #         return_code = -1
-            # else:
-            # cid = AllChem.EmbedMolecule(
-            #     mol_h,
-            #     params)
-            # if cid != 0:
-            #     print(f'WARNING: Need to remove chirality for embedding for {name}_{state_str}!')
-            #     for atom in mol_h.GetAtoms():
-            #         atom.SetChiralTag(Chem.ChiralType.CHI_UNSPECIFIED)
-            # cid = AllChem.EmbedMolecule(
-                # mol_h,
-                # params)
             cid = AllChem.EmbedMolecule(mol_h, randomSeed=1, useRandomCoords=True)
             if cid != 0:
                 raise ValueError(f'{name}_{state_str} could not be embedded.')
-            # AllChem.EmbedMolecule(mol_h, randomSeed=1, useRandomCoords=True)
             AllChem.UFFOptimizeMolecule(mol_h)
             mol_h.SetProp("_Name", f'{name}_{e_idx}')
             f.write(mol_h)
-    return return_code
-
-# def export_smi(name,state_strs,smiles_lib,sfreqs,path='output',fout_smi='out.smi',append=True):
-#     if append:
-#         action = 'a'
-#     else:
-#         action = 'w'
-#     with open(f'{path}/{fout_smi}',action) as f:
-#         for e_idx, (state_str, sfreq) in enumerate(zip(state_strs, sfreqs)):
-#             smiles = smiles_lib[state_str]
-#             f.write(f'{smiles} {name}_{e_idx} {sfreq/np.sum(sfreqs):.3f}\n')
 
 def export_csv(name,state_strs,smiles_lib,sfreqs,state_qs,path='output',fout_csv='out.csv',append=True):
     if append:
@@ -171,7 +121,6 @@ def plot_relevant_states(name, mols_relevant,path='figures',notebook=False):
     img = img.replace('fill:#FFFFFF', 'fill:none')
 
     with open(f'{path}/{name}_relevant_states.svg','w') as f:
-        # f.write(img.data)
         if notebook:
             f.write(img.data)
         else:

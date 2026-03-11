@@ -31,7 +31,6 @@ def preprocess(smiles_raw,verbose=False):
         print('Raw:')
         print(smiles_raw)
     mol = Chem.MolFromSmiles(smiles_raw, sanitize=True)
-    # print(mol)
     smiles = Chem.MolToSmiles(mol,canonical=True)
     
     if verbose:
@@ -45,27 +44,14 @@ def preprocess(smiles_raw,verbose=False):
         print(charges)
 
     mol = rdMolStandardize.Cleanup(mol)
-
-    # reionizer = rdMolStandardize.Reionizer()
-    # mol = reionizer.reionize(mol)
-    # smiles = Chem.MolToSmiles(mol,canonical=True)
-    # print(f'after cleanup: {smiles}')
     uncharger = rdMolStandardize.Uncharger(force=True)
+
+    # load/save cycles to clean up the mol atom ordering
     mol = uncharger.uncharge(mol)
     smiles = Chem.MolToSmiles(mol,canonical=True)
-    # print(f'after uncharge: {smiles}')
-
-    mol = Chem.RemoveHs(mol)
-
-    # smiles = Chem.MolToSmiles(mol,canonical=True)
-    # print(smiles)
     mol = Chem.MolFromSmiles(smiles, sanitize=True)
-    # print([at.GetSymbol() for at in mol.GetAtoms()])
-
     smiles = Chem.MolToSmiles(mol,canonical=True)
-    # print(smiles)
     mol = Chem.MolFromSmiles(smiles, sanitize=True)
-    # print([at.GetSymbol() for at in mol.GetAtoms()])
     smiles = Chem.MolToSmiles(mol,canonical=True)
 
     for atom in mol.GetAtoms():
@@ -88,20 +74,13 @@ def add_exclusions(mol,verbose=False):
     for protonation/deprotonation. This is specified separately for acids and bases.
     For example, only a protonation event could be excluded for a given index,
     but not the deprotonation event.
-    This does not mess with the indices or cluster splitting"""
+    This does not affect the indices or cluster splitting"""
+
     q0s = np.array([at.GetFormalCharge() for at in mol.GetAtoms()])
 
     exclude_acid_indices = []
     exclude_base_indices = []
-    # exclude_indices = []
-    # print([at.GetSymbol() for at in mol.GetAtoms()])
     mol_h = Chem.rdmolops.AddHs(mol)
-
-    # for atom in mol_h.GetAtoms():
-    #     print(atom.GetSymbol(), atom.GetIdx(), atom.GetAtomMapNum())
-
-    # print([at.GetSymbol() for at in mol.GetAtoms()])
-    # print([at.GetSymbol() for at in mol_h.GetAtoms()])
 
     pattern_carbonyl = Chem.MolFromSmarts("NC(=O)")
     found_carbonyl, matches_carbonyl = match_pattern(mol,pattern_carbonyl)
@@ -113,11 +92,7 @@ def add_exclusions(mol,verbose=False):
     for at_idx, q in enumerate(q0s):
         atom = mol_h.GetAtomWithIdx(at_idx) 
         map_idx = atom.GetAtomMapNum()
-        # if q != 0.: # MOVE TO EXCEPTIONS
-        #     print(f'NOTE: Input molecule is charged at idx {at_idx}!')
-        #     exclude_acid_indices.append(map_idx)
-        #     exclude_base_indices.append(map_idx)
-        # else:
+
         if q == 0.:
             # atom = mol_h.GetAtomWithIdx(at_idx)
             if atom.GetSymbol() == 'N':
@@ -166,19 +141,12 @@ def add_exceptions(mol,verbose=False):
     for at_idx, q in enumerate(q0s):
         atom = mol.GetAtomWithIdx(at_idx) 
         map_idx = atom.GetAtomMapNum()
-        if q != 0.: # MOVE TO EXCEPTIONS
+        if q != 0.:
             print(f'NOTE: Input molecule is charged at idx {at_idx}, map_idx {map_idx}!')
             if map_idx not in except_indices:
                 except_indices.append(map_idx)
 
-        #     exclude_acid_indices.append(map_idx)
-        #     exclude_base_indices.append(map_idx)
-
-    # print([at.GetSymbol() for at in mol.GetAtoms()])
     phosphate_found, phosphate_groups = has_phosphate(mol) # returns map indices
-    # print([at.GetSymbol() for at in mol.GetAtoms()])
-
-    # deprotonate_ohs = []
 
     if phosphate_found:
         # ids_phosphate = phosphate_matches(mol)
@@ -191,43 +159,24 @@ def add_exceptions(mol,verbose=False):
                 if map_idx not in except_indices:
                     except_indices.append(map_idx)
 
-    # for atom in mol.GetAtoms():
-    #     print(atom.GetSymbol(), atom.GetIdx(), atom.GetAtomMapNum())
-
     return except_indices, phosphate_groups
 
 
 def has_phosphate(mol):
 
-    # patterns = [
-        # Chem.MolFromSmarts("P(=O)(O)(O)"),
-        # Chem.MolFromSmarts("P(=O)(O)(O)O"),
-        # Chem.MolFromSmarts("P(=O)(O)([O-])"),
-        # Chem.MolFromSmarts("P(=O)(O)([O-])O"),
-        # Chem.MolFromSmarts("P(=O)([O-])([O-])"),
-        # Chem.MolFromSmarts("P(=O)([O-])([O-])O"),
-    # ]
-
     pattern = Chem.MolFromSmarts("P(=O)(O)(O)")
-
-    # found = any(mol.HasSubstructMatch(p) for p in patterns)
-    # matches = [mol.GetSubstructMatches(p) for p in patterns]
 
     found = mol.HasSubstructMatch(pattern)
     matches = mol.GetSubstructMatches(pattern)
 
-    # print(f'matches: ', matches)
-
     phosphate_groups = {}
 
     for match in matches:
-        # poh_indices = []
         # Find central P of phosphate
         for idx in match:
             atom = mol.GetAtomWithIdx(idx)
             if atom.GetSymbol() == "P":
                 p_map_idx = atom.GetAtomMapNum()
-                # p_idx = idx
                 if p_map_idx not in phosphate_groups:
                     phosphate_groups[p_map_idx] = []
         # Find protonable O of phosphate
@@ -252,12 +201,6 @@ def find_candidate_sites(base,acid,exclude_base_indices,exclude_acid_indices,pH,
     indices = list(sorted(set(prot_candidates + deprot_candidates)))
     if verbose:
         print(f'relevant indices: {indices}')
-
-    # for idx in exclude_indices:
-        # if idx in indices:
-            # indices.remove(idx)
-    # if verbose:
-        # print(f'relevant indices (after exclusion): {indices}')
 
     q_options = np.zeros((len(indices),3)) # deprot=0, stay=1, prot=2
     for rel_idx, map_idx in enumerate(indices):
@@ -344,41 +287,33 @@ def calc_phosphate_clusters(phosphate_groups,pH,matrix_def,
         
         ps_all = calc_state_pkas(state_strs, state_vecs, base_lib_poh, acid_lib_poh, oh_ids, 
                                     pH=pH,matrix_def=matrix_def,verbose=verbose)
-        N_states = len(state_vecs)
-        if matrix_def == 'msm':
-            tmatrix = calc_tmatrix(state_vecs,state_strs,ps_all,N_states)
-            state_freqs = calc_state_freqs_sparse(tmatrix)
-        elif matrix_def == 'dG':
-            dGmatrix = calc_dGmatrix(state_vecs,state_strs,ps_all,N_states)
-            # print(dGmatrix)
-            # Fs = calc_Fs(dGmatrix)
-            # print(dGmatrix)
-            dG_clusters = find_dGclusters(dGmatrix)
-            # print(dG_clusters)
-            state_strs, dGmatrix = remove_orphans(dG_clusters, state_strs, dGmatrix)
-            # print(state_strs, dGmatrix)
-            is_connected = check_connectivity(dGmatrix)
-            if not is_connected:
-                raise ValueError('Matrix not connected')
-            Fs = reconstruct_free_energies_incomplete_half(dGmatrix)
-            # print(Fs)
-            state_freqs = calc_populations(Fs)
+        
+        state_strs, state_freqs = calc_freqs_from_states(state_strs,state_vecs,ps_all,matrix_def)
+
+        # N_states = len(state_vecs)
+        # if matrix_def == 'msm':
+        #     tmatrix = calc_tmatrix(state_strs,state_vecs,ps_all,N_states)
+        #     state_freqs = calc_state_freqs_sparse(tmatrix)
+        # elif matrix_def == 'dG':
+        #     dGmatrix = calc_dGmatrix(state_strs,state_vecs,ps_all,N_states)
+        #     dG_clusters = find_dGclusters(dGmatrix)
+        #     state_strs, dGmatrix = remove_orphans(dG_clusters, state_strs, dGmatrix)
+        #     is_connected = check_connectivity(dGmatrix)
+        #     if not is_connected:
+        #         raise ValueError('Matrix not connected')
+        #     Fs = reconstruct_free_energies_incomplete_half(dGmatrix)
+        #     state_freqs = calc_populations(Fs)
 
         state_strs_poh.append(state_strs)
         state_freqs_poh.append(state_freqs)
         oh_ids_poh.append(oh_ids)
-        # tmatrix = calc_tmatrix(state_vecs, state_strs,ps_all, N_states)
-        # state_freqs = calc_state_freqs_sparse(tmatrix)
+
     return state_strs_poh, state_freqs_poh, oh_ids_poh
 
 
 def construct_state_vectors(q_options, cutoff_states, verbose=False):
     """ Enumerate all combinations of state_vectors allowed by q_options """
 
-    # print('Constructing state vectors...')
-    # tfs = np.array(list(itertools.product([0,1,2], repeat=len(indices))))
-    # tfs = itertools.product([0,1,2], repeat=len(indices))
-    
     q_options_nonzero = []
     for rel_idx, qs in enumerate(q_options):
         q_col = []
@@ -392,7 +327,7 @@ def construct_state_vectors(q_options, cutoff_states, verbose=False):
     if N_trial_vecs > cutoff_states:
         return []
     else:
-        state_vecs = np.array(list(itertools.product(*q_options_nonzero)))#[0,1,2], repeat=len(indices))
+        state_vecs = np.array(list(itertools.product(*q_options_nonzero)))
         return state_vecs
 
 def get_atom_with_map_idx(mol, map_idx):
@@ -412,16 +347,8 @@ def construct_mol(mol0, indices, state_vec):
     
     rw = Chem.RWMol(Chem.AddHs(mol_cand))
 
-    # print(indices)
-    # print(qs)
-
-    # print(smiles_cand)
-    # print([at.GetSymbol() for at in mol_cand.GetAtoms()])
     for map_idx, q in zip(indices,qs):
         atom = get_atom_with_map_idx(rw, map_idx)
-        # atom = rw.GetAtomWithIdx(at_idx)
-        # print(map_idx, q)
-        # print(atom.GetFormalCharge())
         atom.SetFormalCharge(int(q))
         if q == -1:
             for nbr in atom.GetNeighbors():
@@ -429,20 +356,9 @@ def construct_mol(mol0, indices, state_vec):
                     rw.RemoveAtom(nbr.GetIdx())
                     break
 
-    # print(Chem.MolToSmiles(rw))
-
     mol_cand = Chem.RemoveHs(rw)
     Chem.SanitizeMol(mol_cand)
     smiles_cand = Chem.MolToSmiles(mol_cand, canonical=False)
-    # print(smiles_cand)
-    # mol_cand = Chem.MolFromSmiles(smiles_cand, sanitize=True)
-    # print([at.GetSymbol() for at in mol_cand.GetAtoms()])
-    # smiles_cand = Chem.MolToSmiles(mol_cand, canonical=False)
-    # mol_cand = Chem.MolFromSmiles(smiles_cand, sanitize=True)
-    # print([at.GetSymbol() for at in mol_cand.GetAtoms()])
-    
-    # for atom in mol_cand.GetAtoms():
-        # print(atom.GetSymbol(), atom.GetIdx(), atom.GetAtomMapNum())
 
     return mol_cand, smiles_cand
     
@@ -466,107 +382,67 @@ def calc_charge(pka,pH=7.):
 
 def run_acid_base_calc(state_strs,state_vecs,indices,mols_lib,model_base,model_acid,base_lib,acid_lib,device='cpu',verbose=False):
     """ Add base and acid calculation results for all state_strs into base_lib and acid_lib """
-    # print(indices)
+
     for state_str, state_vec in zip(state_strs,state_vecs):
-        if state_str not in base_lib:
-            if verbose:
-                print(state_str)
+        if state_str in base_lib:
+            continue
 
-            state_vec_base = np.maximum(state_vec,1)
-            state_str_base = pack_vec(state_vec_base)
+        if verbose:
+            print(state_str)
 
-            # print(f'Using base state_str: {state_str_base}')
+        state_vec_base = np.maximum(state_vec,1) # disregard de-protonations of other sites to assess base probability
+        state_str_base = pack_vec(state_vec_base)
 
-            mol_base = mols_lib[state_str_base]
-            mol_base_h = Chem.rdmolops.AddHs(mol_base)
+        mol_base = mols_lib[state_str_base]
+        mol_base_h = Chem.rdmolops.AddHs(mol_base)
 
-            base_tmp, _ = predict_acid_base(mol_base_h,model_base,model_acid,device=device,
-                                        pred_acid=False,verbose=verbose)
-            base = {}
-            for map_idx, b in base_tmp.items():
-                if map_idx not in indices:
-                    continue
-                rel_idx = indices.index(map_idx)
-                if state_vec[rel_idx] == 1:
-                    base[map_idx] = b
+        base_tmp, _ = predict_acid_base(mol_base_h,model_base,model_acid,device=device,
+                                    pred_acid=False,verbose=verbose)
+        base = {}
+        for map_idx, b in base_tmp.items():
+            if map_idx not in indices:
+                continue
+            rel_idx = indices.index(map_idx)
+            if state_vec[rel_idx] == 1: # Only consider predicted protonation/de-protonation predictions from neutral state
+                base[map_idx] = b
 
-            state_vec_acid = np.minimum(state_vec,1)
-            state_str_acid = pack_vec(state_vec_acid)
+        state_vec_acid = np.minimum(state_vec,1) # disregard protonations of other sites to assess acid probability
+        state_str_acid = pack_vec(state_vec_acid)
 
-            # print(f'Using acid state_str: {state_str_acid}')
+        mol_acid = mols_lib[state_str_acid]
+        mol_acid_h = Chem.rdmolops.AddHs(mol_acid)
 
-            mol_acid = mols_lib[state_str_acid]
-            mol_acid_h = Chem.rdmolops.AddHs(mol_acid)
+        _, acid_tmp = predict_acid_base(mol_acid_h,model_base,model_acid,device=device,
+                                        pred_base=False,verbose=verbose)
+        
+        acid = {}
+        for map_idx, a in acid_tmp.items():
+            if map_idx not in indices:
+                continue
+            rel_idx = indices.index(map_idx)
+            if state_vec[rel_idx] == 1: # Only consider predicted protonation/de-protonation predictions from neutral state
+                acid[map_idx] = a
 
-            _, acid_tmp = predict_acid_base(mol_acid_h,model_base,model_acid,device=device,
-                                           pred_base=False,verbose=verbose)
-            
-            acid = {}
-            for map_idx, a in acid_tmp.items():
-                if map_idx not in indices:
-                    continue
-                rel_idx = indices.index(map_idx)
-                if state_vec[rel_idx] == 1:
-                    acid[map_idx] = a
-            # mol = mols_lib[state_str]
-            # mol_h = Chem.rdmolops.AddHs(mol)
-            # base, acid = predict_acid_base(mol_h,model_base,model_acid,device=device,
-            #                                verbose=verbose)
-            base_lib[state_str] = base
-            acid_lib[state_str] = acid
-        # print('base')
-        # print(base_lib[state_str])
-        # print('acid')
-        # print(acid_lib[state_str])
+        base_lib[state_str] = base
+        acid_lib[state_str] = acid
+
     return base_lib, acid_lib
 
 ###################################################################################
+# Microstate transitions/free energy differences from pKa and pH
 
-# def calc_phosphate_pkas()
+def calc_p_up_down(pka,pH,matrix_def):
+    """ Calc either transition probability or free energy difference between microstates """
 
-# def calc_state_pkas(state_strs, state_vecs, base_lib, acid_lib, indices, pH=7.,
-#                 verbose=False):
-#     """ Calc state probabilities from acid/base pka values for given pH """
-    
-#     ps_all = [] # pH specific
-
-#     for state_str, state_vec in zip(state_strs, state_vecs):
-#         if verbose:
-#             print('='*20)
-#         ps_up = np.zeros((len(state_vec))) - 1
-#         ps_down = np.zeros((len(state_vec))) - 1
-#         base = base_lib[state_str]
-#         acid = acid_lib[state_str]
-#         for at_idx, pka in base.items():
-#             if at_idx not in indices: # Excluded at the start
-#                 continue
-#             rel_idx = indices.index(at_idx)
-#             p_up = calc_charge(pka,pH=pH) # probability for higher + state
-#             p_down = 1 - p_up
-#             if verbose:
-#                 print(f'at_idx:{at_idx} | rel_idx:{rel_idx} | base {pka} up:{p_up:.2f} stay:{p_down:.2f}')
-#             if state_vec[rel_idx] <= 1:
-#                 ps_up[rel_idx] = p_up
-#             else: # already protonated
-#                 ps_down[rel_idx] = p_down
-#         for at_idx, pka in acid.items():
-#             if at_idx not in indices: # Excluded at the start
-#                 continue
-#             rel_idx = indices.index(at_idx)
-#             p_up = calc_charge(pka,pH=pH)
-#             p_down = 1. - p_up
-#             if verbose:
-#                 print(f'at_idx:{at_idx} | rel_idx:{rel_idx} | acid {pka} stay:{p_up:.2f} down:{p_down:.2f}')
-#             if state_vec[rel_idx] >= 1:
-#                 ps_down[rel_idx] = p_down
-#             else: # already deprotonated
-#                 ps_up[rel_idx] = p_up
-
-#         ps = np.vstack([ps_up,ps_down]) # (up/down, state_idx)
-#         ps_all.append(ps)
-
-#     ps_all = np.array(ps_all)
-#     return ps_all
+    if matrix_def == 'msm':
+        p_up = calc_charge(pka,pH=pH) # probability for higher + state
+        p_down = 1 - p_up
+    elif matrix_def == 'dG':
+        p_up = np.log(10) * (pH - pka) # -ln(p+/p0)
+        p_down = np.log(10) * (pka - pH) # -ln(p0/p+)
+    else:
+        raise
+    return p_up, p_down
 
 def calc_state_pkas(state_strs, state_vecs, base_lib, acid_lib, indices, pH=7.,matrix_def='dG',
                 verbose=False):
@@ -580,64 +456,37 @@ def calc_state_pkas(state_strs, state_vecs, base_lib, acid_lib, indices, pH=7.,m
             print(f'{state_str}')
         ps_up = {}
         ps_down = {}
-        # ps_up = np.empty((len(state_vec)))
-        # ps_up.fill(np.nan)
-        # ps_down = np.empty((len(state_vec)))
-        # ps_down.fill(np.nan)
-        # ps_up = np.zeros((len(state_vec))) - 1
-        # ps_down = np.zeros((len(state_vec))) - 1
+
         base = base_lib[state_str]
         acid = acid_lib[state_str]
         for map_idx, pka in base.items():
             if map_idx not in indices: # Excluded at the start
                 continue
+            p_up, p_down = calc_p_up_down(pka,pH,matrix_def)
+
             rel_idx = indices.index(map_idx)
-            if matrix_def == 'msm':
-                p_up = calc_charge(pka,pH=pH) # probability for higher + state
-                p_down = 1 - p_up
-            elif matrix_def == 'dG':
-                p_up = np.log(10) * (pH - pka) # -ln(p+/p0)
-                p_down = np.log(10) * (pka - pH) # -ln(p0/p+)
-            else:
-                raise
             if verbose:
                 print(f'rel_idx:{rel_idx} | map_idx:{map_idx} | base {pka} up:{p_up:.2f} stay:{p_down:.2f}')
             if state_vec[rel_idx] <= 1:
                 ps_up[rel_idx] = p_up
-            # else:
-                # if verbose:
-                    # print('already protonated')
-            # else: # already protonated
-                # ps_down[rel_idx] = p_down
+
         for map_idx, pka in acid.items():
             if map_idx not in indices: # Excluded at the start
                 continue
+            p_up, p_down = calc_p_up_down(pka,pH,matrix_def)
+
             rel_idx = indices.index(map_idx)
-            if matrix_def == 'msm':
-                p_up = calc_charge(pka,pH=pH) # probability for higher + state
-                p_down = 1 - p_up
-            elif matrix_def == 'dG':
-                p_up = np.log(10) * (pH - pka) # -ln(p+/p0)
-                p_down = np.log(10) * (pka - pH) # -ln(p0/p+)
-            else:
-                raise
             if verbose:
                 print(f'rel_idx:{rel_idx} | map_idx:{map_idx} | acid {pka} stay:{p_up:.2f} down:{p_down:.2f}')
             if state_vec[rel_idx] >= 1:
                 ps_down[rel_idx] = p_down
-            # else:
-                # if verbose:
-                    # print('already deprotonated')
-            # else: # already deprotonated
-                # ps_up[rel_idx] = p_up
+
         ps = {
             'up' : ps_up,
             'down' : ps_down,
         }
-        # ps = np.vstack([ps_up,ps_down]) # (up/down, state_idx)
         ps_all.append(ps)
 
-    # ps_all = np.array(ps_all)
     return ps_all
 
 #############################################################################################
@@ -681,7 +530,6 @@ def combine_clusters(state_strs_clusters, state_freqs_clusters, indices_clusters
 
     cluster_state_ids = []
 
-    # print(state_freqs_clusters)
     if verbose:
         print(state_strs_clusters)
         print(state_freqs_clusters)
@@ -692,11 +540,9 @@ def combine_clusters(state_strs_clusters, state_freqs_clusters, indices_clusters
             if s_freq >= sfreq_cutoff_individual:
                 cluster_state_ids[-1].append(s_idx)
 
-    # cluster_state_idxs = [list(range(len(state_strs))) for state_strs in state_strs_clusters]
     combinations = list(itertools.product(*cluster_state_ids))
     if verbose:
         print(f'N microstate combinations from clusters: {len(combinations)}')
-    # print(state_freqs_clusters)
 
     state_strs = []
     state_freqs = []
@@ -717,8 +563,6 @@ def combine_clusters(state_strs_clusters, state_freqs_clusters, indices_clusters
         if state_freq >= sfreq_cutoff_combined:
             state_strs.append(state_str)
             state_freqs.append(state_freq)
-        # else:
-        #     print(f'removing {state_str}')
 
     if verbose:
         print(f'N chosen microstate combinations: {len(state_strs)}')
@@ -736,34 +580,20 @@ def combine_clusters(state_strs_clusters, state_freqs_clusters, indices_clusters
 def calc_relevant_states(state_freqs_all, mols_lib, max_states=18,verbose=False):
     """ Reduce number of states to max_states for plotting """
 
-    cutoff = 0.01
-    tries = 0
     if len(state_freqs_all.keys()) == 0:
         return 0, [], [], []
-    state_strs_relevant = []
-    sfreqs_relevant = []
-    mols_relevant = []
-    pH_argmaxs = []
-    sfreqs_not_relevant = []
 
-    for state_str, sfreqs in state_freqs_all.items():
-        if np.max(sfreqs) > cutoff:
-            state_strs_relevant.append(state_str)
-            sfreqs_relevant.append(sfreqs)
-            mols_relevant.append(mols_lib[state_str])
-            pH_argmaxs.append(np.argmax(sfreqs))
-        else:
-            sfreqs_not_relevant.append(sfreqs)
-    N_relevant_states = len(state_strs_relevant)
-    if verbose:
-        print(f'Initial N relevant states: {N_relevant_states} with cutoff {cutoff}')
+    cutoff = 0.01
+    tries = 0
+
+    N_relevant_states = 1e5
     while N_relevant_states > max_states:
         state_strs_relevant = []
         sfreqs_relevant = []
+        sfreqs_not_relevant = []
         mols_relevant = []
         pH_argmaxs = []
-        tries += 1
-        cutoff += 0.02
+
         for state_str, sfreqs in state_freqs_all.items():
             if np.max(sfreqs) > cutoff:
                 state_strs_relevant.append(state_str)
@@ -773,8 +603,10 @@ def calc_relevant_states(state_freqs_all, mols_lib, max_states=18,verbose=False)
             else:
                 sfreqs_not_relevant.append(sfreqs)
         N_relevant_states = len(state_strs_relevant)
+        tries += 1
+        cutoff += 0.02
 
-    # SORT HERE
+    # Sort by pH value of max freq.
     ps = np.argsort(pH_argmaxs)
     state_strs_relevant = [state_strs_relevant[p] for p in ps]
     sfreqs_relevant = [sfreqs_relevant[p] for p in ps]
@@ -855,25 +687,19 @@ def calc_symmetry(state_strs, state_freqs_lib, mols_lib,verbose=False):
     return state_strs, state_freqs
 
 def check_chiral_consistency(state_strs,mols_lib,smiles_lib):
-    # state_strs_curated = []
-    # params = AllChem.ETKDGv3()
+
     for state_str in state_strs:
         mol = mols_lib[state_str]
-        # print(state_str)
-        # print(Chem.MolToSmiles(mol))
+
         mol_h = Chem.AddHs(mol)
-        # cid = AllChem.EmbedMolecule(
-                # mol_h,
-                # params)
+
         cid = AllChem.EmbedMolecule(mol_h, randomSeed=1, useRandomCoords=True)
         if cid != 0:
             print(f'WARNING: Need to remove chirality for embedding for {state_str}!')
             for atom in mol_h.GetAtoms():
                 atom.SetChiralTag(Chem.ChiralType.CHI_UNSPECIFIED)
         cid = AllChem.EmbedMolecule(mol_h, randomSeed=1, useRandomCoords=True)
-        # cid = AllChem.EmbedMolecule(
-            # mol_h,
-            # params)
+
         if cid != 0:
             raise ValueError(f'{state_str} could not be embedded.')
         for atom in mol.GetAtoms():
@@ -884,25 +710,97 @@ def check_chiral_consistency(state_strs,mols_lib,smiles_lib):
         mols_lib[state_str] = mol
         smiles_lib[state_str] = smiles
     return mols_lib, smiles_lib
-        
-def run_pipeline(name,smiles_raw,pH_output=7,cutoff_states=4000,device='cpu',
-                 pH_band=8.,pHs = np.arange(0,14.1,0.5),
-                 path_out='output',path_figs='figures',
-                 verbose=False,cutoff_export=0.5,
-                 fout_csv='out.csv',append=True,notebook=False,
-                 except_optimize_error=False,
-                 sfreq_cutoff_individual=0.01,
-                 sfreq_cutoff_combined=0.001,
-                 matrix_def='msm',export_opti_sdf=False):
-                #  write_all_relevant=False):
+
+def calc_freqs_from_states(state_strs,state_vecs,ps_all,matrix_def):
+    N_states = len(state_vecs)
+    if matrix_def == 'msm':
+        tmatrix = calc_tmatrix(state_strs,state_vecs,ps_all,N_states)
+        state_freqs = calc_state_freqs_sparse(tmatrix)
+    elif matrix_def == 'dG':
+        dGmatrix = calc_dGmatrix(state_strs,state_vecs,ps_all,N_states)
+        dG_clusters = find_dGclusters(dGmatrix)
+        state_strs, dGmatrix = remove_orphans(dG_clusters, state_strs, dGmatrix)
+        is_connected = check_connectivity(dGmatrix)
+        if not is_connected:
+            raise ValueError('Matrix not connected')
+        Fs = reconstruct_free_energies_incomplete_half(dGmatrix)
+        state_freqs = calc_populations(Fs)
+
+    return state_strs, state_freqs
+
+def calc_macro_props(state_strs, state_freqs, mols_lib):
+    """ Net charge as weighted sum over microstate charges """
+
+    state_qs = {}
+    freqs_macro = {}
+    net_charge = 0.       
+    for state_str, state_freq in zip(state_strs, state_freqs):
+        state_q = Chem.GetFormalCharge(mols_lib[state_str])
+        state_qs[state_str] = state_q
+        if state_q in freqs_macro:
+            freqs_macro[state_q] += state_freq
+        else:
+            freqs_macro[state_q] = state_freq
+        net_charge += state_q * state_freq
+    return net_charge, state_qs, freqs_macro
+
+###########
+
+def make_pH_specific_output(
+            state_strs, state_freqs, cutoff_export,pH,mols_lib,smiles_lib,
+            name, state_qs, path_out, fout_csv, append, export_opti_sdf, path_figs,
+            verbose=False):
+    """ Plot properties of microstates for pH_output """
+
+    # Max freq
+    idx_max = np.argmax(state_freqs)
+    state_freq_max = np.max(state_freqs)
+    state_str_opti = state_strs[idx_max]
+
+    # Select states for pH-specific export
+    state_strs_export = []
+    state_freqs_export = []
+    for state_str, state_freq in zip(state_strs, state_freqs):
+        if state_freq > cutoff_export * state_freq_max: # Include all high prob states
+            state_strs_export.append(state_str)
+            state_freqs_export.append(state_freq)
+
+    state_freqs_export = np.array(state_freqs_export)
+    ps = np.argsort(state_freqs_export)[::-1] # Sort by highest probability
+
+    state_freqs_export = state_freqs_export[ps]
+    state_strs_export = [state_strs_export[p] for p in ps]
+
+    mols_lib, smiles_lib = check_chiral_consistency(state_strs_export,mols_lib,smiles_lib)
+
+    if verbose:
+        print(f'Export at pH {pH}:',flush=True)
+        for e_idx, (state_str, sfreq) in enumerate(zip(state_strs_export, state_freqs_export)):
+            print(e_idx, state_str, sfreq)
+    export_csv(name,state_strs_export,smiles_lib,state_freqs_export,state_qs,path=path_out,fout_csv=fout_csv,append=append)
+    if export_opti_sdf:
+        export_sdf(name,state_strs_export,mols_lib,path=path_out)
+        plot_optimal_state(name,mols_lib[state_strs_export[0]],path=path_figs)
+    if verbose:
+        print(f'Optimal smiles for pH {pH}: {smiles_lib[state_str_opti]}')
+
+###########
+
+def run_pipeline(
+            name,smiles_raw,pH_output=7,cutoff_states=4000,device='cpu',
+            pH_band=8.,pHs = np.arange(0,14.1,0.5),
+            path_out='output',path_figs='figures',
+            verbose=False,cutoff_export=0.5,
+            fout_csv='out.csv',append=True,notebook=False,
+            sfreq_cutoff_individual=0.01,
+            sfreq_cutoff_combined=0.001,
+            matrix_def='msm',export_opti_sdf=False):
     if verbose:
         print(name)
         print(smiles_raw, flush=True)
 
     os.makedirs(path_out,exist_ok=True)
     os.makedirs(path_figs,exist_ok=True)
-
-    return_code = 0
 
     # molgpka ML models
     model_file_base = f'{ROOT}/weight_base.pth'
@@ -939,14 +837,9 @@ def run_pipeline(name,smiles_raw,pH_output=7,cutoff_states=4000,device='cpu',
 
     mol0_h = Chem.rdmolops.AddHs(mol0)
 
-    # for atom in mol0_h.GetAtoms():
-    #     print(atom.GetSymbol(), atom.GetIdx(), atom.GetAtomMapNum())
-
     base0, acid0 = predict_acid_base(mol0_h,model_base,model_acid,device=device,verbose=verbose) # returns pkas for map indices
 
     for pH_idx, pH in enumerate(pHs): #,total=len(pHs)):#,total=len(pHs)):
-        # print('='*50)
-        # print(f'pH: {pH}',flush=True)
         if verbose:
             print('='*50)
             print(f'pH: {pH}',flush=True)
@@ -963,9 +856,10 @@ def run_pipeline(name,smiles_raw,pH_output=7,cutoff_states=4000,device='cpu',
             print(f'curated q_options0: {q_options0}')
 
         # Screen coupling between residues
-        clusters, mols_lib, base_lib, acid_lib = screen_clusters(indices0, q_options0, mol0, mols_lib, smiles_lib, 
-                                            model_base, model_acid, base_lib, acid_lib, cutoff_states, device='cpu',
-                                            verbose=verbose)
+        clusters, mols_lib, base_lib, acid_lib = screen_clusters(
+                indices0, q_options0, mol0, mols_lib, smiles_lib, 
+                model_base, model_acid, base_lib, acid_lib, cutoff_states, device='cpu',
+                verbose=verbose)
         if verbose:
             print(f'Clusters: {clusters}')
         state_freqs_clusters = []
@@ -982,7 +876,7 @@ def run_pipeline(name,smiles_raw,pH_output=7,cutoff_states=4000,device='cpu',
             for id in indices:
                 indices_str += f'{id},'
             # indices_str shows what atoms the cluster state_vec and state_str refer to
-            indices_str = indices_str[:-1]
+            indices_str = indices_str[:-1] # remove last comma
 
             if indices_str not in mols_frag_lib:
                 mols_frag_lib[indices_str] = {}
@@ -993,38 +887,22 @@ def run_pipeline(name,smiles_raw,pH_output=7,cutoff_states=4000,device='cpu',
             
             q_options = q_options0[cluster]
             state_vecs = construct_state_vectors(q_options, cutoff_states)
-            N_states = len(state_vecs)
 
             state_strs = calc_state_strs(state_vecs)
 
             mols_frag_lib[indices_str], smiles_frag_lib = construct_mols(
-                mol0, state_strs, state_vecs, indices, mols_frag_lib[indices_str], smiles_frag_lib) # pH independent
+                    mol0, state_strs, state_vecs, indices, mols_frag_lib[indices_str], smiles_frag_lib) # pH independent
 
-            base_frag_lib[indices_str], acid_frag_lib[indices_str] = run_acid_base_calc(state_strs,state_vecs,indices,mols_frag_lib[indices_str],model_base,model_acid,
-                                                                                        base_frag_lib[indices_str],acid_frag_lib[indices_str],
-                                                                                        device=device,verbose=verbose) # pH independent
+            base_frag_lib[indices_str], acid_frag_lib[indices_str] = run_acid_base_calc(
+                    state_strs,state_vecs,indices,mols_frag_lib[indices_str],model_base,model_acid,
+                    base_frag_lib[indices_str],acid_frag_lib[indices_str],
+                    device=device,verbose=verbose) # pH independent
 
-            ps_all = calc_state_pkas(state_strs, state_vecs, base_frag_lib[indices_str], acid_frag_lib[indices_str], indices, pH=pH,matrix_def=matrix_def,
-                                                        verbose=verbose)
-            N_states = len(state_vecs)
-
-            if matrix_def == 'msm':
-                tmatrix = calc_tmatrix(state_vecs,state_strs,ps_all,N_states)
-                state_freqs = calc_state_freqs_sparse(tmatrix)
-            elif matrix_def == 'dG':
-                dGmatrix = calc_dGmatrix(state_vecs,state_strs,ps_all,N_states)
-                dG_clusters = find_dGclusters(dGmatrix)
-                # print(dGmatrix)
-                # print(f'state_strs before orphan state removal')
-                # print(state_strs)
-                state_strs, dGmatrix = remove_orphans(dG_clusters, state_strs, dGmatrix)
-                # print(f'state_strs after orphan state removal')
-                # print(state_strs)
-                is_connected = check_connectivity(dGmatrix)
-                if not is_connected:
-                    raise ValueError('Matrix not connected')
-                Fs = reconstruct_free_energies_incomplete_half(dGmatrix)
-                state_freqs = calc_populations(Fs)
+            ps_all = calc_state_pkas(
+                    state_strs, state_vecs, base_frag_lib[indices_str], acid_frag_lib[indices_str], indices, pH=pH,matrix_def=matrix_def,
+                    verbose=verbose)
+            
+            state_strs, state_freqs = calc_freqs_from_states(state_strs,state_vecs,ps_all,matrix_def)
 
             state_strs_clusters.append(state_strs)
             state_freqs_clusters.append(state_freqs)
@@ -1039,6 +917,7 @@ def run_pipeline(name,smiles_raw,pH_output=7,cutoff_states=4000,device='cpu',
                 state_freqs_clusters.append(state_freqs)
                 indices_clusters.append(oh_ids)
 
+        # Combine clusters and their frequencies
         indices, state_strs, state_freqs_lib = combine_clusters(
             state_strs_clusters, state_freqs_clusters, indices_clusters, 
             sfreq_cutoff_individual=sfreq_cutoff_individual,sfreq_cutoff_combined=sfreq_cutoff_combined,
@@ -1050,25 +929,9 @@ def run_pipeline(name,smiles_raw,pH_output=7,cutoff_states=4000,device='cpu',
         # Symmetry
         state_strs, state_freqs = calc_symmetry(state_strs, state_freqs_lib, mols_lib, verbose=verbose)
 
-        # Max freq
-        idx_max = np.argmax(state_freqs)
-        state_freq_max = np.max(state_freqs)
-        state_str_opti = state_strs[idx_max]
-
-        # Net charge as weighted sum over microstate charges
-        state_qs = {}
-        freqs_macro = {}
-        net_charge = 0.       
-        for state_str, state_freq in zip(state_strs, state_freqs):
-            state_q = Chem.GetFormalCharge(mols_lib[state_str])
-            state_qs[state_str] = state_q
-            if state_q in freqs_macro:
-                freqs_macro[state_q] += state_freq
-            else:
-                freqs_macro[state_q] = state_freq
-            net_charge += state_q * state_freq
+        # Macro-pka properties
+        net_charge, state_qs, freqs_macro = calc_macro_props(state_strs, state_freqs, mols_lib)
         net_charges.append(net_charge)
-
         freqs_macro_all.append(freqs_macro)
 
         # Add to results for pH scan
@@ -1079,35 +942,40 @@ def run_pipeline(name,smiles_raw,pH_output=7,cutoff_states=4000,device='cpu',
 
         # Output pH-specific results for pH_output
         if pH == pH_output:
-            
-            # Select states for pH-specific export
-            state_strs_export = []
-            state_freqs_export = []
-            for state_str, state_freq in zip(state_strs, state_freqs):
-                if state_freq > cutoff_export * state_freq_max: # Include all high prob states
-                    state_strs_export.append(state_str)
-                    state_freqs_export.append(state_freq)
+            make_pH_specific_output(state_strs, state_freqs, cutoff_export,pH,mols_lib,smiles_lib,
+                            name, state_qs, path_out, fout_csv, append, export_opti_sdf, path_figs,
+                            verbose=verbose)
+            # # Max freq
+            # idx_max = np.argmax(state_freqs)
+            # state_freq_max = np.max(state_freqs)
+            # state_str_opti = state_strs[idx_max]
 
-            state_freqs_export = np.array(state_freqs_export)
-            ps = np.argsort(state_freqs_export)[::-1] # Sort by highest probability
+            # # Select states for pH-specific export
+            # state_strs_export = []
+            # state_freqs_export = []
+            # for state_str, state_freq in zip(state_strs, state_freqs):
+            #     if state_freq > cutoff_export * state_freq_max: # Include all high prob states
+            #         state_strs_export.append(state_str)
+            #         state_freqs_export.append(state_freq)
 
-            state_freqs_export = state_freqs_export[ps]
-            state_strs_export = [state_strs_export[p] for p in ps]
+            # state_freqs_export = np.array(state_freqs_export)
+            # ps = np.argsort(state_freqs_export)[::-1] # Sort by highest probability
 
-            mols_lib, smiles_lib = check_chiral_consistency(state_strs_export,mols_lib,smiles_lib)
+            # state_freqs_export = state_freqs_export[ps]
+            # state_strs_export = [state_strs_export[p] for p in ps]
 
-            if verbose:
-                print(f'Export at pH {pH_output}:',flush=True)
-                for e_idx, (state_str, sfreq) in enumerate(zip(state_strs_export, state_freqs_export)):
-                    print(e_idx, state_str, sfreq)
-            # export_smi(name,state_strs_export,smiles_lib,state_freqs_export,path=path_out,fout_smi=fout_smi,append=append)
-            export_csv(name,state_strs_export,smiles_lib,state_freqs_export,state_qs,path=path_out,fout_csv=fout_csv,append=append)
-            # export_smi(name_state,smiles_lib[state_str_opti],path=path_out)
-            if export_opti_sdf:
-                return_code = export_sdf(name,state_strs_export,mols_lib,path=path_out,except_optimize_error=except_optimize_error)
-                plot_optimal_state(name,mols_lib[state_strs_export[0]],path=path_figs)
-            if verbose:
-                print(f'Optimal smiles for pH {pH}: {smiles_lib[state_str_opti]}')
+            # mols_lib, smiles_lib = check_chiral_consistency(state_strs_export,mols_lib,smiles_lib)
+
+            # if verbose:
+            #     print(f'Export at pH {pH_output}:',flush=True)
+            #     for e_idx, (state_str, sfreq) in enumerate(zip(state_strs_export, state_freqs_export)):
+            #         print(e_idx, state_str, sfreq)
+            # export_csv(name,state_strs_export,smiles_lib,state_freqs_export,state_qs,path=path_out,fout_csv=fout_csv,append=append)
+            # if export_opti_sdf:
+            #     return_code = export_sdf(name,state_strs_export,mols_lib,path=path_out,except_optimize_error=except_optimize_error)
+            #     plot_optimal_state(name,mols_lib[state_strs_export[0]],path=path_figs)
+            # if verbose:
+            #     print(f'Optimal smiles for pH {pH}: {smiles_lib[state_str_opti]}')
 
     # Plotting of pH scan
     net_charges = np.round(np.array(net_charges),decimals=4)
@@ -1117,8 +985,6 @@ def run_pipeline(name,smiles_raw,pH_output=7,cutoff_states=4000,device='cpu',
 
     for pH, freqs_macro in zip(pHs,freqs_macro_all):
         qs_sorted = sorted(freqs_macro.keys())
-        # print(qs_sorted)
-        # print(pH, freqs_macro)
         for q in qs_sorted:
             if q+1 in qs_sorted:
                 freq1 = freqs_macro[q]
@@ -1131,8 +997,7 @@ def run_pipeline(name,smiles_raw,pH_output=7,cutoff_states=4000,device='cpu',
                 else:
                     pkas_macro[q] = [pka_macro]
                     pkas_weights[q] = [pka_weight]
-                # print(q, q+1, pka_macro, pka_weight)
-    
+
     pkas_combined = {}
 
     for q, pkas in pkas_macro.items():
@@ -1146,14 +1011,6 @@ def run_pipeline(name,smiles_raw,pH_output=7,cutoff_states=4000,device='cpu',
     if len(pkas_combined) > 0:
         export_macro_pkas(name,pkas_combined,path=path_out)
 
-    # print(pkas_combined)
-
-    # with open(f'output/{name}_net_charges.txt','w') as f:
-        # for pH, net_charge in zip(pHs, net_charges):
-            # f.write(f'{pH:.2f} {net_charge:.3f}\n')
-
-    # print(state_freqs_all)
-
     # reduce number of microstates for plotting
     N_relevant_states, state_strs_relevant, sfreqs_relevant, mols_relevant, sfreqs_not_relevant = calc_relevant_states(state_freqs_all, mols_lib, verbose=verbose)
 
@@ -1161,9 +1018,3 @@ def run_pipeline(name,smiles_raw,pH_output=7,cutoff_states=4000,device='cpu',
         plot_pH_scan(name, indices, state_strs_relevant, sfreqs_relevant, pHs, net_charges, sfreqs_not_relevant, pkas_combined, path=path_figs,verbose=verbose)
         plot_relevant_states(name, mols_relevant, path=path_figs,notebook=notebook)
         compose_image(name,N_relevant_states, path=path_figs)
-    return return_code
-        # if write_all_relevant:
-        #     for state_str, mol in zip(state_strs_relevant, mols_relevant):
-        #         export_sdf(f'{name}_{state_str}',mol,path=path_out)
-        #         export_smi(f'{name}_{state_str}',smiles_lib[state_str],path=path_out)
-
