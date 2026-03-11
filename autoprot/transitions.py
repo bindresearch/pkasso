@@ -5,6 +5,76 @@ from .utils import pack_vec
 
 MISSING = -1000.
 
+###################################################################################
+# Microstate transitions/free energy differences from pKa and pH
+
+def calc_charge(pka,pH=7.):
+    """ Hendersson-Hasselbalch eq. """
+
+    ppos = 1. / ( 1 + 10**(pH-pka) ) # fraction of more positively charged res
+    return ppos
+
+def calc_p_up_down(pka,pH,matrix_def):
+    """ Calc either transition probability or free energy difference between microstates """
+
+    if matrix_def == 'msm':
+        p_up = calc_charge(pka,pH=pH) # probability for higher + state
+        p_down = 1 - p_up
+    elif matrix_def == 'dG':
+        p_up = np.log(10) * (pH - pka) # -ln(p+/p0)
+        p_down = np.log(10) * (pka - pH) # -ln(p0/p+)
+    else:
+        raise
+    return p_up, p_down
+
+def calc_state_diffs(state_strs, state_vecs, base_lib, acid_lib, indices, pH=7.,matrix_def='dG',
+                verbose=False):
+    """ Calc state differences (free energy or MSM) from acid/base pka values for given pH """
+
+    ps_all = [] # pH specific
+
+    for state_str, state_vec in zip(state_strs, state_vecs):
+        if verbose:
+            print('='*20)
+            print(f'{state_str}')
+        ps_up = {}
+        ps_down = {}
+
+        base = base_lib[state_str]
+        acid = acid_lib[state_str]
+        for map_idx, pka in base.items():
+            if map_idx not in indices: # Excluded at the start
+                continue
+            p_up, p_down = calc_p_up_down(pka,pH,matrix_def)
+
+            rel_idx = indices.index(map_idx)
+            if verbose:
+                print(f'rel_idx:{rel_idx} | map_idx:{map_idx} | base {pka} up:{p_up:.2f} stay:{p_down:.2f}')
+            if state_vec[rel_idx] <= 1:
+                ps_up[rel_idx] = p_up
+
+        for map_idx, pka in acid.items():
+            if map_idx not in indices: # Excluded at the start
+                continue
+            p_up, p_down = calc_p_up_down(pka,pH,matrix_def)
+
+            rel_idx = indices.index(map_idx)
+            if verbose:
+                print(f'rel_idx:{rel_idx} | map_idx:{map_idx} | acid {pka} stay:{p_up:.2f} down:{p_down:.2f}')
+            if state_vec[rel_idx] >= 1:
+                ps_down[rel_idx] = p_down
+
+        ps = {
+            'up' : ps_up,
+            'down' : ps_down,
+        }
+        ps_all.append(ps)
+
+    return ps_all
+
+#############################################################################################
+# Transition matrix operations
+
 def calc_state_freqs(tmatrix):
     w, v = np.linalg.eig(tmatrix.T)
     idx = np.argmin(np.abs(w - 1))
@@ -202,3 +272,19 @@ def calc_populations(Gs):
     Z = np.sum(np.exp(-Gs))
     pops = np.exp(-Gs) / Z # Boltzmann weights
     return pops
+
+def calc_freqs_from_states(state_strs,state_vecs,ps_all,matrix_def):
+    N_states = len(state_vecs)
+    if matrix_def == 'msm':
+        tmatrix = calc_tmatrix(state_strs,state_vecs,ps_all,N_states)
+        state_freqs = calc_state_freqs_sparse(tmatrix)
+    elif matrix_def == 'dG':
+        dGmatrix = calc_dGmatrix(state_strs,state_vecs,ps_all,N_states)
+        dG_clusters = find_dGclusters(dGmatrix)
+        state_strs, dGmatrix = remove_orphans(dG_clusters, state_strs, dGmatrix)
+        is_connected = check_connectivity(dGmatrix)
+        if not is_connected:
+            raise ValueError('Matrix not connected')
+        Gs = reconstruct_free_energies_incomplete_half(dGmatrix)
+        state_freqs = calc_populations(Gs)
+    return state_strs, state_freqs

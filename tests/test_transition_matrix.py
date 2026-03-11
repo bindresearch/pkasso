@@ -1,7 +1,7 @@
 import pytest
 import numpy as np
 
-from autoprot import transition_matrix
+from autoprot import transitions
 from autoprot.utils import pack_vec
 
 def test_calc_tmatrix():
