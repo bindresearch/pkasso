@@ -29,7 +29,7 @@ def calc_state_freqs_power_iter(tmatrix):
     pi /= pi.sum()
     return pi
 
-def calc_tmatrix(state_vecs,state_strs,ps_all,N_states):
+def calc_tmatrix(state_strs,state_vecs,ps_all,N_states):
     """ Transition matrix between molecule protonation states"""
 
     tmatrix_raw = [[[] for _ in range(N_states)] for _ in range(N_states)] # N_states x N_states (x duplicate predictions)
@@ -81,7 +81,7 @@ def calc_tmatrix(state_vecs,state_strs,ps_all,N_states):
 
     return tmatrix_norm
 
-def calc_dGmatrix(state_vecs,state_strs,ps_all,N_states):
+def calc_dGmatrix(state_strs,state_vecs,ps_all,N_states):
     """ Matrix of free energy differences between protonation states """
 
     matrix_raw = [[[] for _ in range(N_states)] for _ in range(N_states)] # N_states x N_states (x duplicate predictions)
