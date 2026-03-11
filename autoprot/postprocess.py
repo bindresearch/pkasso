@@ -108,6 +108,44 @@ def export_macro_pkas(name,pkas_combined,path='output'):
         for idx, (q, pka) in enumerate(pkas_combined.items()):
             f.write(f'pKa{idx+1},{q},{q+1},{pka:.5f}\n')
 
+def calc_relevant_states(state_freqs_all, mols_lib, max_states=18,verbose=False):
+    """ Reduce number of states to max_states for plotting """
+
+    if len(state_freqs_all.keys()) == 0:
+        return 0, [], [], []
+
+    cutoff = 0.01
+    tries = 0
+
+    N_relevant_states = 1e5
+    while N_relevant_states > max_states:
+        state_strs_relevant = []
+        sfreqs_relevant = []
+        sfreqs_not_relevant = []
+        mols_relevant = []
+        pH_argmaxs = []
+
+        for state_str, sfreqs in state_freqs_all.items():
+            if np.max(sfreqs) > cutoff:
+                state_strs_relevant.append(state_str)
+                sfreqs_relevant.append(sfreqs)
+                mols_relevant.append(mols_lib[state_str])
+                pH_argmaxs.append(np.argmax(sfreqs))
+            else:
+                sfreqs_not_relevant.append(sfreqs)
+        N_relevant_states = len(state_strs_relevant)
+        tries += 1
+        cutoff += 0.02
+
+    # Sort by pH value of max freq.
+    ps = np.argsort(pH_argmaxs)
+    state_strs_relevant = [state_strs_relevant[p] for p in ps]
+    sfreqs_relevant = [sfreqs_relevant[p] for p in ps]
+    mols_relevant = [mols_relevant[p] for p in ps]
+    if verbose:
+        print(f'Final N relevant states: {N_relevant_states} with cutoff {cutoff}')
+    return N_relevant_states, state_strs_relevant, sfreqs_relevant, mols_relevant, sfreqs_not_relevant
+
 def plot_relevant_states(name, mols_relevant,path='figures',notebook=False):
 
     for mol in mols_relevant: tmp=AllChem.Compute2DCoords(mol)

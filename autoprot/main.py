@@ -1,13 +1,13 @@
-from rdkit import Chem
-
-from rdkit.Chem.MolStandardize import rdMolStandardize
-from rdkit.Chem import RegistrationHash
-
 from .external.pka import predict_acid_base, load_model
-from .transition_matrix import *
+from .transitions import *
 from .postprocess import *
 from .utils import *
 from .coupling import *
+from .special_cases import *
+
+from rdkit import Chem
+from rdkit.Chem.MolStandardize import rdMolStandardize
+from rdkit.Chem import RegistrationHash
 
 import numpy as np
 
@@ -64,132 +64,7 @@ def preprocess(smiles_raw,verbose=False):
 
     return mol, smiles
 
-def match_pattern(mol,pattern):
-    found = mol.HasSubstructMatch(pattern)
-    matches = mol.GetSubstructMatches(pattern)
-    return found, matches
-
-def add_exclusions(mol,verbose=False):
-    """ Exclusions act on the q_options level. Exclusions are removed from consideration
-    for protonation/deprotonation. This is specified separately for acids and bases.
-    For example, only a protonation event could be excluded for a given index,
-    but not the deprotonation event.
-    This does not affect the indices or cluster splitting"""
-
-    q0s = np.array([at.GetFormalCharge() for at in mol.GetAtoms()])
-
-    exclude_acid_indices = []
-    exclude_base_indices = []
-    mol_h = Chem.rdmolops.AddHs(mol)
-
-    pattern_carbonyl = Chem.MolFromSmarts("NC(=O)")
-    found_carbonyl, matches_carbonyl = match_pattern(mol,pattern_carbonyl)
-    pattern_imine = Chem.MolFromSmarts("NC(=N)")
-    found_imine, matches_imine = match_pattern(mol,pattern_imine)
-    pattern_sulfonamide = Chem.MolFromSmarts("NS(=O)(=O)")
-    found_sulfonamide, matches_sulfonamide = match_pattern(mol,pattern_sulfonamide)
-
-    for at_idx, q in enumerate(q0s):
-        atom = mol_h.GetAtomWithIdx(at_idx) 
-        map_idx = atom.GetAtomMapNum()
-
-        if q == 0.:
-            # atom = mol_h.GetAtomWithIdx(at_idx)
-            if atom.GetSymbol() == 'N':
-                if atom.GetIsAromatic():
-                    if atom.GetDegree() == 3: # arom. N with lone pair needed for ring
-                        exclude_base_indices.append(map_idx)
-                else:
-                    for match in matches_carbonyl: # ...N-C(=O)...
-                        if atom.GetIdx() in match:
-                            print('Excluding N next to carbonyl as base')
-                            if map_idx not in exclude_base_indices:
-                                exclude_base_indices.append(map_idx)
-                            print(at_idx, map_idx)
-                    for match in matches_imine: # ...N-C(=N)...
-                        if atom.GetIdx() in match:
-                            accept = True
-                            for bond in atom.GetBonds(): # Find the correct of the two Ns
-                                if bond.GetBondType() == Chem.BondType.DOUBLE:
-                                    accept = False
-                            if accept:
-                                print('Excluding N next to imine as base')
-                                if map_idx not in exclude_base_indices:
-                                    exclude_base_indices.append(map_idx)
-                                print(at_idx, map_idx)
-                    for match in matches_sulfonamide:
-                        if atom.GetIdx() in match:
-                            print('Excluding N next to sulfonamide as base')
-                            if map_idx not in exclude_base_indices:
-                                exclude_base_indices.append(map_idx)
-                            print(at_idx, map_idx)
-
-    exclude_base_indices = sorted(exclude_base_indices)
-    exclude_acid_indices = sorted(exclude_acid_indices)
-
-    return exclude_base_indices, exclude_acid_indices
-    
-def add_exceptions(mol,verbose=False):
-    """ This de-couples indices from other indices and treats them as separate clusters,
-    possibly with special rules (e.g. hard-coded phosphates).
-    This does not remove (exclude) the (de)protonation per se."""
-
-    except_indices = []
-
-    # Except everything that couldn't be neutralized
-    q0s = np.array([at.GetFormalCharge() for at in mol.GetAtoms()])
-    for at_idx, q in enumerate(q0s):
-        atom = mol.GetAtomWithIdx(at_idx) 
-        map_idx = atom.GetAtomMapNum()
-        if q != 0.:
-            print(f'NOTE: Input molecule is charged at idx {at_idx}, map_idx {map_idx}!')
-            if map_idx not in except_indices:
-                except_indices.append(map_idx)
-
-    phosphate_found, phosphate_groups = has_phosphate(mol) # returns map indices
-
-    if phosphate_found:
-        # ids_phosphate = phosphate_matches(mol)
-        if verbose:
-            print(f'phosphate ids: {phosphate_groups}')
-        for p_idx, oh_ids in phosphate_groups.items():
-            oh_ids = sorted(oh_ids)
-            # deprotonate_ohs.append(oh_ids[0])
-            for map_idx in oh_ids:
-                if map_idx not in except_indices:
-                    except_indices.append(map_idx)
-
-    return except_indices, phosphate_groups
-
-
-def has_phosphate(mol):
-
-    pattern = Chem.MolFromSmarts("P(=O)(O)(O)")
-
-    found = mol.HasSubstructMatch(pattern)
-    matches = mol.GetSubstructMatches(pattern)
-
-    phosphate_groups = {}
-
-    for match in matches:
-        # Find central P of phosphate
-        for idx in match:
-            atom = mol.GetAtomWithIdx(idx)
-            if atom.GetSymbol() == "P":
-                p_map_idx = atom.GetAtomMapNum()
-                if p_map_idx not in phosphate_groups:
-                    phosphate_groups[p_map_idx] = []
-        # Find protonable O of phosphate
-        for idx in match:
-            atom = mol.GetAtomWithIdx(idx)
-            if atom.GetSymbol() == "O" and atom.GetTotalNumHs() > 0:
-                oh_map_idx = atom.GetAtomMapNum()
-                if oh_map_idx not in phosphate_groups[p_map_idx]:
-                    phosphate_groups[p_map_idx].append(oh_map_idx)
-
-    return found, phosphate_groups
-
-def find_candidate_sites(base,acid,exclude_base_indices,exclude_acid_indices,pH,pH_band=6.,
+def find_candidate_sites(base,acid,exclude_base_indices,exclude_acid_indices,pH,pH_band=8.,
                          verbose=False):
     """ Find possible (de-)protonation sites.
     Indices in the acid or base exclusion lists are removed from the
@@ -213,89 +88,7 @@ def find_candidate_sites(base,acid,exclude_base_indices,exclude_acid_indices,pH,
             if map_idx not in exclude_acid_indices:
                 if acid[map_idx] <= pH + pH_band:
                     q_options[rel_idx,0] = 1 # allow deprotonation
-
     return indices, q_options
-
-def split_exceptions(indices, q_options, except_indices):
-    indices_curated = []
-    q_options_curated = []
-    for map_idx, q_option in zip(indices, q_options):
-        if map_idx not in except_indices:
-            indices_curated.append(map_idx)
-            q_options_curated.append(q_option)
-    q_options_curated = np.array(q_options_curated)
-    return indices_curated, q_options_curated
-
-def calc_phosphate_clusters(phosphate_groups,pH,matrix_def,
-                            verbose=False):
-    """ Special treatment of phosphates as separate cluster"""
-
-    state_strs_poh = []
-    state_freqs_poh = []
-    oh_ids_poh = []
-    
-    pka1 = 2.0
-    pka2 = 6.5
-
-    poh_acid_pkas_single = {
-        '0' : [pka1],
-        '1' : [pka1],
-    }
-
-    base_lib_poh_single = {
-        '0': {},
-        '1': {},
-    }
-
-    poh_acid_pkas_double = {
-        '00' : [pka2, pka2],
-        '01' : [pka1, pka2],
-        '10' : [pka2, pka1],
-        '11' : [pka1, pka1],
-    }
-
-    base_lib_poh_double = {
-        '00': {},
-        '01': {},
-        '10': {},
-        '11': {},
-    }
-
-    for p_idx, oh_ids in phosphate_groups.items():
-        if len(oh_ids) == 1:
-            state_strs = ['0','1']
-            state_vecs = [unpack_vec(state_str) for state_str in state_strs]
-            poh_acid_pkas = poh_acid_pkas_single
-            base_lib_poh = base_lib_poh_single
-        elif len(oh_ids) == 2:
-            state_strs = ['00','01','10','11']
-            state_vecs = [unpack_vec(state_str) for state_str in state_strs]
-            poh_acid_pkas = poh_acid_pkas_double
-            base_lib_poh = base_lib_poh_double
-        else:
-            print(f'Did not find protonable O for phosphate {p_idx}')
-            continue
-        acid_lib_poh = {}
-        for key, val in poh_acid_pkas.items():
-            acid_lib_poh[key] = {}
-            for jdx, oh_id in enumerate(oh_ids):
-                acid_lib_poh[key][oh_id] = val[jdx]
-
-        if verbose:
-            print(oh_ids)
-            print(acid_lib_poh)
-        
-        ps_all = calc_state_pkas(state_strs, state_vecs, base_lib_poh, acid_lib_poh, oh_ids, 
-                                    pH=pH,matrix_def=matrix_def,verbose=verbose)
-        
-        state_strs, state_freqs = calc_freqs_from_states(state_strs,state_vecs,ps_all,matrix_def)
-
-        state_strs_poh.append(state_strs)
-        state_freqs_poh.append(state_freqs)
-        oh_ids_poh.append(oh_ids)
-
-    return state_strs_poh, state_freqs_poh, oh_ids_poh
-
 
 def construct_state_vectors(q_options, cutoff_states, verbose=False):
     """ Enumerate all combinations of state_vectors allowed by q_options """
@@ -316,11 +109,8 @@ def construct_state_vectors(q_options, cutoff_states, verbose=False):
         state_vecs = np.array(list(itertools.product(*q_options_nonzero)))
         return state_vecs
 
-def get_atom_with_map_idx(mol, map_idx):
-    for atom in mol.GetAtoms():
-        if atom.GetAtomMapNum() == map_idx:
-            return atom
-    return None
+#########################################
+# rdkit mol object construction
 
 def construct_mol(mol0, indices, state_vec):
     """ Make single rdkit mol object from 'neutral' mol0 and state vector """
@@ -360,11 +150,8 @@ def construct_mols(mol0, state_strs, state_vecs, indices, mols_lib, smiles_lib):
             smiles_lib[state_str] = smiles_cand
     return mols_lib, smiles_lib
 
-def calc_charge(pka,pH=7.):
-    """ Hendersson-Hasselbalch eq. """
-
-    ppos = 1. / ( 1 + 10**(pH-pka) ) # fraction of more positively charged res
-    return ppos
+###################################
+# Acid-base calculation
 
 def run_acid_base_calc(state_strs,state_vecs,indices,mols_lib,model_base,model_acid,base_lib,acid_lib,device='cpu',verbose=False):
     """ Add base and acid calculation results for all state_strs into base_lib and acid_lib """
@@ -414,68 +201,8 @@ def run_acid_base_calc(state_strs,state_vecs,indices,mols_lib,model_base,model_a
 
     return base_lib, acid_lib
 
-###################################################################################
-# Microstate transitions/free energy differences from pKa and pH
-
-def calc_p_up_down(pka,pH,matrix_def):
-    """ Calc either transition probability or free energy difference between microstates """
-
-    if matrix_def == 'msm':
-        p_up = calc_charge(pka,pH=pH) # probability for higher + state
-        p_down = 1 - p_up
-    elif matrix_def == 'dG':
-        p_up = np.log(10) * (pH - pka) # -ln(p+/p0)
-        p_down = np.log(10) * (pka - pH) # -ln(p0/p+)
-    else:
-        raise
-    return p_up, p_down
-
-def calc_state_pkas(state_strs, state_vecs, base_lib, acid_lib, indices, pH=7.,matrix_def='dG',
-                verbose=False):
-    """ Calc state probabilities from acid/base pka values for given pH """
-
-    ps_all = [] # pH specific
-
-    for state_str, state_vec in zip(state_strs, state_vecs):
-        if verbose:
-            print('='*20)
-            print(f'{state_str}')
-        ps_up = {}
-        ps_down = {}
-
-        base = base_lib[state_str]
-        acid = acid_lib[state_str]
-        for map_idx, pka in base.items():
-            if map_idx not in indices: # Excluded at the start
-                continue
-            p_up, p_down = calc_p_up_down(pka,pH,matrix_def)
-
-            rel_idx = indices.index(map_idx)
-            if verbose:
-                print(f'rel_idx:{rel_idx} | map_idx:{map_idx} | base {pka} up:{p_up:.2f} stay:{p_down:.2f}')
-            if state_vec[rel_idx] <= 1:
-                ps_up[rel_idx] = p_up
-
-        for map_idx, pka in acid.items():
-            if map_idx not in indices: # Excluded at the start
-                continue
-            p_up, p_down = calc_p_up_down(pka,pH,matrix_def)
-
-            rel_idx = indices.index(map_idx)
-            if verbose:
-                print(f'rel_idx:{rel_idx} | map_idx:{map_idx} | acid {pka} stay:{p_up:.2f} down:{p_down:.2f}')
-            if state_vec[rel_idx] >= 1:
-                ps_down[rel_idx] = p_down
-
-        ps = {
-            'up' : ps_up,
-            'down' : ps_down,
-        }
-        ps_all.append(ps)
-
-    return ps_all
-
 #############################################################################################
+# Cluster tests and operations
 
 def coupling_assay(indices, q_options, mol0, mols_lib, smiles_lib, model_base, model_acid, base_lib, acid_lib, coupling_cutoff=1.0, 
                    device='cpu', verbose=False):
@@ -484,24 +211,20 @@ def coupling_assay(indices, q_options, mol0, mols_lib, smiles_lib, model_base, m
     state_vecs = construct_state_vectors_single(indices, q_options)
     state_strs = calc_state_strs(state_vecs)
     mols_lib, smiles_lib = construct_mols(mol0, state_strs, state_vecs, indices, mols_lib, smiles_lib) # pH independent
-    base_lib, acid_lib = run_acid_base_calc(state_strs,state_vecs,indices,mols_lib,model_base,model_acid,base_lib,acid_lib,device=device,verbose=verbose) # pH independent
+    base_lib, acid_lib = run_acid_base_calc(
+            state_strs,state_vecs,indices,mols_lib,model_base,model_acid,base_lib,acid_lib,
+            device=device,verbose=verbose) # pH independent
 
     state_str0 = state_strs[0]
     base_pka_diffs = {}
     acid_pka_diffs = {}
     for state_str1 in state_strs[1:]:
-        base_pka_diffs[state_str1], acid_pka_diffs[state_str1] = compare_pkas(indices, q_options, state_str0, state_str1, base_lib, acid_lib)
-    coupling_matrix = construct_coupling_matrix(indices, state_strs, state_vecs, base_pka_diffs, acid_pka_diffs, coupling_cutoff=coupling_cutoff)
+        base_pka_diffs[state_str1], acid_pka_diffs[state_str1] = compare_pkas(
+                indices, q_options, state_str0, state_str1, base_lib, acid_lib)
+    coupling_matrix = construct_coupling_matrix(
+            indices, state_strs, state_vecs, base_pka_diffs, acid_pka_diffs, coupling_cutoff=coupling_cutoff)
     clusters = cluster_coupling_matrix(coupling_matrix)
     return clusters, mols_lib, base_lib, acid_lib
-
-def sort_string(string,ps):
-    """ Sort string by custom indices ps """
-
-    s = list(string)
-    s = [s[p] for p in ps]
-    s = "".join(s)
-    return s
 
 def combine_clusters(state_strs_clusters, state_freqs_clusters, indices_clusters, 
                      sfreq_cutoff_individual=0.01,sfreq_cutoff_combined=0.001,verbose=False):
@@ -562,44 +285,6 @@ def combine_clusters(state_strs_clusters, state_freqs_clusters, indices_clusters
         state_freqs_lib[state_str] = state_freq
 
     return indices, state_strs, state_freqs_lib
-
-def calc_relevant_states(state_freqs_all, mols_lib, max_states=18,verbose=False):
-    """ Reduce number of states to max_states for plotting """
-
-    if len(state_freqs_all.keys()) == 0:
-        return 0, [], [], []
-
-    cutoff = 0.01
-    tries = 0
-
-    N_relevant_states = 1e5
-    while N_relevant_states > max_states:
-        state_strs_relevant = []
-        sfreqs_relevant = []
-        sfreqs_not_relevant = []
-        mols_relevant = []
-        pH_argmaxs = []
-
-        for state_str, sfreqs in state_freqs_all.items():
-            if np.max(sfreqs) > cutoff:
-                state_strs_relevant.append(state_str)
-                sfreqs_relevant.append(sfreqs)
-                mols_relevant.append(mols_lib[state_str])
-                pH_argmaxs.append(np.argmax(sfreqs))
-            else:
-                sfreqs_not_relevant.append(sfreqs)
-        N_relevant_states = len(state_strs_relevant)
-        tries += 1
-        cutoff += 0.02
-
-    # Sort by pH value of max freq.
-    ps = np.argsort(pH_argmaxs)
-    state_strs_relevant = [state_strs_relevant[p] for p in ps]
-    sfreqs_relevant = [sfreqs_relevant[p] for p in ps]
-    mols_relevant = [mols_relevant[p] for p in ps]
-    if verbose:
-        print(f'Final N relevant states: {N_relevant_states} with cutoff {cutoff}')
-    return N_relevant_states, state_strs_relevant, sfreqs_relevant, mols_relevant, sfreqs_not_relevant
 
 def screen_clusters(indices0, q_options0, mol0, mols_lib, smiles_lib, 
                                             model_base, model_acid, base_lib, acid_lib, cutoff_states, device='cpu',
@@ -696,23 +381,6 @@ def check_chiral_consistency(state_strs,mols_lib,smiles_lib):
         mols_lib[state_str] = mol
         smiles_lib[state_str] = smiles
     return mols_lib, smiles_lib
-
-def calc_freqs_from_states(state_strs,state_vecs,ps_all,matrix_def):
-    N_states = len(state_vecs)
-    if matrix_def == 'msm':
-        tmatrix = calc_tmatrix(state_strs,state_vecs,ps_all,N_states)
-        state_freqs = calc_state_freqs_sparse(tmatrix)
-    elif matrix_def == 'dG':
-        dGmatrix = calc_dGmatrix(state_strs,state_vecs,ps_all,N_states)
-        dG_clusters = find_dGclusters(dGmatrix)
-        state_strs, dGmatrix = remove_orphans(dG_clusters, state_strs, dGmatrix)
-        is_connected = check_connectivity(dGmatrix)
-        if not is_connected:
-            raise ValueError('Matrix not connected')
-        Gs = reconstruct_free_energies_incomplete_half(dGmatrix)
-        state_freqs = calc_populations(Gs)
-
-    return state_strs, state_freqs
 
 def calc_macro_props(state_strs, state_freqs, mols_lib):
     """ Net charge as weighted sum over microstate charges """
@@ -884,7 +552,7 @@ def run_pipeline(
                     base_frag_lib[indices_str],acid_frag_lib[indices_str],
                     device=device,verbose=verbose) # pH independent
 
-            ps_all = calc_state_pkas(
+            ps_all = calc_state_diffs(
                     state_strs, state_vecs, base_frag_lib[indices_str], acid_frag_lib[indices_str], indices, pH=pH,matrix_def=matrix_def,
                     verbose=verbose)
             
@@ -967,9 +635,12 @@ def run_pipeline(
         export_macro_pkas(name,pkas_combined,path=path_out)
 
     # reduce number of microstates for plotting
-    N_relevant_states, state_strs_relevant, sfreqs_relevant, mols_relevant, sfreqs_not_relevant = calc_relevant_states(state_freqs_all, mols_lib, verbose=verbose)
+    N_relevant_states, state_strs_relevant, sfreqs_relevant, mols_relevant, sfreqs_not_relevant = calc_relevant_states(
+            state_freqs_all, mols_lib, verbose=verbose)
 
     if N_relevant_states > 0:
-        plot_pH_scan(name, indices, state_strs_relevant, sfreqs_relevant, pHs, net_charges, sfreqs_not_relevant, pkas_combined, path=path_figs,verbose=verbose)
+        plot_pH_scan(
+                name, indices, state_strs_relevant, sfreqs_relevant, pHs, net_charges, 
+                sfreqs_not_relevant, pkas_combined, path=path_figs,verbose=verbose)
         plot_relevant_states(name, mols_relevant, path=path_figs,notebook=notebook)
         compose_image(name,N_relevant_states, path=path_figs)
