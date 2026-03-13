@@ -1,6 +1,6 @@
 import numpy as np
 
-def construct_state_vectors_single(indices, q_options, verbose=False):
+def construct_state_vectors_single(indices, q_options):
     state_vecs = []
     state_vec = np.ones((len(indices)),dtype=int) #[1 for _ in indices]
     state_vecs.append(state_vec)
@@ -29,7 +29,7 @@ def compare_pkas(indices, q_options, state_str0, state_str1, base_lib, acid_lib)
                 acid_pka_diff[rel_idx] = 10. # one disappeared
     return base_pka_diff, acid_pka_diff
 
-def construct_coupling_matrix(indices, state_strs, state_vecs, base_pka_diffs, acid_pka_diffs, coupling_cutoff=1.):
+def construct_coupling_matrix(indices, state_strs, state_vecs, base_pka_diffs, acid_pka_diffs, coupling_cutoff):
     coupling_matrix = np.zeros((len(indices),len(indices)))
     # print(indices)
     for state_str, state_vec in zip(state_strs[1:], state_vecs[1:]):

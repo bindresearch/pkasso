@@ -27,50 +27,7 @@ def calc_p_up_down(pka,pH,matrix_def):
         raise
     return p_up, p_down
 
-def calc_state_diffs(state_strs, state_vecs, base_lib, acid_lib, indices, pH=7.,matrix_def='dG',
-                verbose=False):
-    """ Calc state differences (free energy or MSM) from acid/base pka values for given pH """
 
-    ps_all = [] # pH specific
-
-    for state_str, state_vec in zip(state_strs, state_vecs):
-        if verbose:
-            print('='*20)
-            print(f'{state_str}')
-        ps_up = {}
-        ps_down = {}
-
-        base = base_lib[state_str]
-        acid = acid_lib[state_str]
-        for map_idx, pka in base.items():
-            if map_idx not in indices: # Excluded at the start
-                continue
-            p_up, p_down = calc_p_up_down(pka,pH,matrix_def)
-
-            rel_idx = indices.index(map_idx)
-            if verbose:
-                print(f'rel_idx:{rel_idx} | map_idx:{map_idx} | base {pka} up:{p_up:.2f} stay:{p_down:.2f}')
-            if state_vec[rel_idx] <= 1:
-                ps_up[rel_idx] = p_up
-
-        for map_idx, pka in acid.items():
-            if map_idx not in indices: # Excluded at the start
-                continue
-            p_up, p_down = calc_p_up_down(pka,pH,matrix_def)
-
-            rel_idx = indices.index(map_idx)
-            if verbose:
-                print(f'rel_idx:{rel_idx} | map_idx:{map_idx} | acid {pka} stay:{p_up:.2f} down:{p_down:.2f}')
-            if state_vec[rel_idx] >= 1:
-                ps_down[rel_idx] = p_down
-
-        ps = {
-            'up' : ps_up,
-            'down' : ps_down,
-        }
-        ps_all.append(ps)
-
-    return ps_all
 
 #############################################################################################
 # Transition matrix operations
@@ -288,3 +245,48 @@ def calc_freqs_from_states(state_strs,state_vecs,ps_all,matrix_def):
         Gs = reconstruct_free_energies_incomplete_half(dGmatrix)
         state_freqs = calc_populations(Gs)
     return state_strs, state_freqs
+
+def calc_state_diffs(state_strs, state_vecs, indices, base_lib, acid_lib, pH=7.,matrix_def='dG',
+                verbose=False):
+    """ Calc state differences (free energy or MSM) from acid/base pka values for given pH """
+
+    ps_all = [] # pH specific
+
+    for state_str, state_vec in zip(state_strs, state_vecs):
+        if verbose:
+            print('='*20)
+            print(f'{state_str}')
+        ps_up = {}
+        ps_down = {}
+
+        base = base_lib[state_str]
+        acid = acid_lib[state_str]
+        for map_idx, pka in base.items():
+            if map_idx not in indices: # Excluded at the start
+                continue
+            p_up, p_down = calc_p_up_down(pka,pH,matrix_def)
+
+            rel_idx = indices.index(map_idx)
+            if verbose:
+                print(f'rel_idx:{rel_idx} | map_idx:{map_idx} | base {pka} up:{p_up:.2f} stay:{p_down:.2f}')
+            if state_vec[rel_idx] <= 1:
+                ps_up[rel_idx] = p_up
+
+        for map_idx, pka in acid.items():
+            if map_idx not in indices: # Excluded at the start
+                continue
+            p_up, p_down = calc_p_up_down(pka,pH,matrix_def)
+
+            rel_idx = indices.index(map_idx)
+            if verbose:
+                print(f'rel_idx:{rel_idx} | map_idx:{map_idx} | acid {pka} stay:{p_up:.2f} down:{p_down:.2f}')
+            if state_vec[rel_idx] >= 1:
+                ps_down[rel_idx] = p_down
+
+        ps = {
+            'up' : ps_up,
+            'down' : ps_down,
+        }
+        ps_all.append(ps)
+
+    return ps_all
