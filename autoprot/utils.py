@@ -21,3 +21,17 @@ def calc_qs_all(state_vecs):
         qs = state_vec - 1
         qs_all.append(qs)
     return qs_all
+
+def get_atom_with_map_idx(mol, map_idx):
+    for atom in mol.GetAtoms():
+        if atom.GetAtomMapNum() == map_idx:
+            return atom
+    return None
+
+def sort_string(string,ps):
+    """ Sort string by custom indices ps """
+
+    s = list(string)
+    s = [s[p] for p in ps]
+    s = "".join(s)
+    return s
