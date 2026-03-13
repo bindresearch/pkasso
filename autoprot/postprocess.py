@@ -8,23 +8,10 @@ from rdkit import Chem
 from rdkit.Chem import AllChem
 from rdkit.Chem.Draw import MolToFile, MolsToGridImage
 
+import copy
 import os
 
-# def get_relevant_states(state_strs, state_freqs_all, mols_lib, cutoff=0.05):
-#     state_strs_relevant = []
-#     sfreqs = state_freqs_all.T
-#     sfreqs_relevant = []
-#     mols_relevant = []
-    
-#     for idx, (state_str, sfreq) in enumerate(zip(state_strs,sfreqs)):
-#         if np.max(sfreq) > cutoff:
-#             state_strs_relevant.append(state_str)
-#             sfreqs_relevant.append(sfreq)
-#             mols_relevant.append(mols_lib[state_str])
-
-#     return state_strs_relevant, sfreqs_relevant, mols_relevant
-
-def plot_pH_scan(name, indices, state_strs_relevant, sfreqs_relevant, pHs, net_charges, sfreqs_not_relevant, cmap=plt.cm.Spectral,
+def plot_pH_scan(name, indices, state_strs_relevant, sfreqs_relevant, pHs, net_charges, sfreqs_not_relevant, pkas_combined, cmap=plt.cm.Spectral,
                  path='figures',verbose=False):
     
     cmap = plt.cm.Spectral_r
@@ -55,57 +42,48 @@ def plot_pH_scan(name, indices, state_strs_relevant, sfreqs_relevant, pHs, net_c
     elif len(state_strs_relevant) > 1:
         ax[0].legend(ncol=1,fontsize=8)
 
-    ax[0].set(xlabel='pH',ylabel='Distribution %')
-
-    ax[0].set_title(name)
+    ax[0].set(xlabel='pH',ylabel='Distribution [%]')
+    
     ax[0].grid(alpha=0.3)
 
     ax[1].plot(pHs,net_charges,style,color='black')
+
+    for idx, (q, pka) in enumerate(pkas_combined.items()):
+        x = np.argmin(np.abs(pHs-pka))
+        if q+1 > 0:
+            color = 'tab:blue'
+        else:
+            color = 'tab:red'
+        ax[1].plot(pHs[x],net_charges[x],'o',color=color,markersize=5)
+        ax[1].text(pHs[x]+0.1,net_charges[x]+0.05,f'{pka:.2f}')
+
+
     ax[1].set(xlabel='pH', ylabel='Net charge')
     ax[1].grid(alpha=0.3)
 
     if len(pHs) > 1:
         for idx in range(2):
             ax[idx].set(xlim=(pHs[0],pHs[-1]))
-            ax[idx].set_xticks(np.arange(pHs[0],pHs[-1],1))
+            ax[idx].set_xticks(np.arange(pHs[0],pHs[-1]+0.001,1))
 
     fig.tight_layout()
     if fsave != '':
-        fig.savefig(fsave)
+        fig.savefig(fsave, transparent=True)
     plt.close()
     # return fig
 
-def export_sdf(name,state_strs,mols_lib,path='output',except_optimize_error=False):
-    return_code = 0
+def export_sdf(name,state_strs,mols_lib,path='output'):
     with Chem.SDWriter(f'{path}/{name}.sdf') as f:
         for e_idx, state_str in enumerate(state_strs):
             mol = mols_lib[state_str]
             mol_h = Chem.AddHs(mol)
-            if except_optimize_error:
-                try:
-                    AllChem.EmbedMolecule(mol_h, randomSeed=1, useRandomCoords=True)
-                    AllChem.UFFOptimizeMolecule(mol_h)
-                    mol_h.SetProp("_Name", f'{name}_{e_idx}')
-                    f.write(mol_h)
-                except:
-                    print(f'!!! WARNING: Could not rdkit optimize mol {name} {state_str} !!!')
-                    return_code = -1
-            else:
-                AllChem.EmbedMolecule(mol_h, randomSeed=1, useRandomCoords=True)
-                AllChem.UFFOptimizeMolecule(mol_h)
-                mol_h.SetProp("_Name", f'{name}_{e_idx}')
-                f.write(mol_h)
-    return return_code
 
-def export_smi(name,state_strs,smiles_lib,sfreqs,path='output',fout_smi='out.smi',append=True):
-    if append:
-        action = 'a'
-    else:
-        action = 'w'
-    with open(f'{path}/{fout_smi}',action) as f:
-        for e_idx, (state_str, sfreq) in enumerate(zip(state_strs, sfreqs)):
-            smiles = smiles_lib[state_str]
-            f.write(f'{smiles} {name}_{e_idx} {sfreq/np.sum(sfreqs):.3f}\n')
+            cid = AllChem.EmbedMolecule(mol_h, randomSeed=1, useRandomCoords=True)
+            if cid != 0:
+                raise ValueError(f'{name}_{state_str} could not be embedded.')
+            AllChem.UFFOptimizeMolecule(mol_h)
+            mol_h.SetProp("_Name", f'{name}_{e_idx}')
+            f.write(mol_h)
 
 def export_csv(name,state_strs,smiles_lib,sfreqs,state_qs,path='output',fout_csv='out.csv',append=True):
     if append:
@@ -117,6 +95,11 @@ def export_csv(name,state_strs,smiles_lib,sfreqs,state_qs,path='output',fout_csv
             f.write(f'name,name_state,SMILES,frequency,charge\n')
         for e_idx, (state_str, sfreq) in enumerate(zip(state_strs, sfreqs)):
             smiles = smiles_lib[state_str]
+            # Remove labels
+            mol = Chem.MolFromSmiles(smiles)
+            for atom in mol.GetAtoms():
+                atom.SetAtomMapNum(0)
+            smiles = Chem.MolToSmiles(mol)
             f.write(f'{name},{name}_{e_idx},{smiles},{sfreq/np.sum(sfreqs):.5f},{state_qs[state_str]}\n')
 
 def export_macro_pkas(name,pkas_combined,path='output'):
@@ -125,14 +108,57 @@ def export_macro_pkas(name,pkas_combined,path='output'):
         for idx, (q, pka) in enumerate(pkas_combined.items()):
             f.write(f'pKa{idx+1},{q},{q+1},{pka:.5f}\n')
 
+def calc_relevant_states(state_freqs_all, mols_lib, max_states=18,verbose=False):
+    """ Reduce number of states to max_states for plotting """
+
+    if len(state_freqs_all.keys()) == 0:
+        return 0, [], [], []
+
+    cutoff = 0.01
+    tries = 0
+
+    N_relevant_states = 1e5
+    while N_relevant_states > max_states:
+        state_strs_relevant = []
+        sfreqs_relevant = []
+        sfreqs_not_relevant = []
+        mols_relevant = []
+        pH_argmaxs = []
+
+        for state_str, sfreqs in state_freqs_all.items():
+            if np.max(sfreqs) > cutoff:
+                state_strs_relevant.append(state_str)
+                sfreqs_relevant.append(sfreqs)
+                mols_relevant.append(mols_lib[state_str])
+                pH_argmaxs.append(np.argmax(sfreqs))
+            else:
+                sfreqs_not_relevant.append(sfreqs)
+        N_relevant_states = len(state_strs_relevant)
+        tries += 1
+        cutoff += 0.02
+
+    # Sort by pH value of max freq.
+    ps = np.argsort(pH_argmaxs)
+    state_strs_relevant = [state_strs_relevant[p] for p in ps]
+    sfreqs_relevant = [sfreqs_relevant[p] for p in ps]
+    mols_relevant = [mols_relevant[p] for p in ps]
+    if verbose:
+        print(f'Final N relevant states: {N_relevant_states} with cutoff {cutoff}')
+    return N_relevant_states, state_strs_relevant, sfreqs_relevant, mols_relevant, sfreqs_not_relevant
+
 def plot_relevant_states(name, mols_relevant,path='figures',notebook=False):
 
     for mol in mols_relevant: tmp=AllChem.Compute2DCoords(mol)
+
+    for mol in mols_relevant:
+        for atom in mol.GetAtoms():
+            atom.SetAtomMapNum(0)
     
     img=MolsToGridImage(mols_relevant,molsPerRow=4,subImgSize=(150,150),legends=[x.GetProp("_Name") for x in mols_relevant],returnPNG=False,useSVG=True)
 
+    img = img.replace('fill:#FFFFFF', 'fill:none')
+
     with open(f'{path}/{name}_relevant_states.svg','w') as f:
-        # f.write(img.data)
         if notebook:
             f.write(img.data)
         else:
