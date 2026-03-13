@@ -35,3 +35,11 @@ def sort_string(string,ps):
     s = [s[p] for p in ps]
     s = "".join(s)
     return s
+
+def pack_indices(indices):
+    indices_str = ''
+    for id in indices:
+        indices_str += f'{id},'
+    # indices_str shows what atoms the cluster state_vec and state_str refer to
+    indices_str = indices_str[:-1] # remove last comma
+    return indices_str

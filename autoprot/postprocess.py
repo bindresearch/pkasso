@@ -72,25 +72,25 @@ def plot_pH_scan(name, indices, state_strs_relevant, sfreqs_relevant, pHs, net_c
     plt.close()
     # return fig
 
-def export_sdf(name,state_strs,mols_lib,path='output'):
-    with Chem.SDWriter(f'{path}/{name}.sdf') as f:
+def export_sdf(state_strs,mols_lib,p):
+    with Chem.SDWriter(f'{p.path}/{p.name}.sdf') as f:
         for e_idx, state_str in enumerate(state_strs):
             mol = mols_lib[state_str]
             mol_h = Chem.AddHs(mol)
 
             cid = AllChem.EmbedMolecule(mol_h, randomSeed=1, useRandomCoords=True)
             if cid != 0:
-                raise ValueError(f'{name}_{state_str} could not be embedded.')
+                raise ValueError(f'{p.name}_{state_str} could not be embedded.')
             AllChem.UFFOptimizeMolecule(mol_h)
-            mol_h.SetProp("_Name", f'{name}_{e_idx}')
+            mol_h.SetProp("_Name", f'{p.name}_{e_idx}')
             f.write(mol_h)
 
-def export_csv(name,state_strs,smiles_lib,sfreqs,state_qs,path='output',fout_csv='out.csv',append=True):
-    if append:
+def export_csv(state_strs,smiles_lib,sfreqs,state_qs,p):
+    if p.append:
         action = 'a'
     else:
         action = 'w'
-    with open(f'{path}/{fout_csv}',action) as f:
+    with open(f'{p.path_out}/{p.fout_csv}',action) as f:
         if action == 'w':
             f.write(f'name,name_state,SMILES,frequency,charge\n')
         for e_idx, (state_str, sfreq) in enumerate(zip(state_strs, sfreqs)):
@@ -100,10 +100,10 @@ def export_csv(name,state_strs,smiles_lib,sfreqs,state_qs,path='output',fout_csv
             for atom in mol.GetAtoms():
                 atom.SetAtomMapNum(0)
             smiles = Chem.MolToSmiles(mol)
-            f.write(f'{name},{name}_{e_idx},{smiles},{sfreq/np.sum(sfreqs):.5f},{state_qs[state_str]}\n')
+            f.write(f'{p.name},{p.name}_{e_idx},{smiles},{sfreq/np.sum(sfreqs):.5f},{state_qs[state_str]}\n')
 
-def export_macro_pkas(name,pkas_combined,path='output'):
-    with open(f'{path}/{name}_pkas.csv','w') as f:
+def export_macro_pkas(pkas_combined,p):
+    with open(f'{p.path_out}/{p.name}_pkas.csv','w') as f:
         f.write('idx,q0,q1,pka\n')
         for idx, (q, pka) in enumerate(pkas_combined.items()):
             f.write(f'pKa{idx+1},{q},{q+1},{pka:.5f}\n')
@@ -146,7 +146,7 @@ def calc_relevant_states(state_freqs_all, mols_lib, max_states=18,verbose=False)
         print(f'Final N relevant states: {N_relevant_states} with cutoff {cutoff}')
     return N_relevant_states, state_strs_relevant, sfreqs_relevant, mols_relevant, sfreqs_not_relevant
 
-def plot_relevant_states(name, mols_relevant,path='figures',notebook=False):
+def plot_relevant_states(mols_relevant,p):
 
     for mol in mols_relevant: tmp=AllChem.Compute2DCoords(mol)
 
@@ -158,30 +158,30 @@ def plot_relevant_states(name, mols_relevant,path='figures',notebook=False):
 
     img = img.replace('fill:#FFFFFF', 'fill:none')
 
-    with open(f'{path}/{name}_relevant_states.svg','w') as f:
-        if notebook:
+    with open(f'{p.path_figs}/{p.name}_relevant_states.svg','w') as f:
+        if p.notebook:
             f.write(img.data)
         else:
             f.write(img)
 
-def plot_optimal_state(name, mol, path='figures'):
+def plot_optimal_state(mol, p):
     tmp=AllChem.Compute2DCoords(mol)
-    MolToFile(mol, f'{path}/{name}_opti.svg', size=(800,630), imageType='svg')
-    cairosvg.svg2pdf(url=f'{path}/{name}_opti.svg',write_to=f'{path}/{name}_opti.pdf')
-    os.system(f'rm {path}/{name}_opti.svg')
+    MolToFile(mol, f'{p.path_figs}/{p.name}_opti.svg', size=(800,630), imageType='svg')
+    cairosvg.svg2pdf(url=f'{p.path_figs}/{p.name}_opti.svg',write_to=f'{p.path_figs}/{p.name}_opti.pdf')
+    os.system(f'rm {p.path_figs}/{p.name}_opti.svg')
 
-def compose_image(name,N_relevant_states,path='figures'):
+def compose_image(N_relevant_states,p):
     if N_relevant_states % 4 == 0:
         y = 350 + (N_relevant_states//4) * 150
     else:
         y = 350 + (N_relevant_states//4 + 1) * 150
     Figure(
         "600px", f"{y}px",
-        SVG(f'{path}/{name}_ph_scan.svg').move(30, 0),
-        SVG(f'{path}/{name}_relevant_states.svg').move(0, 350)
-    ).save(f'{path}/{name}_combined.svg')
+        SVG(f'{p.path_figs}/{p.name}_ph_scan.svg').move(30, 0),
+        SVG(f'{p.path_figs}/{p.name}_relevant_states.svg').move(0, 350)
+    ).save(f'{p.path_figs}/{p.name}_combined.svg')
 
-    cairosvg.svg2pdf(url=f'{path}/{name}_combined.svg',write_to=f'{path}/{name}_combined.pdf')
-    os.system(f'rm {path}/{name}_ph_scan.svg')
-    os.system(f'rm {path}/{name}_relevant_states.svg')
-    os.system(f'rm {path}/{name}_combined.svg')
+    cairosvg.svg2pdf(url=f'{p.path_figs}/{p.name}_combined.svg',write_to=f'{p.path_figs}/{p.name}_combined.pdf')
+    os.system(f'rm {p.path_figs}/{p.name}_ph_scan.svg')
+    os.system(f'rm {p.path_figs}/{p.name}_relevant_states.svg')
+    os.system(f'rm {p.path_figs}/{p.name}_combined.svg')

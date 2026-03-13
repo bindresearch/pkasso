@@ -1,6 +1,5 @@
 from .utils import *
 from .transitions import calc_state_diffs, calc_freqs_from_states
-
 import numpy as np
 from rdkit import Chem
 
@@ -197,7 +196,7 @@ def calc_phosphate_clusters(phosphate_groups,pH,matrix_def,
             print(oh_ids)
             print(acid_lib_poh)
         
-        ps_all = calc_state_diffs(state_strs, state_vecs, base_lib_poh, acid_lib_poh, oh_ids, 
+        ps_all = calc_state_diffs(state_strs, state_vecs, oh_ids, base_lib_poh, acid_lib_poh, 
                                     pH=pH,matrix_def=matrix_def,verbose=verbose)
         
         state_strs, state_freqs = calc_freqs_from_states(state_strs,state_vecs,ps_all,matrix_def)
