@@ -20,7 +20,7 @@ pkg_base = resources.files('autoprot')
 
 ROOT = f'{pkg_base}/data'
 
-def preprocess(smiles_raw,verbose=False):
+def preprocess(smiles_raw: str, verbose=False):
     """ 
     Build and preprocess mol.
     Neutralize all molecule charges. If not possible (e.g. quaternary amine),
