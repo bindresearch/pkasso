@@ -5,9 +5,13 @@ from __future__ import division
 from __future__ import unicode_literals
 import numpy as np
 from rdkit import Chem
+from rdkit.Chem import Mol
 
 import os
 import pandas as pd
+from pandas import DataFrame
+
+from typing import Optional
 
 from importlib import resources
 pkg_base = resources.files('autoprot')
@@ -16,21 +20,29 @@ root = f'{pkg_base}/data'
 # root = os.path.abspath("")
 smarts_file = os.path.join(root, "smarts_pattern.tsv")
 
-def split_acid_base_pattern(smarts_file):
+def split_acid_base_pattern(smarts_file: str) -> tuple[DataFrame, DataFrame]:
+    """
+    Load SMARTS patterns and split them into acid and base DataFrames.
+    """
     df_smarts = pd.read_csv(smarts_file, sep="\t")
     df_smarts_acid = df_smarts[df_smarts.Acid_or_base == "A"]
     df_smarts_base = df_smarts[df_smarts.Acid_or_base == "B"]
     return df_smarts_acid, df_smarts_base
 
-def unique_acid_match(matches):
+def unique_acid_match(matches: List[List[int]]) -> List[List[int]]:
+    """
+    Remove duplicate single-atom matches and combine with multi-atom matches.
+    """
     single_matches = list(set([m[0] for m in matches if len(m)==1]))
     double_matches = [m for m in matches if len(m)==2]
     single_matches = [[j] for j in single_matches]
     double_matches.extend(single_matches)
     return double_matches
 
-def match_acid(df_smarts_acid, mol):
-    matches = []
+def match_acid(df_smarts_acid: DataFrame, mol: Mol) -> List[int]:
+    """
+    Find acid pattern matches in a molecule and return matched atom indices.
+    """
     for idx, name, smarts, index, acid_base in df_smarts_acid.itertuples():
         pattern = Chem.MolFromSmarts(smarts)
         match = mol.GetSubstructMatches(pattern)
@@ -52,7 +64,10 @@ def match_acid(df_smarts_acid, mol):
             matches_modify.append(j)
     return matches_modify
 
-def match_base(df_smarts_base, mol):
+def match_base(df_smarts_base: DataFrame, mol: Mol) -> List[int]:
+    """
+    Find base pattern matches in a molecule and return matched atom indices.
+    """
     matches = []
     for idx, name, smarts, indexs, acid_base in df_smarts_base.itertuples():
         pattern = Chem.MolFromSmarts(smarts)
@@ -71,7 +86,30 @@ def match_base(df_smarts_base, mol):
             matches_modify.append(j)
     return matches_modify
 
-def get_ionization_aid(mol, acid_or_base=None):
+def get_ionization_aid(
+    mol: Mol,
+    smarts_file: str,
+    acid_or_base: Optional[str] = None,
+) -> Tuple[List[int], List[int]] | List[int]:
+    """
+    Identify ionization-relevant atom indices in a molecule.
+
+    Parameters
+    ----------
+    mol : RDKit Mol
+        Input molecule.
+    smarts_file : str
+        Path to SMARTS pattern file.
+    acid_or_base : {"acid", "base", None}, optional
+        If None, return both acid and base matches.
+        If "acid", return only acid matches.
+        Otherwise return base matches.
+
+    Returns
+    -------
+    Tuple[List[int], List[int]] or List[int]
+        Matched atom indices.
+    """
     df_smarts_acid, df_smarts_base = split_acid_base_pattern(smarts_file)
 
     if mol == None:
