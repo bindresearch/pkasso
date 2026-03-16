@@ -8,14 +8,18 @@ MISSING = -1000.
 ###################################################################################
 # Microstate transitions/free energy differences from pKa and pH
 
-def calc_charge(pka,pH=7.):
-    """ Hendersson-Hasselbalch eq. """
+def calc_charge(pka: float, pH: float = 7.0) -> float:
+     """Compute protonated fraction from pKa using Henderson-Hasselbalch."""
 
     ppos = 1. / ( 1 + 10**(pH-pka) ) # fraction of more positively charged res
     return ppos
 
-def calc_p_up_down(pka,pH,matrix_def):
-    """ Calc either transition probability or free energy difference between microstates """
+def calc_p_up_down(pka: float, pH: float, matrix_def: str) -> tuple[float, float]:
+    """Compute upward/downward transition values from a pKa at given pH.
+
+    Returns either transition probabilities (`msm`) or free-energy
+    differences (`dG`) between protonation states.
+    """
 
     if matrix_def == 'msm':
         p_up = calc_charge(pka,pH=pH) # probability for higher + state
@@ -27,19 +31,11 @@ def calc_p_up_down(pka,pH,matrix_def):
         raise
     return p_up, p_down
 
-
-
 #############################################################################################
 # Transition matrix operations
 
-def calc_state_freqs(tmatrix):
-    w, v = np.linalg.eig(tmatrix.T)
-    idx = np.argmin(np.abs(w - 1))
-    pi = np.real(v[:, idx])
-    pi = pi / pi.sum()
-    return pi
-
-def calc_state_freqs_sparse(tmatrix):
+def calc_state_freqs_sparse(tmatrix: np.ndarray) -> np.ndarray:
+    """ Compute stationary distribution using power iteration. """
     P = csr_matrix(tmatrix)
 
     pi = np.ones(P.shape[0]) / P.shape[0]
@@ -47,17 +43,14 @@ def calc_state_freqs_sparse(tmatrix):
         pi = pi @ P
     return pi
 
-def calc_state_freqs_power_iter(tmatrix):
-    pi = np.ones(tmatrix.shape[0]) / tmatrix.shape[0]
-
-    for _ in range(10_000):
-        pi = pi @ tmatrix
-
-    pi /= pi.sum()
-    return pi
-
-def calc_raw_matrix(state_strs,state_vecs,ps_all,N_states,matrix_def):
-    """ Make raw matrix between microstates from ps_up and ps_down """
+def calc_raw_matrix(
+    state_strs: list[str],
+    state_vecs: list[np.ndarray],
+    ps_all: np.ndarray,
+    N_states: int,
+    matrix_def: str
+    ) -> tuple[np.ndarray, list[list[int]]]:
+    """ Assemble raw transition or free-energy entries between microstates. """
 
     # N_states x N_states (x duplicate predictions)
     matrix_raw = [[[] for _ in range(N_states)] for _ in range(N_states)] 
@@ -97,8 +90,13 @@ def calc_raw_matrix(state_strs,state_vecs,ps_all,N_states,matrix_def):
                     nonzero_entries.append([c_target_idx,s_idx])
     return matrix_raw, nonzero_entries
 
-def calc_tmatrix(state_strs,state_vecs,ps_all,N_states):
-    """ Transition matrix between molecule protonation states"""
+def calc_tmatrix(
+    state_strs: list[str],
+    state_vecs: list[np.ndarray],
+    ps_all: np.ndarray,
+    N_states: int,
+    ) -> np.ndarray:
+    """ Construct normalized transition matrix between protonation states. """
 
     tmatrix_raw, nonzero_entries = calc_raw_matrix(state_strs,state_vecs,ps_all,N_states,'msm')
 
@@ -122,8 +120,13 @@ def calc_tmatrix(state_strs,state_vecs,ps_all,N_states):
 
     return tmatrix_norm
 
-def calc_dGmatrix(state_strs,state_vecs,ps_all,N_states):
-    """ Matrix of free energy differences between protonation states """
+def calc_dGmatrix(
+    state_strs: list[str],
+    state_vecs: list[np.ndarray],
+    ps_all: np.ndarray,
+    N_states: int,
+    ) -> np.ndarray:
+    """Construct matrix of pairwise free-energy differences between states."""
 
     matrix_raw, nonzero_entries = calc_raw_matrix(state_strs,state_vecs,ps_all,N_states,'dG')
 
@@ -134,7 +137,7 @@ def calc_dGmatrix(state_strs,state_vecs,ps_all,N_states):
         matrix_mean[idx,jdx] = np.mean(matrix_raw[idx][jdx])
     return matrix_mean
 
-def find_dGclusters(dG_matrix):
+def find_dGclusters(dG_matrix: np.ndarray) -> list[list[int]]:
     """
     Identify all clusters (connected components) in dG_matrix.
 
@@ -145,7 +148,7 @@ def find_dGclusters(dG_matrix):
 
     Returns
     -------
-    clusters : list of lists
+    clusters : list[list[int]]
         Each sublist contains the indices of states in that connected cluster
     """
     dG_matrix = np.asarray(dG_matrix)
@@ -157,15 +160,19 @@ def find_dGclusters(dG_matrix):
 
     for i in range(N):
         for j in range(i+1, N):
-            if dG_matrix[i, j] != MISSING:
+            if dG_matrix[i, j] != MISSING or dG_matrix[j, i] != MISSING:
                 Gr.add_edge(i, j)
 
     # Extract connected components
     clusters = [list(c) for c in nx.connected_components(Gr)]
     return clusters
 
-def remove_orphans(dG_clusters, state_strs, dG_matrix):
-    """ Remove disconnected states (never visited) """
+def remove_orphans(
+    dG_clusters: list[list[int]],
+    state_strs: list[str],
+    dG_matrix: np.ndarray,
+    ) -> tuple[list[str], np.ndarray]:
+    """Keep the largest connected cluster and discard isolated states."""
 
     nmax = 0
     for idx, dG_cluster in enumerate(dG_clusters):
@@ -178,8 +185,8 @@ def remove_orphans(dG_clusters, state_strs, dG_matrix):
     dG_matrix_keep = dG_matrix[np.ix_(keep_ids, keep_ids)]
     return state_strs_keep, dG_matrix_keep
 
-def check_connectivity(dG_matrix):
-    """ Double check that matrix is fully connected """
+def check_connectivity(dG_matrix: np.ndarray) -> bool:
+    """Check whether the free-energy difference graph is fully connected."""
 
     N = dG_matrix.shape[0]
     G = nx.Graph()
@@ -188,13 +195,14 @@ def check_connectivity(dG_matrix):
         return True
 
     for i in range(N):
-        for j in range(N):
-            if dG_matrix[i, j] != MISSING and i != j:
+        for j in range(i+1, N):
+            if dG_matrix[i, j] != MISSING:# and i != j: # 
                 G.add_edge(i, j)
 
     return nx.is_connected(G)
 
-def reconstruct_free_energies_incomplete_half(dG_matrix):
+def reconstruct_free_energies_incomplete_half(dG_matrix: np.ndarray) -> np.ndarray:
+    """ Reconstruct absolute free energies from incomplete pairwise deltaG data. """
     N = dG_matrix.shape[0]
     rows, rhs = [], []
 
@@ -225,12 +233,20 @@ def reconstruct_free_energies_incomplete_half(dG_matrix):
     G[1:] = G_reduced
     return G
 
-def calc_populations(Gs):
+def calc_populations(Gs: np.ndarray) -> np.ndarray:
+    """Compute Boltzmann populations from free energies."""
     Z = np.sum(np.exp(-Gs))
     pops = np.exp(-Gs) / Z # Boltzmann weights
     return pops
 
-def calc_freqs_from_states(state_strs,state_vecs,ps_all,matrix_def):
+def calc_freqs_from_states(
+    state_strs: list[str],
+    state_vecs: list[np.ndarray],
+    ps_all: np.ndarray,
+    matrix_def: np.ndarray,
+    ) -> tuple[list[str], np.ndarray]:
+    """Compute microstate frequencies using MSM or dG reconstruction."""
+
     N_states = len(state_vecs)
     if matrix_def == 'msm':
         tmatrix = calc_tmatrix(state_strs,state_vecs,ps_all,N_states)
@@ -241,14 +257,22 @@ def calc_freqs_from_states(state_strs,state_vecs,ps_all,matrix_def):
         state_strs, dGmatrix = remove_orphans(dG_clusters, state_strs, dGmatrix)
         is_connected = check_connectivity(dGmatrix)
         if not is_connected:
-            raise ValueError('Matrix not connected')
+            raise ValueError('Matrix not connected (or not symmetric)')
         Gs = reconstruct_free_energies_incomplete_half(dGmatrix)
         state_freqs = calc_populations(Gs)
     return state_strs, state_freqs
 
-def calc_state_diffs(state_strs, state_vecs, indices, base_lib, acid_lib, pH=7.,matrix_def='dG',
-                verbose=False):
-    """ Calc state differences (free energy or MSM) from acid/base pka values for given pH """
+def calc_state_diffs(
+    state_strs: list[str],
+    state_vecs: list[np.ndarray],
+    indices: list[int],
+    base_lib: dict[str, dict[int, float]],
+    acid_lib: dict[str, dict[int, float]],
+    pH: float = 7.0,
+    matrix_def: str = 'dG',
+    verbose: bool = False,
+    ) -> np.ndarray:
+    """ Compute state transition values from predicted acid/base pKa values. """
 
     ps_all = [] # pH specific
 

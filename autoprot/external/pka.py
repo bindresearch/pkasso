@@ -4,14 +4,20 @@ from .ionization_group import get_ionization_aid
 from .descriptor import mol2vec
 from .net import GCNNet
 
-def load_model(model_file, device="cpu"):
+from rdkit.Chem.rdchem import Mol
+
+def load_model(model_file: str, device: str = "cpu") -> GCNNet:
+    """ Load molgpka ML torch model. """
+
     model= GCNNet().to(device)
     model.load_state_dict(torch.load(model_file, map_location=device, weights_only=True))
     model.eval()
     return model
 
-def model_pred(m2, aid, model, device="cpu"):
-    data = mol2vec(m2, aid)
+def model_pred(mol: Mol, atom_idx: int, model: GCNNet, device: str = "cpu") -> float:
+    """ Predict pKa with molgpka model. """
+
+    data = mol2vec(mol, atom_idx)
     with torch.no_grad():
         data = data.to(device)
         pKa = model(data)
@@ -19,7 +25,8 @@ def model_pred(m2, aid, model, device="cpu"):
         pka = pKa[0][0]
     return pka
 
-def predict_acid(mol,model_acid, device="cpu"):
+def predict_acid(mol: Mol, model_acid: GCNNet, device: str = "cpu") -> dict[int, float]:
+    """ Predict acid pKas with molgpka model. """
 
     acid_idxs= get_ionization_aid(mol, acid_or_base="acid")
     acid_res = {}
@@ -28,7 +35,8 @@ def predict_acid(mol,model_acid, device="cpu"):
         acid_res.update({aid:apka})
     return acid_res
 
-def predict_base(mol,model_base, device="cpu"):
+def predict_base(mol: Mol, model_base: GCNNet, device: str = "cpu") -> dict[int, float]:
+    """ Predict base pKas with molgpka model. """
   
     base_idxs= get_ionization_aid(mol, acid_or_base="base")
     base_res = {}
@@ -37,8 +45,16 @@ def predict_base(mol,model_base, device="cpu"):
         base_res.update({aid:bpka})
     return base_res
 
-def predict_acid_base(mol_h,model_base,model_acid,device='cpu',verbose=False,
-                      pred_acid=True, pred_base=True):
+def predict_acid_base(
+    mol_h: Mol,
+    model_base: GCNNet,
+    model_acid: GCNNet,
+    device: str = 'cpu',
+    verbose: bool = False,
+    pred_acid: bool = True,
+    pred_base: bool =True,
+    ) -> tuple[dict[int, float], dict[int, float]]:
+    """ Wrapper for acid-base prediction with molgpka. """
 
     if pred_base:
         base = predict_base(mol_h,model_base,device=device)
@@ -81,7 +97,8 @@ def predict_acid_base(mol_h,model_base,model_acid,device='cpu',verbose=False,
         acid = {}
     return base, acid
 
-def get_acid_neighbors(mol_h, acid, verbose=False):
+def get_acid_neighbors(mol_h: Mol, acid: dict[int, float], verbose: bool = False) -> dict[int, float]:
+    """ Find heavy-atom neighbour for acidic proton. """
     acid_heavy = {}
 
     for at_idx, pka in acid.items():

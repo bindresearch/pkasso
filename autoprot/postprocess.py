@@ -5,14 +5,27 @@ from svgutils.compose import Figure, SVG
 import cairosvg # import before anything in rdkit.Chem.Draw, breaks otherwise !!
 
 from rdkit import Chem
-from rdkit.Chem import AllChem
+from rdkit.Chem import AllChem, Mol
 from rdkit.Chem.Draw import MolToFile, MolsToGridImage
+
+from autoprot.main import ParamsOutput
 
 import copy
 import os
 
-def plot_pH_scan(name, indices, state_strs_relevant, sfreqs_relevant, pHs, net_charges, sfreqs_not_relevant, pkas_combined, cmap=plt.cm.Spectral,
-                 path='figures',verbose=False):
+def plot_pH_scan(
+    name: str,
+    indices: list[int],
+    state_strs_relevant: list[str],
+    sfreqs_relevant: list[np.ndarray],
+    pHs: np.ndarray,
+    net_charges: np.ndarray,
+    sfreqs_not_relevant: list[np.ndarray],
+    pkas_combined: dict[int, float],
+    path: str = 'figures',
+    verbose: bool = False
+    ) -> None:
+    """ Plot scan of microstate frequencies for different pH values. """
     
     cmap = plt.cm.Spectral_r
     if len(pHs) == 1:
@@ -70,9 +83,8 @@ def plot_pH_scan(name, indices, state_strs_relevant, sfreqs_relevant, pHs, net_c
     if fsave != '':
         fig.savefig(fsave, transparent=True)
     plt.close()
-    # return fig
 
-def export_sdf(state_strs,mols_lib,p):
+def export_sdf(state_strs: list[str], mols_lib: dict[str, Mol], p: ParamsOutput) -> None:
     with Chem.SDWriter(f'{p.path}/{p.name}.sdf') as f:
         for e_idx, state_str in enumerate(state_strs):
             mol = mols_lib[state_str]
@@ -85,7 +97,14 @@ def export_sdf(state_strs,mols_lib,p):
             mol_h.SetProp("_Name", f'{p.name}_{e_idx}')
             f.write(mol_h)
 
-def export_csv(state_strs,smiles_lib,sfreqs,state_qs,p):
+def export_csv(
+    state_strs: list[str],
+    smiles_lib: dict[str,str],
+    sfreqs: np.ndarray,
+    state_qs: dict[str, int],
+    p: ParamsOutput,
+    ) -> None:
+    """ Export csv with information about microstates at the given pH. """
     if p.append:
         action = 'a'
     else:
@@ -102,14 +121,28 @@ def export_csv(state_strs,smiles_lib,sfreqs,state_qs,p):
             smiles = Chem.MolToSmiles(mol)
             f.write(f'{p.name},{p.name}_{e_idx},{smiles},{sfreq/np.sum(sfreqs):.5f},{state_qs[state_str]}\n')
 
-def export_macro_pkas(pkas_combined,p):
+def export_macro_pkas(pkas_combined: dict[int, float], p: ParamsOutput) -> None:
+    """ Write macro pKas from pooled microstates. """
+    for idx, (q, pka) in enumerate(pkas_combined.items()):
+        print(f'pKa{idx+1} | {q+1} --> {q} | {pka:.3f}')
     with open(f'{p.path_out}/{p.name}_pkas.csv','w') as f:
         f.write('idx,q0,q1,pka\n')
         for idx, (q, pka) in enumerate(pkas_combined.items()):
             f.write(f'pKa{idx+1},{q},{q+1},{pka:.5f}\n')
 
-def calc_relevant_states(state_freqs_all, mols_lib, max_states=18,verbose=False):
-    """ Reduce number of states to max_states for plotting """
+def calc_relevant_states(
+    state_freqs_all: dict[str, np.ndarray],
+    mols_lib: dict[str, Mol],
+    max_states: int = 18,
+    verbose: bool = False,
+    ) -> Tuple[
+        int,
+        list[str],
+        list[np.ndarray],
+        list[Mol],
+        list[np.ndarray]
+    ]:
+    """ Reduce number of states to max_states for plotting. """
 
     if len(state_freqs_all.keys()) == 0:
         return 0, [], [], []
@@ -146,7 +179,8 @@ def calc_relevant_states(state_freqs_all, mols_lib, max_states=18,verbose=False)
         print(f'Final N relevant states: {N_relevant_states} with cutoff {cutoff}')
     return N_relevant_states, state_strs_relevant, sfreqs_relevant, mols_relevant, sfreqs_not_relevant
 
-def plot_relevant_states(mols_relevant,p):
+def plot_relevant_states(mols_relevant: list[Mol], p: ParamsOutput) -> None:
+    """ Plot rdkit molecules for relevant states together with state strings. """
 
     for mol in mols_relevant: tmp=AllChem.Compute2DCoords(mol)
 
@@ -164,13 +198,16 @@ def plot_relevant_states(mols_relevant,p):
         else:
             f.write(img)
 
-def plot_optimal_state(mol, p):
+def plot_optimal_state(mol: Mol, p: ParamsOutput) -> None:
+    """ Plot state with highest frequency at pH_output. """
+
     tmp=AllChem.Compute2DCoords(mol)
     MolToFile(mol, f'{p.path_figs}/{p.name}_opti.svg', size=(800,630), imageType='svg')
     cairosvg.svg2pdf(url=f'{p.path_figs}/{p.name}_opti.svg',write_to=f'{p.path_figs}/{p.name}_opti.pdf')
     os.system(f'rm {p.path_figs}/{p.name}_opti.svg')
 
-def compose_image(N_relevant_states,p):
+def compose_image(N_relevant_states: int, p: ParamsOutput) -> None:
+    """ Combine pH scan and plotted rdkit molecules. """
     if N_relevant_states % 4 == 0:
         y = 350 + (N_relevant_states//4) * 150
     else:

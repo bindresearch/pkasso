@@ -10,6 +10,8 @@ from .ionization_group import get_ionization_aid
 import torch
 from torch_geometric.data import Data
 
+from rdkit.Chem.rdchem import Mol
+
 def one_hot(x, allowable_set):
     if x not in allowable_set:
         x = allowable_set[-1]

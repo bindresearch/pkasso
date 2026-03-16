@@ -1,6 +1,20 @@
 import numpy as np
 
-def construct_state_vectors_single(indices, q_options):
+def construct_state_vectors_single(indices: list[int], q_options: np.ndarray) -> list[np.ndarray]:
+    """
+    Construct single-site perturbation state vectors.
+
+    Generates protonation state vectors used for coupling analysis.
+    The neutral reference state (all sites neutral) is included, along
+    with states where exactly one site is protonated or deprotonated,
+    provided that transition is allowed by `q_options`.
+
+    Returns
+    -------
+    state_vecs : list[np.ndarray]
+        List of protonation state vectors.
+    """
+
     state_vecs = []
     state_vec = np.ones((len(indices)),dtype=int) #[1 for _ in indices]
     state_vecs.append(state_vec)
@@ -13,7 +27,30 @@ def construct_state_vectors_single(indices, q_options):
                 state_vecs.append(state_vec)
     return state_vecs
 
-def compare_pkas(indices, q_options, state_str0, state_str1, base_lib, acid_lib):
+def compare_pkas(
+    indices: list[int],
+    q_options: np.ndarray,
+    state_str0: str,
+    state_str1: str,
+    base_lib: dict[str, dict[int, float]],
+    acid_lib: dict[str, dict[int, float]],
+    ) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Compute pKa differences between two protonation states.
+
+    For each site, this function compares predicted acid and base pKa
+    values between a reference state (`state_str0`) and a perturbed
+    state (`state_str1`). Missing predictions are treated as large
+    differences to indicate strong coupling.
+
+    Returns
+    -------
+    base_pka_diff : np.ndarray
+        Absolute differences in predicted base pKa values per site.
+    acid_pka_diff : np.ndarray
+        Absolute differences in predicted acid pKa values per site.
+    """
+
     base_pka_diff = np.zeros((len(indices)))
     acid_pka_diff = np.zeros((len(indices)))
     for rel_idx, at_idx in enumerate(indices):
@@ -29,7 +66,27 @@ def compare_pkas(indices, q_options, state_str0, state_str1, base_lib, acid_lib)
                 acid_pka_diff[rel_idx] = 10. # one disappeared
     return base_pka_diff, acid_pka_diff
 
-def construct_coupling_matrix(indices, state_strs, state_vecs, base_pka_diffs, acid_pka_diffs, coupling_cutoff):
+def construct_coupling_matrix(
+    indices: list[int],
+    state_strs: list[str],
+    state_vecs: list[np.ndarray],
+    base_pka_diffs: dict[str, np.ndarray],
+    acid_pka_diffs: dict[str, np.ndarray],
+    coupling_cutoff: float
+    ) -> np.ndarray:
+    """
+    Build a site-site coupling matrix from pKa perturbations.
+
+    The matrix records how strongly protonating or deprotonating one
+    site affects the predicted pKa values of other sites. Entries are
+    incremented when pKa differences exceed the specified cutoff.
+
+    Returns
+    -------
+    coupling_matrix : np.ndarray
+        Square matrix indicating pairwise coupling strength between sites.
+    """
+
     coupling_matrix = np.zeros((len(indices),len(indices)))
     # print(indices)
     for state_str, state_vec in zip(state_strs[1:], state_vecs[1:]):
@@ -38,7 +95,19 @@ def construct_coupling_matrix(indices, state_strs, state_vecs, base_pka_diffs, a
         coupling_matrix[changed_rel_idx] += np.where(acid_pka_diffs[state_str] >= coupling_cutoff, 1, 0)
     return coupling_matrix
 
-def cluster_coupling_matrix(M):
+def cluster_coupling_matrix(M: np.ndarray) -> list[list[int]]:
+    """
+    Partition sites into clusters based on coupling connectivity.
+
+    Identify connected components in the coupling matrix, grouping
+    sites that influence each other into clusters.
+
+    Returns
+    -------
+    clusters : list[list[int]]
+        Lists of site indices belonging to each coupling cluster.
+    """
+
     n = M.shape[0]
     visited = set()
     clusters = []
