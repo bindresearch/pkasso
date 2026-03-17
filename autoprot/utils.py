@@ -40,8 +40,8 @@ def sort_string(string: str, ps: np.ndarray) -> str:
 
     s = list(string)
     s = [s[p] for p in ps]
-    s = "".join(s)
-    return s
+    s_out = "".join(s)
+    return s_out
 
 def pack_indices(indices: list[int]) -> str:
     """ Convert list of indices into comma-separated string. """

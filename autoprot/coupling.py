@@ -125,5 +125,5 @@ def cluster_coupling_matrix(M: np.ndarray) -> list[list[int]]:
             cluster = {i}
             dfs(i, cluster)
             clusters.append(cluster)
-    clusters = [list(c) for c in clusters]
-    return clusters
+    clusters_out = [list(c) for c in clusters]
+    return clusters_out

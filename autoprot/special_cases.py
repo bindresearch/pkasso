@@ -4,6 +4,8 @@ import numpy as np
 from rdkit import Chem
 from rdkit.Chem.rdchem import Mol
 
+from typing import Any
+
 def match_pattern(mol,pattern):
     """ Match pattern in rdkit molecule.
     
@@ -53,8 +55,8 @@ def add_exclusions(mol: Mol, verbose: bool = False) -> tuple[list[int], list[int
 
     q0s = np.array([at.GetFormalCharge() for at in mol.GetAtoms()])
 
-    exclude_acid_indices = []
-    exclude_base_indices = []
+    exclude_acid_indices: list[int] = []
+    exclude_base_indices: list[int] = []
     mol_h = Chem.rdmolops.AddHs(mol)
 
     pattern_carbonyl = Chem.MolFromSmarts("NC(=O)")
@@ -169,10 +171,7 @@ def has_phosphate(mol: Mol) -> tuple[bool, dict[int, list[int]]]:
 
     found, matches = match_pattern(mol,pattern)
 
-    # found = mol.HasSubstructMatch(pattern)
-    # matches = mol.GetSubstructMatches(pattern)
-
-    phosphate_groups = {}
+    phosphate_groups: dict[int, list[int]] = {}
 
     for match in matches:
         # Find central P of phosphate
@@ -214,8 +213,8 @@ def split_exceptions(indices: list[int], q_options: np.ndarray, except_indices: 
         if map_idx not in except_indices:
             indices_curated.append(map_idx)
             q_options_curated.append(q_option)
-    q_options_curated = np.array(q_options_curated)
-    return indices_curated, q_options_curated
+    q_options_curated_arr = np.array(q_options_curated)
+    return indices_curated, q_options_curated_arr
 
 def calc_phosphate_clusters(
     phosphate_groups: dict[int, list[int]],
@@ -248,24 +247,24 @@ def calc_phosphate_clusters(
     pka1 = 2.0
     pka2 = 6.5
 
-    poh_acid_pkas_single = {
+    poh_acid_pkas_single: dict[str, list[float]] = {
         '0' : [pka1],
         '1' : [pka1],
     }
 
-    base_lib_poh_single = {
+    base_lib_poh_single: dict[str, Any] = {
         '0': {},
         '1': {},
     }
 
-    poh_acid_pkas_double = {
+    poh_acid_pkas_double: dict[str, list[float]] = {
         '00' : [pka2, pka2],
         '01' : [pka1, pka2],
         '10' : [pka2, pka1],
         '11' : [pka1, pka1],
     }
 
-    base_lib_poh_double = {
+    base_lib_poh_double: dict[str, Any] = {
         '00': {},
         '01': {},
         '10': {},
@@ -286,7 +285,7 @@ def calc_phosphate_clusters(
         else:
             print(f'Did not find protonable O for phosphate {p_idx}')
             continue
-        acid_lib_poh = {}
+        acid_lib_poh: dict[str, dict[int, float]] = {}
         for key, val in poh_acid_pkas.items():
             acid_lib_poh[key] = {}
             for jdx, oh_id in enumerate(oh_ids):
@@ -299,9 +298,9 @@ def calc_phosphate_clusters(
         ps_all = calc_state_diffs(state_strs, state_vecs, oh_ids, base_lib_poh, acid_lib_poh, 
                                     pH=pH,matrix_def=matrix_def,verbose=verbose)
         
-        state_strs, state_freqs = calc_freqs_from_states(state_strs,state_vecs,ps_all,matrix_def)
+        state_strs_curated, state_freqs = calc_freqs_from_states(state_strs,state_vecs,ps_all,matrix_def)
 
-        state_strs_poh.append(state_strs)
+        state_strs_poh.append(state_strs_curated)
         state_freqs_poh.append(state_freqs)
         oh_ids_poh.append(oh_ids)
 

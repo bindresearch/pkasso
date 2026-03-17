@@ -1,7 +1,7 @@
 import torch
 from torch.nn import Parameter
-from torch_geometric.nn.conv import MessagePassing
-from torch_geometric.utils import add_remaining_self_loops
+from torch_geometric.nn.conv import MessagePassing # type: ignore
+from torch_geometric.utils import add_remaining_self_loops # type: ignore
 
 from .inits import glorot, zeros
 from .scatter import scatter_add

@@ -1,8 +1,9 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
-from svgutils.compose import Figure, SVG
-import cairosvg # import before anything in rdkit.Chem.Draw, breaks otherwise !!
+from svgutils.compose import Figure, SVG # type: ignore
+# import cairosvg before anything in rdkit.Chem.Draw, breaks otherwise !!
+import cairosvg  # type: ignore
 
 from rdkit import Chem
 from rdkit.Chem import AllChem, Mol
@@ -23,7 +24,7 @@ def plot_pH_scan(
     sfreqs_not_relevant: list[np.ndarray],
     pkas_combined: dict[int, float],
     path: str = 'figures',
-    verbose: bool = False
+    verbose: bool = False,
     ) -> None:
     """ Plot scan of microstate frequencies for different pH values. """
     
