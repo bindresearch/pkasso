@@ -1,7 +1,10 @@
 import numpy as np
+from numpy.typing import NDArray
+
 from scipy.sparse import csr_matrix # type: ignore
 import networkx as nx # type: ignore
 from .utils import pack_vec
+
 
 MISSING = -1000.
 
@@ -34,11 +37,11 @@ def calc_p_up_down(pka: float, pH: float, matrix_def: str) -> tuple[float, float
 #############################################################################################
 # Transition matrix operations
 
-def calc_state_freqs_sparse(tmatrix: np.ndarray) -> np.ndarray:
+def calc_state_freqs_sparse(tmatrix: NDArray[np.float64]) -> NDArray[np.float64]:
     """ Compute stationary distribution using power iteration. """
     P = csr_matrix(tmatrix)
 
-    pi = np.ones(P.shape[0]) / P.shape[0]
+    pi: NDArray[np.float64] = np.ones(P.shape[0]) / P.shape[0]
     for idx in range(1000):
         pi = pi @ P
     return pi
@@ -46,7 +49,7 @@ def calc_state_freqs_sparse(tmatrix: np.ndarray) -> np.ndarray:
 def calc_raw_matrix(
     state_strs: list[str],
     state_vecs: list[np.ndarray],
-    ps_all: np.ndarray,
+    ps_all: list[dict[str, dict[int, float]]],
     N_states: int,
     matrix_def: str
     ) -> tuple[list[list[list[float]]], list[list[int]]]:
@@ -61,14 +64,18 @@ def calc_raw_matrix(
         ps_up = ps_all[s_idx]['up']
         ps_down = ps_all[s_idx]['down']
 
-        recipes = [
-            [ps_up, 1],
-            [ps_down, -1]
-        ]
+        pss = [ps_up, ps_down]
+        dqs = [1, -1]
 
-        for rec in recipes:
-            ps = rec[0]
-            dq = rec[1]
+        # recipes = [
+            # [ps_up, 1],
+            # [ps_down, -1]
+        # ]
+
+        for ps, dq in zip(pss, dqs):
+        # for rec in recipes:
+        #     ps = rec[0]
+        #     dq = rec[1]
 
             for rel_idx, p in ps.items():
                 state_target_vec = state_vec.copy()
@@ -93,7 +100,7 @@ def calc_raw_matrix(
 def calc_tmatrix(
     state_strs: list[str],
     state_vecs: list[np.ndarray],
-    ps_all: np.ndarray,
+    ps_all: list[dict[str, dict[int, float]]],
     N_states: int,
     ) -> np.ndarray:
     """ Construct normalized transition matrix between protonation states. """
@@ -121,7 +128,7 @@ def calc_tmatrix(
 def calc_dGmatrix(
     state_strs: list[str],
     state_vecs: list[np.ndarray],
-    ps_all: np.ndarray,
+    ps_all: list[dict[str, dict[int, float]]],
     N_states: int,
     ) -> np.ndarray:
     """Construct matrix of pairwise free-energy differences between states."""
@@ -197,7 +204,8 @@ def check_connectivity(dG_matrix: np.ndarray) -> bool:
             if dG_matrix[i, j] != MISSING:# and i != j: # 
                 G.add_edge(i, j)
 
-    return nx.is_connected(G)
+    connected = bool(nx.is_connected(G))
+    return connected
 
 def reconstruct_free_energies_incomplete_half(dG_matrix: np.ndarray) -> np.ndarray:
     """ Reconstruct absolute free energies from incomplete pairwise deltaG data. """
@@ -231,10 +239,10 @@ def reconstruct_free_energies_incomplete_half(dG_matrix: np.ndarray) -> np.ndarr
     G[1:] = G_reduced
     return G
 
-def calc_populations(Gs: np.ndarray) -> np.ndarray:
+def calc_populations(Gs: NDArray[np.float64]) -> NDArray[np.float64]:
     """Compute Boltzmann populations from free energies."""
-    Z = np.sum(np.exp(-Gs))
-    pops = np.exp(-Gs) / Z # Boltzmann weights
+    Z: NDArray[np.float64] = np.sum(np.exp(-Gs))
+    pops: NDArray[np.float64] = np.exp(-Gs) / Z # Boltzmann weights
     return pops
 
 def calc_freqs_from_states(

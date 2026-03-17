@@ -1,4 +1,5 @@
 import numpy as np
+from numpy.typing import NDArray
 
 def construct_state_vectors_single(indices: list[int], q_options: np.ndarray) -> list[np.ndarray]:
     """
@@ -34,7 +35,7 @@ def compare_pkas(
     state_str1: str,
     base_lib: dict[str, dict[int, float]],
     acid_lib: dict[str, dict[int, float]],
-    ) -> tuple[np.ndarray, np.ndarray]:
+    ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
     """
     Compute pKa differences between two protonation states.
 
@@ -45,9 +46,9 @@ def compare_pkas(
 
     Returns
     -------
-    base_pka_diff : np.ndarray
+    base_pka_diff : NDArray[np.float64]
         Absolute differences in predicted base pKa values per site.
-    acid_pka_diff : np.ndarray
+    acid_pka_diff : NDArray[np.float64]
         Absolute differences in predicted acid pKa values per site.
     """
 
@@ -69,11 +70,11 @@ def compare_pkas(
 def construct_coupling_matrix(
     indices: list[int],
     state_strs: list[str],
-    state_vecs: list[np.ndarray],
-    base_pka_diffs: dict[str, np.ndarray],
-    acid_pka_diffs: dict[str, np.ndarray],
+    state_vecs: list[NDArray[np.int64]],
+    base_pka_diffs: dict[str, NDArray[np.float64]],
+    acid_pka_diffs: dict[str, NDArray[np.float64]],
     coupling_cutoff: float
-    ) -> np.ndarray:
+    ) -> NDArray[np.int64]:
     """
     Build a site-site coupling matrix from pKa perturbations.
 
@@ -83,11 +84,11 @@ def construct_coupling_matrix(
 
     Returns
     -------
-    coupling_matrix : np.ndarray
+    coupling_matrix : NDArray[np.int64]
         Square matrix indicating pairwise coupling strength between sites.
     """
 
-    coupling_matrix = np.zeros((len(indices),len(indices)))
+    coupling_matrix: NDArray[np.int64] = np.zeros((len(indices),len(indices)), dtype=np.int64)
     # print(indices)
     for state_str, state_vec in zip(state_strs[1:], state_vecs[1:]):
         changed_rel_idx = np.where(state_vec != 1)[0][0]
@@ -95,7 +96,7 @@ def construct_coupling_matrix(
         coupling_matrix[changed_rel_idx] += np.where(acid_pka_diffs[state_str] >= coupling_cutoff, 1, 0)
     return coupling_matrix
 
-def cluster_coupling_matrix(M: np.ndarray) -> list[list[int]]:
+def cluster_coupling_matrix(M: NDArray[np.int64]) -> list[list[int]]:
     """
     Partition sites into clusters based on coupling connectivity.
 
@@ -112,7 +113,7 @@ def cluster_coupling_matrix(M: np.ndarray) -> list[list[int]]:
     visited = set()
     clusters = []
 
-    def dfs(i, cluster):
+    def dfs(i: int, cluster: set[int]) -> None:
         for j in range(n):
             if j not in visited and (M[i, j] != 0 or M[j, i] != 0):
                 visited.add(j)

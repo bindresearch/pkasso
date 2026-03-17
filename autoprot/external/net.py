@@ -8,8 +8,10 @@ from torch_geometric.nn import AttentionalAggregation # type: ignore
 n_features = 29
 hidden = 1024
 
+from typing import Any
+
 class GCNNet(nn.Module):
-    def __init__(self):
+    def __init__(self) -> None:
         super(GCNNet, self).__init__()
         self.conv1 = GCNConv(n_features, 1024, cached=False) # if you defined cache=True, the shape of batch must be same!
         self.bn1 = BatchNorm1d(1024)
@@ -27,7 +29,7 @@ class GCNNet(nn.Module):
         self.fc3 = Linear(128, 16)
         self.fc4 = Linear(16, 1)
 
-    def reset_parameters(self):
+    def reset_parameters(self) -> None:
         self.conv1.reset_parameters()
         self.conv2.reset_parameters()
         self.conv3.reset_parameters()
@@ -39,7 +41,7 @@ class GCNNet(nn.Module):
         self.fc3.reset_parameters()
         self.fc4.reset_parameters()
 
-    def forward(self, data):
+    def forward(self, data: Any) -> Any:
         x, edge_index, batch = data.x, data.edge_index, data.batch
         x = F.relu(self.conv1(x, edge_index))
         x = self.bn1(x)
