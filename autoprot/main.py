@@ -473,7 +473,7 @@ def calc_macro_props(
         - Net charge (frequency-weighted sum)
         - Dictionary mapping microstate strings to formal charges
         - Dictionary mapping formal charges to their total frequency
-    """"
+    """
 
     state_qs = {}
     freqs_macro = {}
@@ -942,35 +942,35 @@ class Autoprot:
     #########################
 
     def coupling_assay(self, indices: list[int], q_options: np.ndarray, coupling_cutoff: float) -> list[list[int]]:
-    """
-    Perform pairwise pKa sensitivity analysis and cluster coupled sites.
+        """
+        Perform pairwise pKa sensitivity analysis and cluster coupled sites.
 
-    This method evaluates whether protonation of one site affects the
-    predicted pKa values of other sites within the provided index set.
+        This method evaluates whether protonation of one site affects the
+        predicted pKa values of other sites within the provided index set.
 
-    Procedure:
-    - Enumerate all single-site protonation states
-    - Construct molecular representations for each state
-    - Compare pKa values between reference and perturbed states
-    - Build a coupling matrix based on pKa differences
-    - Cluster sites according to the coupling threshold
+        Procedure:
+        - Enumerate all single-site protonation states
+        - Construct molecular representations for each state
+        - Compare pKa values between reference and perturbed states
+        - Build a coupling matrix based on pKa differences
+        - Cluster sites according to the coupling threshold
 
-    Parameters
-    ----------
-    indices : list[int]
-        Absolute atom map indices of the protonable sites being analyzed.
-    q_options : np.ndarray
-        Array encoding allowed protonation states for each site.
-    coupling_cutoff : float
-        Threshold used to determine whether two sites are considered
-        coupled based on their pKa differences.
+        Parameters
+        ----------
+        indices : list[int]
+            Absolute atom map indices of the protonable sites being analyzed.
+        q_options : np.ndarray
+            Array encoding allowed protonation states for each site.
+        coupling_cutoff : float
+            Threshold used to determine whether two sites are considered
+            coupled based on their pKa differences.
 
-    Returns
-    -------
-    clusters : list[list[int]]
-        List of clusters, where each cluster contains indices of
-        mutually coupled sites.
-    """
+        Returns
+        -------
+        clusters : list[list[int]]
+            List of clusters, where each cluster contains indices of
+            mutually coupled sites.
+        """
 
         indices_str = pack_indices(indices)
 
@@ -1040,28 +1040,28 @@ class Autoprot:
         return clusters
 
     def construct_mols(self, state_strs: list[str], state_vecs: np.ndarray, indices: list[int]) -> None:
-    """
-    Construct and cache RDKit molecular objects for protonation states.
+        """
+        Construct and cache RDKit molecular objects for protonation states.
 
-    For each unique protonation state defined by `state_strs` and
-    `state_vecs`, this method:
+        For each unique protonation state defined by `state_strs` and
+        `state_vecs`, this method:
 
-    - Builds the corresponding RDKit molecule
-    - Assigns the state string as the molecule name
-    - Stores the molecule and its SMILES representation
+        - Builds the corresponding RDKit molecule
+        - Assigns the state string as the molecule name
+        - Stores the molecule and its SMILES representation
 
-    Molecules are only constructed if they are not already present
-    in the cache.
+        Molecules are only constructed if they are not already present
+        in the cache.
 
-    Parameters
-    ----------
-    state_strs : list[str]
-        Encoded representations of protonation states.
-    state_vecs : np.ndarray
-        Vector representations corresponding to `state_strs`.
-    indices : list[int]
-        Absolute atom map indices defining the current cluster.
-    """
+        Parameters
+        ----------
+        state_strs : list[str]
+            Encoded representations of protonation states.
+        state_vecs : np.ndarray
+            Vector representations corresponding to `state_strs`.
+        indices : list[int]
+            Absolute atom map indices defining the current cluster.
+        """
 
         indices_str = pack_indices(indices)
         if indices_str not in self.mols_libs:

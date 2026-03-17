@@ -4,7 +4,7 @@ from torch import nn
 from torch.nn import Linear
 from torch.nn import BatchNorm1d
 from .gcn_conv import GCNConv
-from torch_geometric.nn import AttentionalAggregation
+from torch_geometric.nn import AttentionalAggregation # type: ignore
 n_features = 29
 hidden = 1024
 

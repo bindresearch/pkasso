@@ -8,7 +8,7 @@ from rdkit import Chem
 from rdkit.Chem import Mol
 
 import os
-import pandas as pd
+import pandas as pd # type: ignore
 from pandas import DataFrame
 
 from typing import Optional
@@ -29,20 +29,21 @@ def split_acid_base_pattern(smarts_file: str) -> tuple[DataFrame, DataFrame]:
     df_smarts_base = df_smarts[df_smarts.Acid_or_base == "B"]
     return df_smarts_acid, df_smarts_base
 
-def unique_acid_match(matches: List[List[int]]) -> List[List[int]]:
+def unique_acid_match(matches: list[list[int]]) -> list[list[int]]:
     """
     Remove duplicate single-atom matches and combine with multi-atom matches.
     """
     single_matches = list(set([m[0] for m in matches if len(m)==1]))
     double_matches = [m for m in matches if len(m)==2]
-    single_matches = [[j] for j in single_matches]
-    double_matches.extend(single_matches)
+    single_matches_l = [[j] for j in single_matches]
+    double_matches.extend(single_matches_l)
     return double_matches
 
-def match_acid(df_smarts_acid: DataFrame, mol: Mol) -> List[int]:
+def match_acid(df_smarts_acid: DataFrame, mol: Mol) -> list[int]:
     """
     Find acid pattern matches in a molecule and return matched atom indices.
     """
+    matches = []
     for idx, name, smarts, index, acid_base in df_smarts_acid.itertuples():
         pattern = Chem.MolFromSmarts(smarts)
         match = mol.GetSubstructMatches(pattern)
@@ -64,7 +65,7 @@ def match_acid(df_smarts_acid: DataFrame, mol: Mol) -> List[int]:
             matches_modify.append(j)
     return matches_modify
 
-def match_base(df_smarts_base: DataFrame, mol: Mol) -> List[int]:
+def match_base(df_smarts_base: DataFrame, mol: Mol) -> list[int]:
     """
     Find base pattern matches in a molecule and return matched atom indices.
     """
@@ -90,7 +91,7 @@ def get_ionization_aid(
     mol: Mol,
     smarts_file: str,
     acid_or_base: Optional[str] = None,
-) -> Tuple[List[int], List[int]] | List[int]:
+) -> tuple[list[int], list[int]] | list[int]:
     """
     Identify ionization-relevant atom indices in a molecule.
 

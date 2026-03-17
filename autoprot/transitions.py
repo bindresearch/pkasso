@@ -1,6 +1,6 @@
 import numpy as np
-from scipy.sparse import csr_matrix
-import networkx as nx
+from scipy.sparse import csr_matrix # type: ignore
+import networkx as nx # type: ignore
 from .utils import pack_vec
 
 MISSING = -1000.
@@ -9,7 +9,7 @@ MISSING = -1000.
 # Microstate transitions/free energy differences from pKa and pH
 
 def calc_charge(pka: float, pH: float = 7.0) -> float:
-     """Compute protonated fraction from pKa using Henderson-Hasselbalch."""
+    """Compute protonated fraction from pKa using Henderson-Hasselbalch."""
 
     ppos = 1. / ( 1 + 10**(pH-pka) ) # fraction of more positively charged res
     return ppos
@@ -49,11 +49,11 @@ def calc_raw_matrix(
     ps_all: np.ndarray,
     N_states: int,
     matrix_def: str
-    ) -> tuple[np.ndarray, list[list[int]]]:
+    ) -> tuple[list[list[list[float]]], list[list[int]]]:
     """ Assemble raw transition or free-energy entries between microstates. """
 
     # N_states x N_states (x duplicate predictions)
-    matrix_raw = [[[] for _ in range(N_states)] for _ in range(N_states)] 
+    matrix_raw: list[list[list[float]]] = [[[] for _ in range(N_states)] for _ in range(N_states)] 
 
     nonzero_entries = []
 
@@ -112,11 +112,9 @@ def calc_tmatrix(
         tmatrix[idx,idx] = np.prod(-1.*row+1) # probability not to transition
 
     # Normalized tmatrix (probabilities from one state to all other states sums to 1)
-    tmatrix_norm = []
-    for row in tmatrix:
-        tmatrix_norm.append(row / np.sum(row))
-    
-    tmatrix_norm = np.array(tmatrix_norm)
+    tmatrix_norm = np.zeros((tmatrix.shape))
+    for idx, row in enumerate(tmatrix):
+        tmatrix_norm[idx] = row / np.sum(row)
 
     return tmatrix_norm
 
@@ -242,8 +240,8 @@ def calc_populations(Gs: np.ndarray) -> np.ndarray:
 def calc_freqs_from_states(
     state_strs: list[str],
     state_vecs: list[np.ndarray],
-    ps_all: np.ndarray,
-    matrix_def: np.ndarray,
+    ps_all: list[dict[str, dict[int, float]]],
+    matrix_def: str,
     ) -> tuple[list[str], np.ndarray]:
     """Compute microstate frequencies using MSM or dG reconstruction."""
 
@@ -271,7 +269,7 @@ def calc_state_diffs(
     pH: float = 7.0,
     matrix_def: str = 'dG',
     verbose: bool = False,
-    ) -> np.ndarray:
+    ) -> list[dict[str, dict[int, float]]]:
     """ Compute state transition values from predicted acid/base pKa values. """
 
     ps_all = [] # pH specific
