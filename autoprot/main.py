@@ -597,8 +597,8 @@ class Autoprot:
 
     def __post_init__(self) -> None:
         if self.pHs is None:
-            assert self.pHs is not None
             self.pHs: NDArray[np.float64] = np.arange(0, 14.1, 0.5)
+            assert self.pHs is not None
 
     def run(self) -> None:
         """
@@ -1175,7 +1175,7 @@ class Autoprot:
                 state_strs_export.append(state_str)
                 state_freqs_export_l.append(state_freq)
 
-        state_freqs_export: NDArray[np.float64] = np.array(state_freqs_export)
+        state_freqs_export: NDArray[np.float64] = np.array(state_freqs_export_l)
         ps = np.argsort(state_freqs_export)[::-1] # Sort by highest probability
 
         state_freqs_export = state_freqs_export[ps]
