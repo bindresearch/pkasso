@@ -1,7 +1,7 @@
 from rdkit import Chem
 from rdkit.Chem import AllChem
 from rdkit import RDLogger
-RDLogger.DisableLog('rdApp.*')
+# RDLogger.DisableLog('rdApp.*')
 from rdkit.Chem import rdmolops
 
 import numpy as np
@@ -12,21 +12,23 @@ from torch_geometric.data import Data # type: ignore
 
 from rdkit.Chem.rdchem import Mol
 
-def one_hot(x, allowable_set):
+from typing import Any
+
+def one_hot(x: Any, allowable_set: list[Any]) -> list[bool]:
     if x not in allowable_set:
         x = allowable_set[-1]
     return list(map(lambda s: x == s, allowable_set))
 
-def get_bond_pair(mol):
-    bonds = mol.GetBonds()
-    res = [[],[]]
+def get_bond_pair(mol: Mol) -> list[list[int]]:
+    bonds = mol.GetBonds() # type: ignore
+    res: list[list[int]] = [[],[]]
     for bond in bonds:
         res[0] += [bond.GetBeginAtomIdx(), bond.GetEndAtomIdx()]
         res[1] += [bond.GetEndAtomIdx(), bond.GetBeginAtomIdx()]
     return res
 
-def get_atom_features(mol, aid):
-    AllChem.ComputeGasteigerCharges(mol)
+def get_atom_features(mol: Mol, aid: int) -> list[Any]:
+    AllChem.ComputeGasteigerCharges(mol) # type: ignore
     Chem.AssignStereochemistry(mol)
 
     acceptor_smarts_one = '[!$([#1,#6,F,Cl,Br,I,o,s,nX3,#7v5,#15v5,#16v4,#16v6,*+1,*+2,*+3])]'
@@ -59,7 +61,7 @@ def get_atom_features(mol, aid):
     for atom_idx in range(mol.GetNumAtoms()):
         atom = mol.GetAtomWithIdx(atom_idx)
 
-        o = []
+        o: list[Any] = []
         o += one_hot(atom.GetSymbol(), ['C', 'H', 'O', 'N', 'S', 'Cl', 'F', 'Br', 'P',
                                         'I'])
         o += [atom.GetDegree()]
@@ -92,7 +94,12 @@ def get_atom_features(mol, aid):
         m.append(o)
     return m
 
-def mol2vec(mol, atom_idx, evaluation=True, pka=None):
+def mol2vec(
+    mol: Mol,
+    atom_idx: int,
+    evaluation: bool = True,
+    pka: float | None = None,
+) -> Data:
     node_f = get_atom_features(mol, atom_idx)
     edge_index = get_bond_pair(mol)
     if evaluation:

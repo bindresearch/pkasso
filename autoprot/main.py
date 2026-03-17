@@ -11,6 +11,7 @@ from rdkit.Chem import RegistrationHash
 from rdkit.Chem.rdchem import Mol
 
 import numpy as np
+from numpy.typing import NDArray
 
 import copy
 import itertools
@@ -59,7 +60,7 @@ def preprocess(smiles_raw: str, verbose: bool = False) -> tuple[Mol,  str]:
 
     if verbose:
         print('Formal charges before cleanup')
-        charges = [at.GetFormalCharge() for at in mol.GetAtoms()]
+        charges = [at.GetFormalCharge() for at in mol.GetAtoms()] # type: ignore
         print(charges)
 
     mol = rdMolStandardize.Cleanup(mol)
@@ -73,12 +74,12 @@ def preprocess(smiles_raw: str, verbose: bool = False) -> tuple[Mol,  str]:
     mol = Chem.MolFromSmiles(smiles, sanitize=True)
     smiles = Chem.MolToSmiles(mol,canonical=True)
 
-    for atom in mol.GetAtoms():
+    for atom in mol.GetAtoms(): # type: ignore
         atom.SetAtomMapNum(atom.GetIdx() + 1)
 
     if verbose:
         print('Formal charges after cleanup')
-        symbols = [at.GetFormalCharge() for at in mol.GetAtoms()]
+        symbols = [at.GetFormalCharge() for at in mol.GetAtoms()] # type: ignore
         print(symbols)
 
     return mol, smiles
@@ -91,7 +92,7 @@ def find_candidate_sites(
         pH: float,
         pH_band: float = 8.,
         verbose: bool = False,
-) -> tuple[list[int], np.ndarray]:
+) -> tuple[list[int], NDArray[np.int64]]:
     """
     Determine possible protonation and deprotonation sites for a molecule.
     Candidate atom indices are derived from predicted basic and acidic sites.
@@ -118,7 +119,7 @@ def find_candidate_sites(
     -------
     indices : list[int]
         Sorted atom map indices considered for protonation state changes.
-    q_options : np.ndarray
+    q_options : NDArray[np.int64]
         Array of shape (n_sites, 3) indicating allowed states per site:
         [deprotonated, unchanged, protonated].
     """
@@ -130,7 +131,7 @@ def find_candidate_sites(
     if verbose:
         print(f'relevant indices: {indices}')
 
-    q_options = np.zeros((len(indices),3)) # deprot=0, stay=1, prot=2
+    q_options = np.zeros((len(indices),3),dtype=np.int64) # deprot=0, stay=1, prot=2
     for rel_idx, map_idx in enumerate(indices):
         q_options[rel_idx,1] = 1 # always allow stay
         if map_idx in prot_candidates:
@@ -143,7 +144,10 @@ def find_candidate_sites(
                     q_options[rel_idx,0] = 1 # allow deprotonation
     return indices, q_options
 
-def construct_state_vectors(q_options: np.ndarray, cutoff_states: int) -> np.ndarray:
+def construct_state_vectors(
+    q_options: NDArray[np.int64],
+    cutoff_states: int,
+) -> list[NDArray[np.int64]]:
     """
     Enumerate all valid protonation state vectors given allowed site options.
 
@@ -154,7 +158,7 @@ def construct_state_vectors(q_options: np.ndarray, cutoff_states: int) -> np.nda
 
     Parameters
     ----------
-    q_options : np.ndarray
+    q_options :  NDArray[np.int64]
         Array of shape (n_sites, 3) indicating allowed states per site,
         where columns correspond to [deprotonated, unchanged, protonated]
         and entries are 1 (allowed) or 0 (disallowed).
@@ -163,7 +167,7 @@ def construct_state_vectors(q_options: np.ndarray, cutoff_states: int) -> np.nda
 
     Returns
     -------
-    np.ndarray
+    list[NDArray[np.int64]]
         Array of shape (n_states, n_sites) containing all valid state vectors,
         or an empty list if the number of combinations exceeds ``cutoff_states``.
     """
@@ -179,15 +183,15 @@ def construct_state_vectors(q_options: np.ndarray, cutoff_states: int) -> np.nda
     
     N_trial_vecs = np.prod([len(qs) for qs in q_options_nonzero])
     if N_trial_vecs > cutoff_states:
-        return np.array([])
+        return []#np.array([])
     else:
-        state_vecs = np.array(list(itertools.product(*q_options_nonzero)))
+        state_vecs = list([np.array(x) for x in list(itertools.product(*q_options_nonzero))])
         return state_vecs
 
 #########################################
 # rdkit mol object construction
 
-def construct_mol(mol0: Mol, indices: list[int], state_vec: np.ndarray) -> tuple[Mol, str]:
+def construct_mol(mol0: Mol, indices: list[int], state_vec: NDArray[np.int64]) -> tuple[Mol, str]:
     """
     Construct a protonation-state-specific molecule from a reference molecule.
 
@@ -205,7 +209,7 @@ def construct_mol(mol0: Mol, indices: list[int], state_vec: np.ndarray) -> tuple
     indices : list[int]
         Atom map indices corresponding to the sites whose states are
         defined in ``state_vec``.
-    state_vec : np.ndarray
+    state_vec :  NDArray[np.int64]
         Protonation state vector for the selected sites. Values are encoded
         as [0, 1, 2] corresponding to [deprotonated, unchanged, protonated].
 
@@ -227,6 +231,8 @@ def construct_mol(mol0: Mol, indices: list[int], state_vec: np.ndarray) -> tuple
 
     for map_idx, q in zip(indices,qs):
         atom = get_atom_with_map_idx(rw, map_idx)
+        if atom is None:
+            raise
         atom.SetFormalCharge(int(q))
         if q == -1:
             for nbr in atom.GetNeighbors():
@@ -245,8 +251,8 @@ def construct_mol(mol0: Mol, indices: list[int], state_vec: np.ndarray) -> tuple
 # Cluster tests and operations
 
 def combine_clusters(
-    state_strs_clusters: list[str],
-    state_freqs_clusters: list[np.ndarray],
+    state_strs_clusters: list[list[str]],
+    state_freqs_clusters: list[NDArray[np.float64]],
     indices_clusters: list[list[int]],
     sfreq_cutoff_individual: float = 0.01,
     sfreq_cutoff_combined: float = 0.001,
@@ -271,7 +277,7 @@ def combine_clusters(
     ----------
     state_strs_clusters : list[str]
         Microstate string labels for each cluster.
-    state_freqs_clusters : list[np.ndarray]
+    state_freqs_clusters : list[NDArray[np.float64]]
         Corresponding state frequency arrays for each cluster.
     indices_clusters : list[list[int]]
         Atom indices associated with each cluster (must be non-overlapping).
@@ -298,7 +304,7 @@ def combine_clusters(
     # Cull the state_strs per cluster a bit before combining.
     # This is quite conservative (everything with at least 1% freq in that cluster)
 
-    cluster_state_ids = []
+    cluster_state_ids: list[list[int]] = []
 
     if verbose:
         print(state_strs_clusters)
@@ -315,7 +321,7 @@ def combine_clusters(
         print(f'N microstate combinations from clusters: {len(combinations)}')
 
     state_strs = []
-    state_freqs = []
+    state_freqs_list = []
     indices = []
     for indices_cluster in indices_clusters:
         indices.extend(indices_cluster) # This requires non-overlapping clusters!
@@ -332,12 +338,12 @@ def combine_clusters(
         state_str = sort_string(state_str,ps) # match sorted indices                 
         if state_freq >= sfreq_cutoff_combined:
             state_strs.append(state_str)
-            state_freqs.append(state_freq)
+            state_freqs_list.append(state_freq)
 
     if verbose:
         print(f'N chosen microstate combinations: {len(state_strs)}')
     # Correct freqs for removal of very unlikely states
-    state_freqs = np.array(state_freqs)
+    state_freqs = np.array(state_freqs_list)
     state_freqs /= np.sum(state_freqs)
 
     state_freqs_lib = {}
@@ -422,7 +428,7 @@ def calc_symmetry(
     """
 
     state_hashes = calc_hashes(state_strs,mols_lib)
-    state_dict = {}
+    state_dict: dict[str, list[str]] = {}
 
     for state_str, state_hash in zip(state_strs,state_hashes):
         if state_hash in state_dict:
@@ -433,8 +439,8 @@ def calc_symmetry(
     if verbose:
         print(state_dict)
 
-    state_strs_symm = []
-    state_freqs_symm = []
+    state_strs_symm: list[str] = []
+    state_freqs_symm: list[float] = []
 
     for state_hash, state_strs_per_hash in state_dict.items():
         state_strs_sorted = sorted(state_strs_per_hash)
@@ -475,9 +481,9 @@ def calc_macro_props(
         - Dictionary mapping formal charges to their total frequency
     """
 
-    state_qs = {}
-    freqs_macro = {}
-    net_charge = 0.       
+    state_qs: dict[str, int] = {}
+    freqs_macro: dict[int, float] = {}
+    net_charge = 0.
     for state_str, state_freq in zip(state_strs, state_freqs):
         state_q = Chem.GetFormalCharge(mols_lib[state_str])
         state_qs[state_str] = state_q
@@ -490,7 +496,7 @@ def calc_macro_props(
 
 ###########
 
-def combine_pkas_macro(pHs: np.ndarray, freqs_macro_all: list[dict[int, float]]) -> dict[int, float]:
+def combine_pkas_macro(pHs: NDArray[np.float64], freqs_macro_all: list[dict[int, float]]) -> dict[int, float]:
     """
     Estimate macrostate pKa values from charge-resolved frequency data.
 
@@ -505,7 +511,7 @@ def combine_pkas_macro(pHs: np.ndarray, freqs_macro_all: list[dict[int, float]])
 
     Parameters
     ----------
-    pHs : np.ndarray
+    pHs : NDArray[np.float64]
         Array of pH values corresponding to the frequency datasets.
     freqs_macro_all : list[dict[int, float]]
         List of macrostate frequency dictionaries, one per pH value.
@@ -518,8 +524,8 @@ def combine_pkas_macro(pHs: np.ndarray, freqs_macro_all: list[dict[int, float]])
         Represents pKa between q and q+1.
     """
 
-    pkas_macro = {}
-    pkas_weights = {}
+    pkas_macro: dict[int, list[float]] = {}
+    pkas_weights: dict[int, list[float]] = {}
 
     for pH, freqs_macro in zip(pHs,freqs_macro_all):
         qs_sorted = sorted(freqs_macro.keys())
@@ -536,7 +542,7 @@ def combine_pkas_macro(pHs: np.ndarray, freqs_macro_all: list[dict[int, float]])
                     pkas_macro[q] = [pka_macro]
                     pkas_weights[q] = [pka_weight]
 
-    pkas_combined = {}
+    pkas_combined: dict[int, float] = {}
 
     for q, pkas in pkas_macro.items():
         ws = pkas_weights[q]
@@ -547,86 +553,52 @@ def combine_pkas_macro(pHs: np.ndarray, freqs_macro_all: list[dict[int, float]])
 ###########
 
 @dataclass
-class ParamsOutput:
-    name: str
-    path_out : str
-    path_figs: str
-    fout_csv: str
-    append: bool
-    notebook: bool
-
 class Autoprot:
-    def __init__(self, smiles_raw: str, **kwargs: object) -> None:
-        """
-        Initialize the Autoprot pipeline.
+    """
+    Autoprot pipeline for protonation state prediction.
 
-        Parameters
-        ----------
-        smiles_raw : str
-            Input SMILES string of the molecule to be processed.
-        **kwargs : object
-            Optional configuration parameters. Supported keys include:
+    Parameters
+    ----------
+    smiles_raw : str
+        Input SMILES string of the molecule to be processed.
+    **kwargs : object
+        Optional configuration parameters. Supported keys include:
 
-            Pipeline parameters:
-                name, cutoff_states, device, pH_output, pH_band,
-                pHs, sfreq_cutoff_individual, sfreq_cutoff_combined,
-                matrix_def, export_opti_sdf, path_out, path_figs,
-                cutoff_export, verbose
+        Pipeline parameters:
+            name, cutoff_states, device, pH_output, pH_band,
+            pHs, sfreq_cutoff_individual, sfreq_cutoff_combined,
+            matrix_def, export_opti_sdf, path_out, path_figs,
+            cutoff_export, verbose
 
-            Output-related parameters:
-                name, path_out, path_figs, fout_csv, append, notebook
+        Output-related parameters:
+            name, path_out, path_figs, fout_csv, append, notebook
 
-        Notes
-        -----
-        Parameters not provided in ``kwargs`` are filled with internal
-        defaults. Output-related parameters are stored in
-        ``self.params_out`` (``ParamsOutput`` object). All other
-        configuration values are stored as instance attributes.
-        """
+    """
+    smiles_raw: str
 
-        self.smiles_raw: str = smiles_raw
+    name: str = 'molecule'
+    path_out: str = 'output'
+    path_figs: str = 'figures'
+    fout_csv: str = 'results.csv'
+    append: bool = False
+    notebook: bool = False
 
-        defaults: dict[str, object] = {
-            "name": "molecule",
-            "cutoff_states": 4000,
-            "device": "cpu",
-            "pH_output": 7.0,
-            "pH_band": 8.0,
-            "pHs": np.arange(0, 14.1, 0.5),
-            "fout_csv": "results.csv",
-            "append": False,
-            "notebook": False,
-            "sfreq_cutoff_individual": 0.01,
-            "sfreq_cutoff_combined": 0.001,
-            "matrix_def": "dG",
-            "export_opti_sdf": False,
-            "path_out": "output",
-            "path_figs": "figures",
-            "cutoff_export": 0.5,
-            "verbose": False,
-        }
+    cutoff_states: int = 4000
+    device: str = 'cpu'
+    pH_band: float = 8.0
+    pH_output: float = 7.0
+    pHs: NDArray[np.float64] | None = None
+    sfreq_cutoff_individual: float = 0.01
+    sfreq_cutoff_combined: float = 0.001
+    matrix_def: str = 'dG'
+    export_opti_sdf: bool = False
+    cutoff_export: float = 0.5
+    verbose: bool = False
 
-        output_keys: set[str] = {
-            "name",
-            "path_out",
-            "path_figs",
-            "fout_csv",
-            "append",
-            "notebook",
-        }
-
-        params: dict[str, object] = {
-            key: kwargs.get(key, defaults[key]) for key in defaults
-        }
-
-        self.params_out: ParamsOutput = ParamsOutput(
-            **{key: params[key] for key in output_keys}
-        )
-
-        for key, value in params.items():
-            if key not in output_keys:
-                setattr(self, key, value)
-
+    def __post_init__(self) -> None:
+        if self.pHs is None:
+            assert self.pHs is not None
+            self.pHs: NDArray[np.float64] = np.arange(0, 14.1, 0.5)
 
     def run(self) -> None:
         """
@@ -657,15 +629,15 @@ class Autoprot:
         """
 
         if self.verbose:
-            print(self.params_out.name)
+            print(self.name)
             print(self.smiles_raw, flush=True)
 
         self.initialize_paths_models_libs()
         self.prepare_neutral_state()
 
-        self.net_charges = []
-        self.state_freqs_all = {}
-        self.freqs_macro_all = []
+        self.net_charges: list[float] = []
+        self.state_freqs_all: dict[str, NDArray[np.float64]] = {}
+        self.freqs_macro_all: list[dict[int, float]] = []
 
         self.indices0, _ = find_candidate_sites(
                 self.base0, self.acid0, self.exclude_base_indices, self.exclude_acid_indices,
@@ -689,7 +661,8 @@ class Autoprot:
         - Optionally exports pH-specific outputs
         """
 
-        for pH_idx, pH in enumerate(self.pHs):
+        assert self.pHs is not None
+        for pH_idx, pH in enumerate(self.pHs.flat):
 
             indices0_curated, q_options0 = self.calc_curated_indices(pH)
 
@@ -735,24 +708,24 @@ class Autoprot:
             self.construct_mols(state_strs, state_vecs, indices)
 
             # Symmetry (combine frequencies for chemically identical microstates)
-            state_strs, state_freqs = calc_symmetry(
+            state_strs_sym, state_freqs_sym = calc_symmetry(
                 state_strs, state_freqs_lib, self.mols_libs[indices_str], verbose=self.verbose)
 
             # Macro-pka properties from combined microstates
             net_charge, state_qs, freqs_macro = calc_macro_props(
-                state_strs, state_freqs, self.mols_libs[indices_str])
+                state_strs_sym, state_freqs_sym, self.mols_libs[indices_str])
             self.net_charges.append(net_charge)
             self.freqs_macro_all.append(freqs_macro)
 
             # Add to results for pH scan
-            for state_str, state_freq in zip(state_strs,state_freqs):
+            for state_str, state_freq in zip(state_strs_sym,state_freqs_sym):
                 if state_str not in self.state_freqs_all:
                     self.state_freqs_all[state_str] = np.zeros(len(self.pHs))
                 self.state_freqs_all[state_str][pH_idx] = state_freq
 
             # Output pH-specific results for pH_output
             if abs(pH - self.pH_output) < 1e-8:
-                self.make_pH_specific_output(state_strs, state_freqs, state_qs, indices)
+                self.make_pH_specific_output(state_strs_sym, state_freqs_sym, state_qs, indices)
 
     def _finalize(self) -> None:
         """
@@ -765,23 +738,23 @@ class Autoprot:
         - Generating pH scan plots
         """
 
-        self.net_charges = np.round(np.array(self.net_charges),decimals=4)
+        assert self.pHs is not None
+        self.net_charges_arr = np.round(np.array(self.net_charges),decimals=4)
         pkas_combined = combine_pkas_macro(self.pHs, self.freqs_macro_all)
 
         if pkas_combined:
-            export_macro_pkas(pkas_combined,self.params_out)
+            export_macro_pkas(pkas_combined,self.name, self.path_out)
 
         # reduce number of microstates for plotting
-        N_relevant_states, state_strs_relevant, sfreqs_relevant, mols_relevant, sfreqs_not_relevant = calc_relevant_states(
-                self.state_freqs_all, self.mols_libs[self.indices0_str], verbose=self.verbose)
-
-        # Plotting of pH scan
-        if N_relevant_states > 0:
+        if self.state_freqs_all:
+            N_relevant_states, state_strs_relevant, sfreqs_relevant, mols_relevant, sfreqs_not_relevant = calc_relevant_states(
+                    self.state_freqs_all, self.mols_libs[self.indices0_str], verbose=self.verbose)
+            # Plotting of pH scan
             plot_pH_scan(
-                    self.params_out.name, self.indices0, state_strs_relevant, sfreqs_relevant, self.pHs, self.net_charges, 
-                    sfreqs_not_relevant, pkas_combined, path=self.params_out.path_figs,verbose=self.verbose)
-            plot_relevant_states(mols_relevant, self.params_out)
-            compose_image(N_relevant_states, self.params_out)
+                    self.name, self.indices0, state_strs_relevant, sfreqs_relevant, self.pHs, self.net_charges_arr, 
+                    sfreqs_not_relevant, pkas_combined, path=self.path_figs,verbose=self.verbose)
+            plot_relevant_states(mols_relevant, self.name, self.path_figs, self.notebook)
+            compose_image(N_relevant_states, self.name, self.path_figs)
 
     #########################
 
@@ -790,8 +763,8 @@ class Autoprot:
         Initialize output directories, load ML models, and reset internal libraries.
         """
 
-        os.makedirs(self.params_out.path_out, exist_ok=True)
-        os.makedirs(self.params_out.path_figs, exist_ok=True)
+        os.makedirs(self.path_out, exist_ok=True)
+        os.makedirs(self.path_figs, exist_ok=True)
 
         # molgpka ML models
         model_file_base: str = f'{ROOT}/weight_base.pth'
@@ -842,7 +815,7 @@ class Autoprot:
                                          self.model_base,self.model_acid,
                                          device=self.device,verbose=self.verbose) # returns pkas for map indices
 
-    def calc_curated_indices(self, pH: float) -> tuple[list[int], np.ndarray]:
+    def calc_curated_indices(self, pH: float) -> tuple[list[int], NDArray[np.int64]]:
         """
         Determine protonation candidate sites and apply exception filtering
         for a given pH value.
@@ -861,7 +834,7 @@ class Autoprot:
 
         Returns
         -------
-        tuple[list[int], list[int], np.ndarray]
+        tuple[list[int], list[int], NDArray[np.int64]]
             - Curated indices after applying exception rules.
             - Corresponding state option matrix (q_options).
         """
@@ -886,9 +859,9 @@ class Autoprot:
         self,
         cluster: list[int],
         indices0_curated: list[int],
-        q_options0: np.ndarray,
+        q_options0: NDArray[np.int64],
         pH: float,
-    ) -> tuple[list[str], np.ndarray, list[int]]:
+    ) -> tuple[list[str], NDArray[np.float64], list[int]]:
         """ 
         Generate and evaluate microstates for a single protonation cluster at a given pH value.
 
@@ -900,7 +873,7 @@ class Autoprot:
         indices0_curated : list[int]
             Absolute indices of all protonable sites after exclusion
             and exception handling.
-        q_options0 : np.ndarray
+        q_options0 : NDArray[np.int64]
             Array of shape (n_sites, 3) encoding protonation options for
             each site:
                 0 → deprotonation allowed
@@ -913,7 +886,7 @@ class Autoprot:
         -------
         state_strs : list[str]
             Encoded microstate representations for the cluster.
-        state_freqs : np.ndarray
+        state_freqs : NDArray[np.float64]
             Corresponding normalized microstate frequencies,
             ordered identically to `state_strs`.
         indices : list[int]
@@ -941,7 +914,7 @@ class Autoprot:
 
     #########################
 
-    def coupling_assay(self, indices: list[int], q_options: np.ndarray, coupling_cutoff: float) -> list[list[int]]:
+    def coupling_assay(self, indices: list[int], q_options: NDArray[np.int64], coupling_cutoff: float) -> list[list[int]]:
         """
         Perform pairwise pKa sensitivity analysis and cluster coupled sites.
 
@@ -993,7 +966,7 @@ class Autoprot:
         clusters = cluster_coupling_matrix(coupling_matrix)
         return clusters
 
-    def screen_clusters(self, indices0: list[int], q_options0: np.ndarray) -> list[list[int]]:
+    def screen_clusters(self, indices0: list[int], q_options0: NDArray[np.int64]) -> list[list[int]]:
         """
         Determine stable pKa coupling clusters using adaptive thresholding.
 
@@ -1010,7 +983,7 @@ class Autoprot:
         ----------
         indices0 : list[int]
             Absolute atom map indices of candidate protonation sites.
-        q_options0 : np.ndarray
+        q_options0 : NDArray[np.int64]
             Array encoding allowed protonation states for each site.
 
         Returns
@@ -1039,7 +1012,7 @@ class Autoprot:
             print(f'Coupling cutoff high: {coupling_cutoff}')
         return clusters
 
-    def construct_mols(self, state_strs: list[str], state_vecs: np.ndarray, indices: list[int]) -> None:
+    def construct_mols(self, state_strs: list[str], state_vecs: list[NDArray[np.int64]], indices: list[int]) -> None:
         """
         Construct and cache RDKit molecular objects for protonation states.
 
@@ -1057,7 +1030,7 @@ class Autoprot:
         ----------
         state_strs : list[str]
             Encoded representations of protonation states.
-        state_vecs : np.ndarray
+        state_vecs : list[NDArray[np.int64]
             Vector representations corresponding to `state_strs`.
         indices : list[int]
             Absolute atom map indices defining the current cluster.
@@ -1081,7 +1054,7 @@ class Autoprot:
     def run_acid_base_calcs(
         self,
         state_strs: list[str],
-        state_vecs: np.ndarray,
+        state_vecs: list[NDArray[np.int64]],
         indices: list[int],
     ) -> None:
         """Compute and cache acid/base pKa predictions for microstates.
@@ -1100,7 +1073,7 @@ class Autoprot:
         ----------
         state_strs : list[str]
             Encoded representations of protonation states.
-        state_vecs : np.ndarray
+        state_vecs : NDArray[np.int64]
             Protonation state vectors corresponding to `state_strs`.
         indices : list[int]
             Absolute atom map indices defining the current cluster.
@@ -1195,14 +1168,14 @@ class Autoprot:
         state_str_opti = state_strs[idx_max]
 
         # Select states for pH-specific export
-        state_strs_export = []
-        state_freqs_export = []
+        state_strs_export: list[str] = []
+        state_freqs_export_l: list[float] = []
         for state_str, state_freq in zip(state_strs, state_freqs):
             if state_freq > self.cutoff_export * state_freq_max: # Include all high prob states
                 state_strs_export.append(state_str)
-                state_freqs_export.append(state_freq)
+                state_freqs_export_l.append(state_freq)
 
-        state_freqs_export = np.array(state_freqs_export)
+        state_freqs_export: NDArray[np.float64] = np.array(state_freqs_export)
         ps = np.argsort(state_freqs_export)[::-1] # Sort by highest probability
 
         state_freqs_export = state_freqs_export[ps]
@@ -1215,10 +1188,10 @@ class Autoprot:
             print(f'Export at pH {self.pH_output}:',flush=True)
             for e_idx, (state_str, sfreq) in enumerate(zip(state_strs_export, state_freqs_export)):
                 print(e_idx, state_str, sfreq)
-        export_csv(state_strs_export,self.smiles_libs[indices_str],state_freqs_export,state_qs,self.params_out)
+        export_csv(state_strs_export,self.smiles_libs[indices_str],state_freqs_export,state_qs, self.name, self.path_out, self.fout_csv, self.append)
         if self.export_opti_sdf:
-            export_sdf(state_strs_export,self.mols_libs[indices_str],self.params_out)
-            plot_optimal_state(self.mols_libs[indices_str][state_strs_export[0]],self.params_out)
+            export_sdf(state_strs_export,self.mols_libs[indices_str], self.name, self.path_out)
+            plot_optimal_state(self.mols_libs[indices_str][state_strs_export[0]],self.name, self.path_figs)
         if self.verbose:
             print(f'Optimal smiles for pH {self.pH_output}: {self.smiles_libs[indices_str][state_str_opti]}')
 
@@ -1252,16 +1225,16 @@ class Autoprot:
 
             mol_h = Chem.AddHs(mol)
 
-            cid = AllChem.EmbedMolecule(mol_h, randomSeed=1, useRandomCoords=True)
+            cid = AllChem.EmbedMolecule(mol_h, randomSeed=1, useRandomCoords=True) # type: ignore
             if cid != 0:
                 print(f'WARNING: Need to remove chirality for embedding for {state_str}!')
-                for atom in mol_h.GetAtoms():
-                    atom.SetChiralTag(Chem.ChiralType.CHI_UNSPECIFIED)
-            cid = AllChem.EmbedMolecule(mol_h, randomSeed=1, useRandomCoords=True)
+                for atom in mol_h.GetAtoms(): # type: ignore
+                    atom.SetChiralTag(Chem.ChiralType.CHI_UNSPECIFIED) 
+            cid = AllChem.EmbedMolecule(mol_h, randomSeed=1, useRandomCoords=True) # type: ignore
 
             if cid != 0:
                 raise ValueError(f'{state_str} could not be embedded.')
-            for atom in mol.GetAtoms():
+            for atom in mol.GetAtoms(): # type: ignore
                 atom.SetChiralTag(Chem.ChiralType.CHI_UNSPECIFIED)
             
             smiles = Chem.MolToSmiles(mol)

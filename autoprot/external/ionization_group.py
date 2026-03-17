@@ -8,23 +8,21 @@ from rdkit import Chem
 from rdkit.Chem import Mol
 
 import os
-import pandas as pd # type: ignore
+import pandas as pd
 from pandas import DataFrame
-
-from typing import Optional
 
 from importlib import resources
 pkg_base = resources.files('autoprot')
 root = f'{pkg_base}/data'
 
 # root = os.path.abspath("")
-smarts_file = os.path.join(root, "smarts_pattern.tsv")
+SMARTS_FILE = os.path.join(root, "smarts_pattern.tsv")
 
-def split_acid_base_pattern(smarts_file: str) -> tuple[DataFrame, DataFrame]:
+def split_acid_base_pattern() -> tuple[DataFrame, DataFrame]:
     """
     Load SMARTS patterns and split them into acid and base DataFrames.
     """
-    df_smarts = pd.read_csv(smarts_file, sep="\t")
+    df_smarts = pd.read_csv(SMARTS_FILE, sep="\t")
     df_smarts_acid = df_smarts[df_smarts.Acid_or_base == "A"]
     df_smarts_base = df_smarts[df_smarts.Acid_or_base == "B"]
     return df_smarts_acid, df_smarts_base
@@ -89,9 +87,8 @@ def match_base(df_smarts_base: DataFrame, mol: Mol) -> list[int]:
 
 def get_ionization_aid(
     mol: Mol,
-    smarts_file: str,
-    acid_or_base: Optional[str] = None,
-) -> tuple[list[int], list[int]] | list[int]:
+    acid_or_base: str,
+) -> list[int]:
     """
     Identify ionization-relevant atom indices in a molecule.
 
@@ -99,32 +96,24 @@ def get_ionization_aid(
     ----------
     mol : RDKit Mol
         Input molecule.
-    smarts_file : str
-        Path to SMARTS pattern file.
     acid_or_base : {"acid", "base", None}, optional
-        If None, return both acid and base matches.
         If "acid", return only acid matches.
         Otherwise return base matches.
 
     Returns
     -------
-    Tuple[List[int], List[int]] or List[int]
+    List[int]
         Matched atom indices.
     """
-    df_smarts_acid, df_smarts_base = split_acid_base_pattern(smarts_file)
+    df_smarts_acid, df_smarts_base = split_acid_base_pattern()
 
     if mol == None:
         raise RuntimeError("No mol found for get_ionization_aid")
     acid_matches = match_acid(df_smarts_acid, mol)
     base_matches = match_base(df_smarts_base, mol)
-    if acid_or_base == None:
-        return acid_matches, base_matches
-    elif acid_or_base == "acid":
+    if acid_or_base == "acid":
         return acid_matches
-    else:
+    elif acid_or_base == 'base':
         return base_matches
-
-if __name__=="__main__":
-    mol = Chem.MolFromSmiles("CN(C)CCCN1C2=CC=CC=C2SC2=C1C=C(C=C2)C(C)=O")
-    matches = get_ionization_aid(mol)
-    print(matches)
+    else:
+        raise ValueError

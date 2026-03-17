@@ -1,6 +1,8 @@
 import numpy as np
-from rdkit.Chem.rdchem import Mol
-from rdkit.Chem import Atom
+from rdkit.Chem.rdchem import Mol, Atom
+from numpy.typing import NDArray
+
+from typing import Iterable, cast
 
 def pack_vec(state_vec: np.ndarray) -> str:
     """ Pack vector into string. """
@@ -12,7 +14,7 @@ def unpack_vec(state_str: str) -> np.ndarray:
     state_vec = np.array([int(s) for s in state_str],dtype=int)
     return state_vec
 
-def calc_state_strs(state_vecs: list[np.ndarray]) -> list[str]:
+def calc_state_strs(state_vecs: list[NDArray[np.int64]]) -> list[str]:
     """ Calc state strings from vectors. """
     state_strs = []
     for state_vec in state_vecs:
@@ -30,7 +32,7 @@ def calc_qs_all(state_vecs: list[np.ndarray]) -> list[np.ndarray]:
 
 def get_atom_with_map_idx(mol: Mol, map_idx: int) -> Atom | None:
     """ Find atom of rdkit Mol object with specific map index. """
-    for atom in mol.GetAtoms():
+    for atom in cast(list[Atom], mol.GetAtoms()): # type: ignore
         if atom.GetAtomMapNum() == map_idx:
             return atom
     return None

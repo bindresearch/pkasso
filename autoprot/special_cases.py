@@ -6,15 +6,15 @@ from rdkit.Chem.rdchem import Mol
 
 from typing import Any
 
-def match_pattern(mol,pattern):
+def match_pattern(mol: Mol, pattern: Mol) -> tuple[bool, list[list[int]]]:
     """ Match pattern in rdkit molecule.
     
     Parameters:
     -----------
     mol : Mol
         Rdkit molecule
-    pattern: str
-        String to match.
+    pattern: Mol
+        Pattern mol to match.
 
     Returns
     -------
@@ -53,7 +53,7 @@ def add_exclusions(mol: Mol, verbose: bool = False) -> tuple[list[int], list[int
         be excluded.
     """
 
-    q0s = np.array([at.GetFormalCharge() for at in mol.GetAtoms()])
+    q0s = np.array([at.GetFormalCharge() for at in mol.GetAtoms()]) # type: ignore
 
     exclude_acid_indices: list[int] = []
     exclude_base_indices: list[int] = []
@@ -126,7 +126,7 @@ def add_exceptions(mol: Mol, verbose: bool = False) -> tuple[list[int], dict[int
     except_indices = []
 
     # Except everything that couldn't be neutralized
-    q0s = np.array([at.GetFormalCharge() for at in mol.GetAtoms()])
+    q0s = np.array([at.GetFormalCharge() for at in mol.GetAtoms()]) # type: ignore
     for at_idx, q in enumerate(q0s):
         atom = mol.GetAtomWithIdx(at_idx) 
         map_idx = atom.GetAtomMapNum()

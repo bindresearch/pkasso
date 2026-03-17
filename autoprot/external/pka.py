@@ -22,23 +22,25 @@ def model_pred(mol: Mol, atom_idx: int, model: GCNNet, device: str = "cpu") -> f
         data = data.to(device)
         pKa = model(data)
         pKa = pKa.cpu().numpy()
-        pka = pKa[0][0]
+        pka: float = pKa[0][0]
     return pka
 
-def predict_acid(mol: Mol, model_acid: GCNNet, device: str = "cpu") -> dict[int, float]:
+def predict_acid(mol: Mol, model_acid: GCNNet, device: str = "cpu"
+) -> dict[int, float]:
     """ Predict acid pKas with molgpka model. """
 
-    acid_idxs= get_ionization_aid(mol, acid_or_base="acid")
+    acid_idxs = get_ionization_aid(mol, "acid")
     acid_res = {}
     for aid in acid_idxs:
         apka = model_pred(mol, aid, model_acid, device=device)
         acid_res.update({aid:apka})
     return acid_res
 
-def predict_base(mol: Mol, model_base: GCNNet, device: str = "cpu") -> dict[int, float]:
+def predict_base(mol: Mol, model_base: GCNNet, device: str = "cpu"
+) -> dict[int, float]:
     """ Predict base pKas with molgpka model. """
   
-    base_idxs= get_ionization_aid(mol, acid_or_base="base")
+    base_idxs= get_ionization_aid(mol, "base")
     base_res = {}
     for aid in base_idxs:
         bpka = model_pred(mol, aid, model_base, device=device)

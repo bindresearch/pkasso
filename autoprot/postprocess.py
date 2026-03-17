@@ -9,8 +9,6 @@ from rdkit import Chem
 from rdkit.Chem import AllChem, Mol
 from rdkit.Chem.Draw import MolToFile, MolsToGridImage
 
-from autoprot.main import ParamsOutput
-
 import copy
 import os
 
@@ -28,13 +26,13 @@ def plot_pH_scan(
     ) -> None:
     """ Plot scan of microstate frequencies for different pH values. """
     
-    cmap = plt.cm.Spectral_r
     if len(pHs) == 1:
         style = 'o'
     else:
         style = '-'
 
     fsave = f'{path}/{name}_ph_scan.svg'
+    cmap = plt.cm.get_cmap("Spectral_r")
 
     if verbose:
         print(f'Indices: {indices}')
@@ -65,10 +63,10 @@ def plot_pH_scan(
     for idx, (q, pka) in enumerate(pkas_combined.items()):
         x = np.argmin(np.abs(pHs-pka))
         if q+1 > 0:
-            color = 'tab:blue'
+            color_rb = 'tab:blue'
         else:
-            color = 'tab:red'
-        ax[1].plot(pHs[x],net_charges[x],'o',color=color,markersize=5)
+            color_rb = 'tab:red'
+        ax[1].plot(pHs[x],net_charges[x],'o',color=color_rb,markersize=5)
         ax[1].text(pHs[x]+0.1,net_charges[x]+0.05,f'{pka:.2f}')
 
 
@@ -85,17 +83,17 @@ def plot_pH_scan(
         fig.savefig(fsave, transparent=True)
     plt.close()
 
-def export_sdf(state_strs: list[str], mols_lib: dict[str, Mol], p: ParamsOutput) -> None:
-    with Chem.SDWriter(f'{p.path}/{p.name}.sdf') as f:
+def export_sdf(state_strs: list[str], mols_lib: dict[str, Mol], name: str, path_out: str) -> None:
+    with Chem.SDWriter(f'{path_out}/{name}.sdf') as f:
         for e_idx, state_str in enumerate(state_strs):
             mol = mols_lib[state_str]
             mol_h = Chem.AddHs(mol)
 
-            cid = AllChem.EmbedMolecule(mol_h, randomSeed=1, useRandomCoords=True)
+            cid = AllChem.EmbedMolecule(mol_h, randomSeed=1, useRandomCoords=True) # type: ignore
             if cid != 0:
-                raise ValueError(f'{p.name}_{state_str} could not be embedded.')
-            AllChem.UFFOptimizeMolecule(mol_h)
-            mol_h.SetProp("_Name", f'{p.name}_{e_idx}')
+                raise ValueError(f'{name}_{state_str} could not be embedded.')
+            AllChem.UFFOptimizeMolecule(mol_h) # type: ignore
+            mol_h.SetProp("_Name", f'{name}_{e_idx}')
             f.write(mol_h)
 
 def export_csv(
@@ -103,30 +101,33 @@ def export_csv(
     smiles_lib: dict[str,str],
     sfreqs: np.ndarray,
     state_qs: dict[str, int],
-    p: ParamsOutput,
+    name: str,
+    path_out: str,
+    fout_csv: str,
+    append: bool,
     ) -> None:
     """ Export csv with information about microstates at the given pH. """
-    if p.append:
+    if append:
         action = 'a'
     else:
         action = 'w'
-    with open(f'{p.path_out}/{p.fout_csv}',action) as f:
+    with open(f'{path_out}/{fout_csv}',action) as f:
         if action == 'w':
             f.write(f'name,name_state,SMILES,frequency,charge\n')
         for e_idx, (state_str, sfreq) in enumerate(zip(state_strs, sfreqs)):
             smiles = smiles_lib[state_str]
             # Remove labels
             mol = Chem.MolFromSmiles(smiles)
-            for atom in mol.GetAtoms():
+            for atom in mol.GetAtoms(): # type: ignore
                 atom.SetAtomMapNum(0)
             smiles = Chem.MolToSmiles(mol)
-            f.write(f'{p.name},{p.name}_{e_idx},{smiles},{sfreq/np.sum(sfreqs):.5f},{state_qs[state_str]}\n')
+            f.write(f'{name},{name}_{e_idx},{smiles},{sfreq/np.sum(sfreqs):.5f},{state_qs[state_str]}\n')
 
-def export_macro_pkas(pkas_combined: dict[int, float], p: ParamsOutput) -> None:
+def export_macro_pkas(pkas_combined: dict[int, float], name: str, path_out: str) -> None:
     """ Write macro pKas from pooled microstates. """
     for idx, (q, pka) in enumerate(pkas_combined.items()):
         print(f'pKa{idx+1} | {q+1} --> {q} | {pka:.3f}')
-    with open(f'{p.path_out}/{p.name}_pkas.csv','w') as f:
+    with open(f'{path_out}/{name}_pkas.csv','w') as f:
         f.write('idx,q0,q1,pka\n')
         for idx, (q, pka) in enumerate(pkas_combined.items()):
             f.write(f'pKa{idx+1},{q},{q+1},{pka:.5f}\n')
@@ -136,7 +137,7 @@ def calc_relevant_states(
     mols_lib: dict[str, Mol],
     max_states: int = 18,
     verbose: bool = False,
-    ) -> Tuple[
+    ) -> tuple[
         int,
         list[str],
         list[np.ndarray],
@@ -145,13 +146,10 @@ def calc_relevant_states(
     ]:
     """ Reduce number of states to max_states for plotting. """
 
-    if len(state_freqs_all.keys()) == 0:
-        return 0, [], [], []
-
     cutoff = 0.01
     tries = 0
 
-    N_relevant_states = 1e5
+    N_relevant_states = int(1e5)
     while N_relevant_states > max_states:
         state_strs_relevant = []
         sfreqs_relevant = []
@@ -180,34 +178,34 @@ def calc_relevant_states(
         print(f'Final N relevant states: {N_relevant_states} with cutoff {cutoff}')
     return N_relevant_states, state_strs_relevant, sfreqs_relevant, mols_relevant, sfreqs_not_relevant
 
-def plot_relevant_states(mols_relevant: list[Mol], p: ParamsOutput) -> None:
+def plot_relevant_states(mols_relevant: list[Mol], name: str, path_figs: str, notebook: bool) -> None:
     """ Plot rdkit molecules for relevant states together with state strings. """
 
-    for mol in mols_relevant: tmp=AllChem.Compute2DCoords(mol)
+    for mol in mols_relevant: tmp=AllChem.Compute2DCoords(mol) # type: ignore
 
     for mol in mols_relevant:
-        for atom in mol.GetAtoms():
+        for atom in mol.GetAtoms(): # type: ignore
             atom.SetAtomMapNum(0)
     
-    img=MolsToGridImage(mols_relevant,molsPerRow=4,subImgSize=(150,150),legends=[x.GetProp("_Name") for x in mols_relevant],returnPNG=False,useSVG=True)
+    img=MolsToGridImage(mols_relevant,molsPerRow=4,subImgSize=(150,150),legends=[x.GetProp("_Name") for x in mols_relevant],returnPNG=False,useSVG=True) # type: ignore
 
     img = img.replace('fill:#FFFFFF', 'fill:none')
 
-    with open(f'{p.path_figs}/{p.name}_relevant_states.svg','w') as f:
-        if p.notebook:
+    with open(f'{path_figs}/{name}_relevant_states.svg','w') as f:
+        if notebook:
             f.write(img.data)
         else:
             f.write(img)
 
-def plot_optimal_state(mol: Mol, p: ParamsOutput) -> None:
+def plot_optimal_state(mol: Mol, name: str, path_figs: str) -> None:
     """ Plot state with highest frequency at pH_output. """
 
-    tmp=AllChem.Compute2DCoords(mol)
-    MolToFile(mol, f'{p.path_figs}/{p.name}_opti.svg', size=(800,630), imageType='svg')
-    cairosvg.svg2pdf(url=f'{p.path_figs}/{p.name}_opti.svg',write_to=f'{p.path_figs}/{p.name}_opti.pdf')
-    os.system(f'rm {p.path_figs}/{p.name}_opti.svg')
+    tmp=AllChem.Compute2DCoords(mol) # type: ignore
+    MolToFile(mol, f'{path_figs}/{name}_opti.svg', size=(800,630), imageType='svg') # type: ignore
+    cairosvg.svg2pdf(url=f'{path_figs}/{name}_opti.svg',write_to=f'{path_figs}/{name}_opti.pdf')
+    os.system(f'rm {path_figs}/{name}_opti.svg')
 
-def compose_image(N_relevant_states: int, p: ParamsOutput) -> None:
+def compose_image(N_relevant_states: int, name: str, path_figs: str) -> None:
     """ Combine pH scan and plotted rdkit molecules. """
     if N_relevant_states % 4 == 0:
         y = 350 + (N_relevant_states//4) * 150
@@ -215,11 +213,11 @@ def compose_image(N_relevant_states: int, p: ParamsOutput) -> None:
         y = 350 + (N_relevant_states//4 + 1) * 150
     Figure(
         "600px", f"{y}px",
-        SVG(f'{p.path_figs}/{p.name}_ph_scan.svg').move(30, 0),
-        SVG(f'{p.path_figs}/{p.name}_relevant_states.svg').move(0, 350)
-    ).save(f'{p.path_figs}/{p.name}_combined.svg')
+        SVG(f'{path_figs}/{name}_ph_scan.svg').move(30, 0),
+        SVG(f'{path_figs}/{name}_relevant_states.svg').move(0, 350)
+    ).save(f'{path_figs}/{name}_combined.svg')
 
-    cairosvg.svg2pdf(url=f'{p.path_figs}/{p.name}_combined.svg',write_to=f'{p.path_figs}/{p.name}_combined.pdf')
-    os.system(f'rm {p.path_figs}/{p.name}_ph_scan.svg')
-    os.system(f'rm {p.path_figs}/{p.name}_relevant_states.svg')
-    os.system(f'rm {p.path_figs}/{p.name}_combined.svg')
+    cairosvg.svg2pdf(url=f'{path_figs}/{name}_combined.svg',write_to=f'{path_figs}/{name}_combined.pdf')
+    os.system(f'rm {path_figs}/{name}_ph_scan.svg')
+    os.system(f'rm {path_figs}/{name}_relevant_states.svg')
+    os.system(f'rm {path_figs}/{name}_combined.svg')

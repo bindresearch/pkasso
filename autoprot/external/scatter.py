@@ -1,7 +1,7 @@
 from torch import Tensor, zeros
 from typing import Optional
 
-def broadcast(src: Tensor, other: Tensor, dim: int):
+def broadcast(src: Tensor, other: Tensor, dim: int) -> Tensor:
     if dim < 0:
         dim = other.dim() + dim
     if src.dim() == 1:
