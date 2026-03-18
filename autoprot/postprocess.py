@@ -82,59 +82,62 @@ def plot_pH_scan(
         fig.savefig(fsave, transparent=True)
     plt.close()
 
-def export_sdf(state_strs: list[str], state_freqs: list[float], mols_lib: dict[str, Mol], name: str, path_out: str) -> list[Mol]:
-    mols_out = []
+def curate_output(state_strs: list[str], state_freqs: list[float], mols_lib: dict[str, Mol], name: str) -> list[Mol]:
+    """ Clean up smiles and mols for output. """
+    mols_out: list[Mol] = []
+    smiles_out: list[str] = []
+    sfreqs_out: list[float] = []
+    for e_idx, (state_str, sfreq) in enumerate(zip(state_strs, state_freqs)):
+        mol = mols_lib[state_str]
+        mol.SetProp("_Name", f'{name}_{e_idx}')
+        mol.SetProp("Frequency", f'{sfreq}')
+        for atom in mol.GetAtoms(): # type: ignore
+            atom.SetAtomMapNum(0)
+        tmp=AllChem.Compute2DCoords(mol)
+        smiles = Chem.MolToSmiles(mol)
+        sfreq_out = sfreq/np.sum(state_freqs)
+        
+        smiles_out.append(smiles)
+        mols_out.append(mol)
+        sfreqs_out.append(float(sfreq_out))
+    return smiles_out, mols_out, sfreqs_out
+
+def export_sdf(mols: list[Mol], name: str, path_out: str) -> None:
+    """ 
+    Write sdf file with all relevant mols, optimized geometry with rdkit.
+    Includes explicit hydrogens.
+    """
     with Chem.SDWriter(f'{path_out}/{name}.sdf') as f:
-        for e_idx, (state_str, state_freq) in enumerate(zip(state_strs, state_freqs)):
-            mol = mols_lib[state_str]
-            mol.SetProp("_Name", f'{name}_{e_idx}')
-            mol.SetProp("Frequency", f'{state_freq}')
-            for atom in mol.GetAtoms(): # type: ignore
-                atom.SetAtomMapNum(0)
-            mol_2d = copy.deepcopy(mol)
-            mols_out.append(mol_2d)
-            mol_h = Chem.AddHs(mol)
+        for mol in mols:
+            mol_3d = copy.deepcopy(mol)
+            mol_h = Chem.AddHs(mol_3d)
             cid = AllChem.EmbedMolecule(mol_h, randomSeed=1, useRandomCoords=True) # type: ignore
             if cid != 0:
-                raise ValueError(f'{name}_{state_str} could not be embedded.')
+                raise ValueError(f'{mol.GetProp("_Name")} could not be embedded.')
             AllChem.UFFOptimizeMolecule(mol_h) # type: ignore
             f.write(mol_h)
-    return mols_out
 
 def export_csv(
     state_strs: list[str],
-    smiles_lib: dict[str,str],
-    sfreqs: np.ndarray,
+    smiles_out: list[str],
+    sfreqs_out: list[float],
     state_qs: dict[str, int],
     name: str,
     path_out: str,
     fout_csv: str,
     append_csv: bool,
-    ) -> tuple[list[str], list[float]]:
+    ) -> None:
     """ Export csv with information about microstates at the given pH. """
     if append_csv:
         action = 'a'
     else:
         action = 'w'
 
-    smiles_out: list[str] = []
-    sfreqs_out: list[float] = []
-
     with open(f'{path_out}/{fout_csv}',action) as f:
         if action == 'w':
             f.write(f'name,name_state,SMILES,frequency,charge\n')
-        for e_idx, (state_str, sfreq) in enumerate(zip(state_strs, sfreqs)):
-            smiles = smiles_lib[state_str]
-            # Remove labels
-            mol = Chem.MolFromSmiles(smiles)
-            for atom in mol.GetAtoms(): # type: ignore
-                atom.SetAtomMapNum(0)
-            smiles = Chem.MolToSmiles(mol)
-            smiles_out.append(smiles)
-            sfreq_out = sfreq/np.sum(sfreqs)
-            sfreqs_out.append(float(sfreq_out))
-            f.write(f'{name},{name}_{e_idx},{smiles},{sfreq_out:.5f},{state_qs[state_str]}\n')
-    return smiles_out, sfreqs_out
+        for e_idx, (state_str, smiles, sfreq) in enumerate(zip(state_strs, smiles_out, sfreqs_out)):
+            f.write(f'{name},{name}_{e_idx},{smiles},{sfreq:.5f},{state_qs[state_str]}\n')
 
 def export_macro_pkas(pkas_combined: dict[int, float], name: str, path_out: str) -> None:
     """ Write macro pKas from pooled microstates. """
