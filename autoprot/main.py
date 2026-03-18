@@ -567,32 +567,31 @@ class Autoprot:
         Pipeline parameters:
             name, cutoff_states, device, pH_output, pH_band,
             pHs, sfreq_cutoff_individual, sfreq_cutoff_combined,
-            matrix_def, export_opti_sdf, path_out, path_figs,
+            matrix_def, no_sdf, path_out, path_figs,
             cutoff_export, verbose
 
         Output-related parameters:
-            name, path_out, path_figs, fout_csv, append, notebook
+            name, path_out, path_figs, fout_csv, append
 
     """
-    smiles_raw: str
+    smiles: str
 
     name: str = 'molecule'
     path_out: str = 'output'
     path_figs: str = 'figures'
-    fout_csv: str = 'results.csv'
-    append: bool = False
-    notebook: bool = False
+    fout_csv: str = 'autoprot_results.csv'
+    append_csv: bool = False
 
     cutoff_states: int = 4000
     device: str = 'cpu'
-    pH_band: float = 8.0
+    pH_band: float = 10.0
     pH_output: float = 7.0
     pHs: NDArray[np.float64] | None = None
     sfreq_cutoff_individual: float = 0.01
     sfreq_cutoff_combined: float = 0.001
     matrix_def: str = 'dG'
-    export_opti_sdf: bool = False
-    cutoff_export: float = 0.5
+    no_sdf: bool = False
+    cutoff_export: float = 0.2
     verbose: bool = False
 
     def __post_init__(self) -> None:
@@ -600,7 +599,7 @@ class Autoprot:
             self.pHs: NDArray[np.float64] = np.arange(0, 14.1, 0.5)
             assert self.pHs is not None
 
-    def run(self) -> None:
+    def run(self) -> None: # tuple[list[str], list[float]]:
         """
         Run the full Autoprot pipeline.
 
@@ -630,7 +629,7 @@ class Autoprot:
 
         if self.verbose:
             print(self.name)
-            print(self.smiles_raw, flush=True)
+            print(self.smiles, flush=True)
 
         self.initialize_paths_models_libs()
         self.prepare_neutral_state()
@@ -753,7 +752,7 @@ class Autoprot:
             plot_pH_scan(
                     self.name, self.indices0, state_strs_relevant, sfreqs_relevant, self.pHs, self.net_charges_arr, 
                     sfreqs_not_relevant, pkas_combined, path=self.path_figs,verbose=self.verbose)
-            plot_relevant_states(mols_relevant, self.name, self.path_figs, self.notebook)
+            plot_relevant_states(mols_relevant, self.name, self.path_figs)
             compose_image(N_relevant_states, self.name, self.path_figs)
 
     #########################
@@ -795,7 +794,7 @@ class Autoprot:
         instance attributes for downstream pipeline steps.
         """
 
-        self.mol0, self.smiles0 = preprocess(self.smiles_raw, verbose=self.verbose)
+        self.mol0, self.smiles0 = preprocess(self.smiles, verbose=self.verbose)
         self.exclude_base_indices, self.exclude_acid_indices = add_exclusions(self.mol0, verbose=self.verbose)
         self.except_indices, self.phosphate_groups = add_exceptions(self.mol0, verbose=self.verbose)
 
@@ -807,7 +806,8 @@ class Autoprot:
             print(f'Except indices: {self.except_indices}')
 
         if self.phosphate_groups:
-            print(self.phosphate_groups)
+            if self.verbose:
+                print(self.phosphate_groups)
 
         mol0_h = Chem.rdmolops.AddHs(self.mol0)
 
@@ -1188,10 +1188,10 @@ class Autoprot:
             print(f'Export at pH {self.pH_output}:',flush=True)
             for e_idx, (state_str, sfreq) in enumerate(zip(state_strs_export, state_freqs_export)):
                 print(e_idx, state_str, sfreq)
-        export_csv(state_strs_export,self.smiles_libs[indices_str],state_freqs_export,state_qs, self.name, self.path_out, self.fout_csv, self.append)
-        if self.export_opti_sdf:
-            export_sdf(state_strs_export,self.mols_libs[indices_str], self.name, self.path_out)
-            plot_optimal_state(self.mols_libs[indices_str][state_strs_export[0]],self.name, self.path_figs)
+        self.smiles_out, self.sfreqs_out = export_csv(state_strs_export,self.smiles_libs[indices_str],state_freqs_export,state_qs, self.name, self.path_out, self.fout_csv, self.append_csv)
+        if not self.no_sdf:
+            self.mols_out = export_sdf(state_strs_export, state_freqs_export, self.mols_libs[indices_str], self.name, self.path_out)
+        plot_optimal_state(self.mols_libs[indices_str][state_strs_export[0]],self.name, self.path_figs)
         if self.verbose:
             print(f'Optimal smiles for pH {self.pH_output}: {self.smiles_libs[indices_str][state_str_opti]}')
 
@@ -1240,3 +1240,16 @@ class Autoprot:
             smiles = Chem.MolToSmiles(mol)
             self.mols_libs[indices_str][state_str] = mol
             self.smiles_libs[indices_str][state_str] = smiles
+
+def protonate(smiles: str, **kwargs) -> tuple[list[Mol], list[str], list[float]]:
+    """
+    Helper function to run autoprot via
+    from autoprot import protonate
+    
+    smiles_input = 'OC(=O)C(c1ccc(O)cc1)CNCCN'
+    mols, smiles, freqs = protonate(smiles_input)
+    """
+    ap = Autoprot(
+        smiles, **kwargs)
+    ap.run()
+    return ap.mols_out, ap.smiles_out, ap.sfreqs_out

@@ -79,10 +79,12 @@ def add_exclusions(mol: Mol, verbose: bool = False) -> tuple[list[int], list[int
                 else:
                     for match in matches_carbonyl: # ...N-C(=O)...
                         if atom.GetIdx() in match:
-                            print('Excluding N next to carbonyl as base')
+                            
                             if map_idx not in exclude_base_indices:
                                 exclude_base_indices.append(map_idx)
-                            print(at_idx, map_idx)
+                            if verbose:
+                                print('Excluding N next to carbonyl as base')
+                                print(at_idx, map_idx)
                     for match in matches_imine: # ...N-C(=N)...
                         if atom.GetIdx() in match:
                             accept = True
@@ -90,16 +92,20 @@ def add_exclusions(mol: Mol, verbose: bool = False) -> tuple[list[int], list[int
                                 if bond.GetBondType() == Chem.BondType.DOUBLE:
                                     accept = False
                             if accept:
-                                print('Excluding N next to imine as base')
+                                
                                 if map_idx not in exclude_base_indices:
                                     exclude_base_indices.append(map_idx)
-                                print(at_idx, map_idx)
+                                if verbose:
+                                    print('Excluding N next to imine as base')
+                                    print(at_idx, map_idx)
                     for match in matches_sulfonamide:
                         if atom.GetIdx() in match:
-                            print('Excluding N next to sulfonamide as base')
+                            
                             if map_idx not in exclude_base_indices:
                                 exclude_base_indices.append(map_idx)
-                            print(at_idx, map_idx)
+                            if verbose:
+                                print('Excluding N next to sulfonamide as base')
+                                print(at_idx, map_idx)
 
     exclude_base_indices = sorted(exclude_base_indices)
     exclude_acid_indices = sorted(exclude_acid_indices)
@@ -283,7 +289,8 @@ def calc_phosphate_clusters(
             poh_acid_pkas = poh_acid_pkas_double
             base_lib_poh = base_lib_poh_double
         else:
-            print(f'Did not find protonable O for phosphate {p_idx}')
+            if verbose:
+                print(f'Did not find protonable O for phosphate {p_idx}')
             continue
         acid_lib_poh: dict[str, dict[int, float]] = {}
         for key, val in poh_acid_pkas.items():

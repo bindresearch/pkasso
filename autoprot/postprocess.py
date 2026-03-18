@@ -69,7 +69,6 @@ def plot_pH_scan(
         ax[1].plot(pHs[x],net_charges[x],'o',color=color_rb,markersize=5)
         ax[1].text(pHs[x]+0.1,net_charges[x]+0.05,f'{pka:.2f}')
 
-
     ax[1].set(xlabel='pH', ylabel='Net charge')
     ax[1].grid(alpha=0.3)
 
@@ -83,18 +82,24 @@ def plot_pH_scan(
         fig.savefig(fsave, transparent=True)
     plt.close()
 
-def export_sdf(state_strs: list[str], mols_lib: dict[str, Mol], name: str, path_out: str) -> None:
+def export_sdf(state_strs: list[str], state_freqs: list[float], mols_lib: dict[str, Mol], name: str, path_out: str) -> list[Mol]:
+    mols_out = []
     with Chem.SDWriter(f'{path_out}/{name}.sdf') as f:
-        for e_idx, state_str in enumerate(state_strs):
+        for e_idx, (state_str, state_freq) in enumerate(zip(state_strs, state_freqs)):
             mol = mols_lib[state_str]
+            mol.SetProp("_Name", f'{name}_{e_idx}')
+            mol.SetProp("Frequency", f'{state_freq}')
+            for atom in mol.GetAtoms(): # type: ignore
+                atom.SetAtomMapNum(0)
+            mol_2d = copy.deepcopy(mol)
+            mols_out.append(mol_2d)
             mol_h = Chem.AddHs(mol)
-
             cid = AllChem.EmbedMolecule(mol_h, randomSeed=1, useRandomCoords=True) # type: ignore
             if cid != 0:
                 raise ValueError(f'{name}_{state_str} could not be embedded.')
             AllChem.UFFOptimizeMolecule(mol_h) # type: ignore
-            mol_h.SetProp("_Name", f'{name}_{e_idx}')
             f.write(mol_h)
+    return mols_out
 
 def export_csv(
     state_strs: list[str],
@@ -104,13 +109,17 @@ def export_csv(
     name: str,
     path_out: str,
     fout_csv: str,
-    append: bool,
-    ) -> None:
+    append_csv: bool,
+    ) -> tuple[list[str], list[float]]:
     """ Export csv with information about microstates at the given pH. """
-    if append:
+    if append_csv:
         action = 'a'
     else:
         action = 'w'
+
+    smiles_out: list[str] = []
+    sfreqs_out: list[float] = []
+
     with open(f'{path_out}/{fout_csv}',action) as f:
         if action == 'w':
             f.write(f'name,name_state,SMILES,frequency,charge\n')
@@ -121,13 +130,18 @@ def export_csv(
             for atom in mol.GetAtoms(): # type: ignore
                 atom.SetAtomMapNum(0)
             smiles = Chem.MolToSmiles(mol)
-            f.write(f'{name},{name}_{e_idx},{smiles},{sfreq/np.sum(sfreqs):.5f},{state_qs[state_str]}\n')
+            smiles_out.append(smiles)
+            sfreq_out = sfreq/np.sum(sfreqs)
+            sfreqs_out.append(float(sfreq_out))
+            f.write(f'{name},{name}_{e_idx},{smiles},{sfreq_out:.5f},{state_qs[state_str]}\n')
+    return smiles_out, sfreqs_out
 
 def export_macro_pkas(pkas_combined: dict[int, float], name: str, path_out: str) -> None:
     """ Write macro pKas from pooled microstates. """
-    for idx, (q, pka) in enumerate(pkas_combined.items()):
-        print(f'pKa{idx+1} | {q+1} --> {q} | {pka:.3f}')
-    with open(f'{path_out}/{name}_pkas.csv','w') as f:
+    # print(f'Macro-pKa values:')
+    # for idx, (q, pka) in enumerate(pkas_combined.items()):
+    #     print(f'pKa{idx+1} | {q+1} --> {q} | {pka:.3f}')
+    with open(f'{path_out}/{name}_macro_pkas.csv','w') as f:
         f.write('idx,q0,q1,pka\n')
         for idx, (q, pka) in enumerate(pkas_combined.items()):
             f.write(f'pKa{idx+1},{q},{q+1},{pka:.5f}\n')
@@ -178,7 +192,15 @@ def calc_relevant_states(
         print(f'Final N relevant states: {N_relevant_states} with cutoff {cutoff}')
     return N_relevant_states, state_strs_relevant, sfreqs_relevant, mols_relevant, sfreqs_not_relevant
 
-def plot_relevant_states(mols_relevant: list[Mol], name: str, path_figs: str, notebook: bool) -> None:
+def is_jupyter() -> bool:
+    """ Check if a jupyter notebook/lab is run."""
+    try:
+        from IPython import get_ipython
+        return get_ipython() is not None and "IPKernelApp" in get_ipython().config
+    except ImportError:
+        return False
+
+def plot_relevant_states(mols_relevant: list[Mol], name: str, path_figs: str) -> None:
     """ Plot rdkit molecules for relevant states together with state strings. """
 
     for mol in mols_relevant: tmp=AllChem.Compute2DCoords(mol) # type: ignore
@@ -189,13 +211,14 @@ def plot_relevant_states(mols_relevant: list[Mol], name: str, path_figs: str, no
     
     img=MolsToGridImage(mols_relevant,molsPerRow=4,subImgSize=(150,150),legends=[x.GetProp("_Name") for x in mols_relevant],returnPNG=False,useSVG=True) # type: ignore
 
-    img = img.replace('fill:#FFFFFF', 'fill:none')
+    if is_jupyter():
+        img_data: str = img.data
+    else:
+        img_data: str = img
+    img_data = img_data.replace('fill:#FFFFFF', 'fill:none')
 
     with open(f'{path_figs}/{name}_relevant_states.svg','w') as f:
-        if notebook:
-            f.write(img.data)
-        else:
-            f.write(img)
+        f.write(img_data)
 
 def plot_optimal_state(mol: Mol, name: str, path_figs: str) -> None:
     """ Plot state with highest frequency at pH_output. """
@@ -217,7 +240,7 @@ def compose_image(N_relevant_states: int, name: str, path_figs: str) -> None:
         SVG(f'{path_figs}/{name}_relevant_states.svg').move(0, 350)
     ).save(f'{path_figs}/{name}_combined.svg')
 
-    cairosvg.svg2pdf(url=f'{path_figs}/{name}_combined.svg',write_to=f'{path_figs}/{name}_combined.pdf')
+    cairosvg.svg2pdf(url=f'{path_figs}/{name}_combined.svg',write_to=f'{path_figs}/{name}_scan.pdf')
     os.system(f'rm {path_figs}/{name}_ph_scan.svg')
     os.system(f'rm {path_figs}/{name}_relevant_states.svg')
     os.system(f'rm {path_figs}/{name}_combined.svg')
