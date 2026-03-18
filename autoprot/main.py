@@ -9,6 +9,8 @@ from rdkit import Chem
 from rdkit.Chem.MolStandardize import rdMolStandardize
 from rdkit.Chem import RegistrationHash
 from rdkit.Chem.rdchem import Mol
+from rdkit import RDLogger
+RDLogger.DisableLog("rdApp.*")
 
 import numpy as np
 from numpy.typing import NDArray
@@ -592,6 +594,7 @@ class Autoprot:
     matrix_def: str = 'dG'
     no_sdf: bool = False
     cutoff_export: float = 0.2
+    write_output: bool = True
     verbose: bool = False
 
     def __post_init__(self) -> None:
@@ -741,11 +744,11 @@ class Autoprot:
         self.net_charges_arr = np.round(np.array(self.net_charges),decimals=4)
         pkas_combined = combine_pkas_macro(self.pHs, self.freqs_macro_all)
 
-        if pkas_combined:
+        if pkas_combined and self.write_output:
             export_macro_pkas(pkas_combined,self.name, self.path_out)
 
         # reduce number of microstates for plotting
-        if self.state_freqs_all:
+        if self.state_freqs_all and self.write_output:
             N_relevant_states, state_strs_relevant, sfreqs_relevant, mols_relevant, sfreqs_not_relevant = calc_relevant_states(
                     self.state_freqs_all, self.mols_libs[self.indices0_str], verbose=self.verbose)
             # Plotting of pH scan
@@ -762,8 +765,9 @@ class Autoprot:
         Initialize output directories, load ML models, and reset internal libraries.
         """
 
-        os.makedirs(self.path_out, exist_ok=True)
-        os.makedirs(self.path_figs, exist_ok=True)
+        if self.write_output:
+            os.makedirs(self.path_out, exist_ok=True)
+            os.makedirs(self.path_figs, exist_ok=True)
 
         # molgpka ML models
         model_file_base: str = f'{ROOT}/weight_base.pth'
@@ -1165,7 +1169,6 @@ class Autoprot:
         # Max freq
         idx_max = np.argmax(state_freqs)
         state_freq_max = np.max(state_freqs)
-        state_str_opti = state_strs[idx_max]
 
         # Select states for pH-specific export
         state_strs_export: list[str] = []
@@ -1188,12 +1191,16 @@ class Autoprot:
             print(f'Export at pH {self.pH_output}:',flush=True)
             for e_idx, (state_str, sfreq) in enumerate(zip(state_strs_export, state_freqs_export)):
                 print(e_idx, state_str, sfreq)
-        self.smiles_out, self.sfreqs_out = export_csv(state_strs_export,self.smiles_libs[indices_str],state_freqs_export,state_qs, self.name, self.path_out, self.fout_csv, self.append_csv)
-        if not self.no_sdf:
-            self.mols_out = export_sdf(state_strs_export, state_freqs_export, self.mols_libs[indices_str], self.name, self.path_out)
-        plot_optimal_state(self.mols_libs[indices_str][state_strs_export[0]],self.name, self.path_figs)
+
+        self.smiles_out, self.mols_out, self.sfreqs_out = curate_output(state_strs_export, state_freqs_export, self.mols_libs[indices_str], self.name)
+
+        if self.write_output:
+            export_csv(state_strs_export,self.smiles_out,self.sfreqs_out, state_qs, self.name, self.path_out, self.fout_csv, self.append_csv)
+            if not self.no_sdf:
+                export_sdf(self.mols_out, self.name, self.path_out)
+            plot_optimal_state(self.mols_out[0], self.name, self.path_figs)
         if self.verbose:
-            print(f'Optimal smiles for pH {self.pH_output}: {self.smiles_libs[indices_str][state_str_opti]}')
+            print(f'Optimal smiles for pH {self.pH_output}: {self.smiles_out[0]}')
 
     def check_chiral_consistency(
         self,
@@ -1249,6 +1256,8 @@ def protonate(smiles: str, **kwargs) -> tuple[list[Mol], list[str], list[float]]
     smiles_input = 'OC(=O)C(c1ccc(O)cc1)CNCCN'
     mols, smiles, freqs = protonate(smiles_input)
     """
+    kwargs['write_output'] = kwargs.get('write_output',False)
+
     ap = Autoprot(
         smiles, **kwargs)
     ap.run()
