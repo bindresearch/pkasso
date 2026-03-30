@@ -6,9 +6,9 @@ Autoprot enumerates protonation microstates (one microstate describes a unique c
 
 The program runs in different modes: 
 
-1) Calculate single pH-dependent microstate probabilities given a SMILES string
-2) Batch process a .smi file to calculate pH-dependent microstates
-3) Screen a pH range and plot the microstate frequencies (for a single molecule); calculate macro-pKa values.
+1) `single`: Calculate single pH-dependent microstate probabilities given a SMILES string
+2) `batch`: Batch process a .smi file to calculate pH-dependent microstates
+3) `scan`: Scan a pH range and plot the microstate distributions for all pH values (for a single molecule); calculate macro-pKa values.
 
 # Installation
 
@@ -22,13 +22,11 @@ Basic example:
 
 ```
 autoprot --smiles 'OC(=O)C(c1ccc(O)cc1)CNCCN' --name mymolecule
-```
-(equivalent to)
-```
-autoprot single --smiles 'OC(=O)C(c1ccc(O)cc1)CNCCN' --name mymolecule
+# equivalent to
+# autoprot single --smiles 'OC(=O)C(c1ccc(O)cc1)CNCCN' --name mymolecule
 ```
 
-Get help for different autoprot options (single prediction, batch prediction, pH scan) via
+Get help for different autoprot options (single prediction, batch prediction, pH scan) with
 ```
 autoprot --help
 autoprot single --help
