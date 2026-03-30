@@ -1,2 +1,2 @@
 import autoprot.main
-from autoprot.main import protonate
+from autoprot.py_interface import protonate, batch_protonate, scan_pH

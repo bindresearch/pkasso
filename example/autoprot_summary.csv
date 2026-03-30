@@ -1,0 +1,7 @@
+name_state,name,SMILES,frequency,q
+fasudil_0,fasudil,O=S(=O)(c1cccc2cnccc12)N1CCC[NH2+]CC1,1.0,1.0
+mymolecule_0,mymolecule,NCC[NH2+]CC(C(=O)[O-])c1ccc(O)cc1,0.5780819000252586,0.0
+mymolecule_1,mymolecule,[NH3+]CCNCC(C(=O)[O-])c1ccc(O)cc1,0.2563056500856549,0.0
+mymolecule_2,mymolecule,[NH3+]CC[NH2+]CC(C(=O)[O-])c1ccc(O)cc1,0.16561244988908652,1.0
+histamine_0,histamine,[NH3+]CCc1cnc[nH]1,0.5891699036124948,1.0
+histamine_1,histamine,[NH3+]CCc1c[nH+]c[nH]1,0.4108300963875052,2.0

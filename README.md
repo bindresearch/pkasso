@@ -1,6 +1,6 @@
-# autoprot
+# Autoprot
 
-Automated protonation state assignment based on pKa calculations from MolGpKa (https://github.com/Xundrug/MolGpKa).
+Autoprot determines protonation states for small molecules based on pKa calculations from MolGpKa (https://github.com/Xundrug/MolGpKa). Autoprot enumerates protonation microstates (one microstate describes a unique charge pattern on the protonable sites of the molecule), screens pKa values between connected microstates and predicts pH-dependent microstate frequencies based on the graph of free energy differences between microstates. Macroscopic pKa values are calculated from the pooled frequencies of microstates that share the same net charge.
 
 # Installation
 
@@ -10,40 +10,80 @@ pip install .
 
 # Use
 
-There are several ways to use autoprot.
+ADD INFORMATION ABOUT MODE SINGLE VS MODE SCAN HERE.
+
+There are several easy ways to use autoprot.
 
 ## Command line interface
+
+Basic example:
 
 ```
 autoprot --smiles 'OC(=O)C(c1ccc(O)cc1)CNCCN' --name mymolecule
 ```
+(equivalent to)
+```
+autoprot single --smiles 'OC(=O)C(c1ccc(O)cc1)CNCCN' --name mymolecule
+```
 
-Results are output with the most likely microstate first. By default, figures are saved in folder `figures`, output files (including sdf structures and a csv file with a summary) are saved in folder `output`. See `autoprot --help` to change these settings and other behavior.
+Get help for different autoprot options (single prediction, batch prediction, pH scan) via
+```
+autoprot --help
+autoprot single --help
+autoprot batch --help
+autoprot scan --help
+```
 
 ## Python interface (e.g. in a notebook)
 
-Retrieve rdkit Mol objects, output smiles and frequencies of most likely microstates given a pH value (default: `pH_output = 7.0`).
-This does not write any output by default. The behavior can be changed by passing `write_output = True`.
+Also see the example jupyter notebook in `example/example.ipynb`
+
+### Single molecule, single pH
 
 ```
 from autoprot import protonate
 
+name = 'mymolecule'
 smiles = r'OC(=O)C(c1ccc(O)cc1)CNCCN'
-mols_p, smiles_p, freqs = protonate(smiles, pH=8.5)
+pH = 7.0
+
+# Include microstates with probability of 20% compared to most probable microstate
+cutoff_export = 0.2 
+
+molecule = protonate(smiles, name=name, pH=pH, cutoff_export=cutoff_export)
+print(molecule.smiles)
+
+molecule.draw()
 ```
 
-## Autoprot object
+### Batch molecules (from .smi file)
 
 ```
-from autoprot.main import Autoprot
+from autoprot import batch_protonate
 
-smiles = r'OC(=O)C(c1ccc(O)cc1)CNCCN'
+batch_file = 'example_molecules.smi'
+batch = batch_protonate(batch_file, pH=7., cutoff_export=0.2)
 
-ap = Autoprot(smiles)
-ap.run()
-
-print(ap.smiles_out, ap.sfreqs_out)
-# ap.mols_out stores the rdkit molecules
+for name, molecule in batch.molecules.items():
+    print(name, molecule.smiles)
 ```
 
-This does write output files by default.
+### pH scan (single molecule) in notebook
+
+```
+from autoprot import scan_pH
+from IPython.display import display
+
+# smiles = r'OC(=O)C(c1ccc(O)cc1)CNCCN'
+name = 'mymolecule'
+
+scan = scan_pH(
+    smiles,
+    name = name,
+)
+
+scan.print_macro_pkas()
+
+display(scan.plot_scan())
+display(scan.plot_mols())
+```

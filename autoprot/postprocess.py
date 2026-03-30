@@ -1,249 +1,301 @@
+from svgutils.compose import Figure, SVG # type: ignore
+import svgutils.transform as sg
+# import cairosvg before anything in rdkit.Chem.Draw, breaks otherwise !!
+import cairosvg  # type: ignore
+
 import numpy as np
 import matplotlib.pyplot as plt
 
-from svgutils.compose import Figure, SVG # type: ignore
-# import cairosvg before anything in rdkit.Chem.Draw, breaks otherwise !!
-import cairosvg  # type: ignore
+from .utils import *
 
 from rdkit import Chem
 from rdkit.Chem import AllChem, Mol
 from rdkit.Chem.Draw import MolToFile, MolsToGridImage
 
+import pandas as pd
+
 import copy
 import os
+import io
+import tempfile
 
-def plot_pH_scan(
-    name: str,
-    indices: list[int],
-    state_strs_relevant: list[str],
-    sfreqs_relevant: list[np.ndarray],
-    pHs: np.ndarray,
-    net_charges: np.ndarray,
-    sfreqs_not_relevant: list[np.ndarray],
-    pkas_combined: dict[int, float],
-    path: str = 'figures',
-    verbose: bool = False,
-    ) -> None:
-    """ Plot scan of microstate frequencies for different pH values. """
+from dataclasses import dataclass
+
+from typing import Any
+
+@dataclass
+class Microstate:
+    name: str
+    name_state: str
+    mol: Mol
+    smiles: str
+    freq: float
+    q: int
+
+@dataclass
+class Molecule:
+    name: str
+    microstates: list[Microstate]
     
-    if len(pHs) == 1:
-        style = 'o'
-    else:
-        style = '-'
+    def __post_init__(self):
+        self.smiles = [m.smiles for m in self.microstates]
+        self.mols = [m.mol for m in self.microstates]
+        self.freqs = [m.freq for m in self.microstates]
+        self.qs = [m.q for m in self.microstates]
 
-    fsave = f'{path}/{name}_ph_scan.svg'
-    cmap = plt.cm.get_cmap("Spectral_r")
-
-    if verbose:
-        print(f'Indices: {indices}')
-    px = 1/plt.rcParams['figure.dpi']
-
-    fig, ax = plt.subplots(2,1,figsize=(700*px,500*px),height_ratios=[0.6,0.4])
-
-    for idx, sfreq in enumerate(sfreqs_not_relevant):
-        ax[0].plot(pHs,sfreq*100,style,color='gray',lw=1.,alpha=0.3)
-
-    for idx, (state_str, sfreq) in enumerate(zip(state_strs_relevant,sfreqs_relevant)):
-        if len(state_strs_relevant) > 1:
-            color = cmap(idx/(len(state_strs_relevant)-1))
-        else:
-            color = cmap(0)
-        ax[0].plot(pHs,sfreq*100,style,label=state_str,color=color)
-    if len(state_strs_relevant) > 10:
-        ax[0].legend(ncol=2,fontsize=6)
-    elif len(state_strs_relevant) > 1:
-        ax[0].legend(ncol=1,fontsize=8)
-
-    ax[0].set(xlabel='pH',ylabel='Distribution [%]')
+    def draw(self):
+        mols = [state.mol for state in self.microstates]
+        img = MolsToGridImage(
+            mols,molsPerRow=len(mols),subImgSize=(250,200),
+            legends=[x.GetProp("_Name") for x in mols],
+            returnPNG=False,useSVG=True
+            ) # type: ignore
+        return img
     
-    ax[0].grid(alpha=0.3)
+    def save(self, file: str) -> None:
+        """ 
+        Write sdf file with all relevant mols, optimized geometry with rdkit.
+        Includes explicit hydrogens.
+        """
+        with Chem.SDWriter(f'{file}') as f:
+            for mol in self.mols:
+                mol_3d = copy.deepcopy(mol)
+                mol_h = Chem.AddHs(mol_3d)
+                cid = AllChem.EmbedMolecule(mol_h, randomSeed=1, useRandomCoords=True) # type: ignore
+                if cid != 0:
+                    raise ValueError(f'{mol.GetProp("_Name")} could not be embedded.')
+                AllChem.UFFOptimizeMolecule(mol_h) # type: ignore
+                f.write(mol_h)
 
-    ax[1].plot(pHs,net_charges,style,color='black')
-
-    for idx, (q, pka) in enumerate(pkas_combined.items()):
-        x = np.argmin(np.abs(pHs-pka))
-        if q+1 > 0:
-            color_rb = 'tab:blue'
-        else:
-            color_rb = 'tab:red'
-        ax[1].plot(pHs[x],net_charges[x],'o',color=color_rb,markersize=5)
-        ax[1].text(pHs[x]+0.1,net_charges[x]+0.05,f'{pka:.2f}')
-
-    ax[1].set(xlabel='pH', ylabel='Net charge')
-    ax[1].grid(alpha=0.3)
-
-    if len(pHs) > 1:
-        for idx in range(2):
-            ax[idx].set(xlim=(pHs[0],pHs[-1]))
-            ax[idx].set_xticks(np.arange(pHs[0],pHs[-1]+0.001,1))
-
-    fig.tight_layout()
-    if fsave != '':
-        fig.savefig(fsave, transparent=True)
-    plt.close()
-
-def curate_output(state_strs: list[str], state_freqs: list[float], mols_lib: dict[str, Mol], name: str) -> list[Mol]:
+def combine_results(name: str, state_strs: list[str], state_freqs: list[float], mols_lib: dict[str, Mol], state_qs: dict[str, int]
+) -> Molecule:
     """ Clean up smiles and mols for output. """
-    mols_out: list[Mol] = []
-    smiles_out: list[str] = []
-    sfreqs_out: list[float] = []
+
+    microstates: list[Microstate] = []
+
     for e_idx, (state_str, sfreq) in enumerate(zip(state_strs, state_freqs)):
-        mol = mols_lib[state_str]
-        mol.SetProp("_Name", f'{name}_{e_idx}')
+        name_state = f'{name}_{e_idx}'
+        mol = copy.deepcopy(mols_lib[state_str])
+        mol.SetProp("_Name", name_state)
         mol.SetProp("Frequency", f'{sfreq}')
         for atom in mol.GetAtoms(): # type: ignore
             atom.SetAtomMapNum(0)
         tmp=AllChem.Compute2DCoords(mol)
         smiles = Chem.MolToSmiles(mol)
         sfreq_out = sfreq/np.sum(state_freqs)
+        q = state_qs[state_str]
+
+        res = Microstate(name, name_state, mol, smiles, float(sfreq_out), q)
+        microstates.append(res)
+
+    molecule = Molecule(name, microstates)
+    return molecule
+
+@dataclass
+class Batch:
+    molecules: dict[str, Molecule]
+
+    def to_pandas(self):
+        df = pd.DataFrame()
+        for name, molecule in self.molecules.items():
+            for m in molecule.microstates:
+                df.loc[m.name_state,'name'] = m.name
+                df.loc[m.name_state,'SMILES'] = m.smiles
+                df.loc[m.name_state,'frequency'] = m.freq
+                df.loc[m.name_state,'q'] = m.q
+        df.index.rename('name_state', inplace=True)
+        return df
+
+@dataclass
+class Scan:
+    name: str
+    indices: list[int]
+    state_strs_relevant: list[str]
+    mols_relevant: list[Mol]
+    sfreqs_relevant: list[np.ndarray]
+    pHs: np.ndarray
+    net_charges: np.ndarray
+    sfreqs_not_relevant: list[np.ndarray]
+    pkas_macro: dict[int, float]
+
+    def __post_init__(self):
+        self.state_strs_conv = [state_str_to_q(state_str) for state_str in self.state_strs_relevant]
+
+    def export_macro_pkas(self, file) -> None:
+        """ Write macro pKas from pooled microstates. """
+        with open(f'{file}','w') as f:
+            f.write('idx,q0,q1,pka\n')
+            for idx, (q, pka) in enumerate(self.pkas_macro.items()):
+                f.write(f'pKa{idx+1},{q},{q+1},{pka:.5f}\n')
+
+    def print_macro_pkas(self) -> None:
+        print(f'Macro-pKa values:')
+        for idx, (q, pka) in enumerate(self.pkas_macro.items()):
+            print(f'pKa{idx+1} | {q+1} --> {q} | {pka:.3f}')
+
+    def plot_mols(self, size_x: float = 200, size_y: float = 175) -> None:# name: str, path_out: str) -> None:
+        """ Plot rdkit molecules for relevant states together with state strings. """
+
+        for mol in self.mols_relevant: tmp=AllChem.Compute2DCoords(mol) # type: ignore
+        for mol in self.mols_relevant:
+            for atom in mol.GetAtoms(): # type: ignore
+                atom.SetAtomMapNum(0)
         
-        smiles_out.append(smiles)
-        mols_out.append(mol)
-        sfreqs_out.append(float(sfreq_out))
-    return smiles_out, mols_out, sfreqs_out
+        fig_mols = MolsToGridImage(self.mols_relevant,molsPerRow=4,subImgSize=(size_x,size_y), legends=[state_str_to_q(x.GetProp("_Name")) for x in self.mols_relevant],returnPNG=False,useSVG=True) # type: ignore
+        return fig_mols
 
-def export_sdf(mols: list[Mol], name: str, path_out: str) -> None:
-    """ 
-    Write sdf file with all relevant mols, optimized geometry with rdkit.
-    Includes explicit hydrogens.
-    """
-    with Chem.SDWriter(f'{path_out}/{name}.sdf') as f:
-        for mol in mols:
-            mol_3d = copy.deepcopy(mol)
-            mol_h = Chem.AddHs(mol_3d)
-            cid = AllChem.EmbedMolecule(mol_h, randomSeed=1, useRandomCoords=True) # type: ignore
-            if cid != 0:
-                raise ValueError(f'{mol.GetProp("_Name")} could not be embedded.')
-            AllChem.UFFOptimizeMolecule(mol_h) # type: ignore
-            f.write(mol_h)
+    # @staticmethod
+    # def export_mols(file: str, img: Any) -> None: # FIX TYPING
+    #     if is_jupyter():
+    #         img_data: str = img.data
+    #     else:
+    #         img_data: str = img
+    #     img_data = img_data.replace('fill:#FFFFFF', 'fill:none')
+    #     with open(file,'w') as f:
+    #         f.write(img_data)
 
-def export_csv(
-    state_strs: list[str],
-    smiles_out: list[str],
-    sfreqs_out: list[float],
-    state_qs: dict[str, int],
-    name: str,
-    path_out: str,
-    fout_csv: str,
-    append_csv: bool,
-    ) -> None:
-    """ Export csv with information about microstates at the given pH. """
-    if append_csv:
-        action = 'a'
-    else:
-        action = 'w'
+    def plot_scan(self,
+        ) -> None:
+        """ Plot scan of microstate frequencies for different pH values. """
+        
+        if len(self.pHs) == 1:
+            style = 'o'
+        else:
+            style = '-'
 
-    with open(f'{path_out}/{fout_csv}',action) as f:
-        if action == 'w':
-            f.write(f'name,name_state,SMILES,frequency,charge\n')
-        for e_idx, (state_str, smiles, sfreq) in enumerate(zip(state_strs, smiles_out, sfreqs_out)):
-            f.write(f'{name},{name}_{e_idx},{smiles},{sfreq:.5f},{state_qs[state_str]}\n')
+        # fsave = f'{path}/{name}_ph_scan.svg'
+        cmap = plt.cm.get_cmap("Spectral_r")
 
-def export_macro_pkas(pkas_combined: dict[int, float], name: str, path_out: str) -> None:
-    """ Write macro pKas from pooled microstates. """
-    # print(f'Macro-pKa values:')
-    # for idx, (q, pka) in enumerate(pkas_combined.items()):
-    #     print(f'pKa{idx+1} | {q+1} --> {q} | {pka:.3f}')
-    with open(f'{path_out}/{name}_macro_pkas.csv','w') as f:
-        f.write('idx,q0,q1,pka\n')
-        for idx, (q, pka) in enumerate(pkas_combined.items()):
-            f.write(f'pKa{idx+1},{q},{q+1},{pka:.5f}\n')
+        px = 1/plt.rcParams['figure.dpi']
 
-def calc_relevant_states(
-    state_freqs_all: dict[str, np.ndarray],
-    mols_lib: dict[str, Mol],
-    max_states: int = 18,
-    verbose: bool = False,
-    ) -> tuple[
-        int,
-        list[str],
-        list[np.ndarray],
-        list[Mol],
-        list[np.ndarray]
-    ]:
-    """ Reduce number of states to max_states for plotting. """
+        # fig_scan, ax = plt.subplots(2,1,figsize=(700*px,500*px),height_ratios=[0.6,0.4])
+        fig_scan, ax = plt.subplots(2,1,figsize=(820*px,600*px),height_ratios=[0.6,0.4])
 
-    cutoff = 0.01
-    tries = 0
+        for idx, sfreq in enumerate(self.sfreqs_not_relevant):
+            ax[0].plot(self.pHs,sfreq*100,style,color='gray',lw=1.,alpha=0.3)
 
-    N_relevant_states = int(1e5)
-    while N_relevant_states > max_states:
-        state_strs_relevant = []
-        sfreqs_relevant = []
-        sfreqs_not_relevant = []
-        mols_relevant = []
-        pH_argmaxs = []
-
-        for state_str, sfreqs in state_freqs_all.items():
-            if np.max(sfreqs) > cutoff:
-                state_strs_relevant.append(state_str)
-                sfreqs_relevant.append(sfreqs)
-                mols_relevant.append(mols_lib[state_str])
-                pH_argmaxs.append(np.argmax(sfreqs))
+        for idx, (state_str, sfreq) in enumerate(zip(self.state_strs_conv,self.sfreqs_relevant)):
+            if len(self.state_strs_conv) > 1:
+                if len(self.state_strs_conv) == 3 and idx == 1:
+                    color = cmap((idx-0.3)/(len(self.state_strs_conv)-1)) # avoid invisible yellow
+                else:
+                    color = cmap(idx/(len(self.state_strs_conv)-1))
             else:
-                sfreqs_not_relevant.append(sfreqs)
-        N_relevant_states = len(state_strs_relevant)
-        tries += 1
-        cutoff += 0.02
+                color = cmap(0)
+            ax[0].plot(self.pHs,sfreq*100,style,label=state_str,color=color)
+        if len(self.state_strs_conv) > 8:
+            ax[0].legend(ncol=2,fontsize=8)
+        elif len(self.state_strs_conv) > 1:
+            ax[0].legend(ncol=1,fontsize=10)
 
-    # Sort by pH value of max freq.
-    ps = np.argsort(pH_argmaxs)
-    state_strs_relevant = [state_strs_relevant[p] for p in ps]
-    sfreqs_relevant = [sfreqs_relevant[p] for p in ps]
-    mols_relevant = [mols_relevant[p] for p in ps]
-    if verbose:
-        print(f'Final N relevant states: {N_relevant_states} with cutoff {cutoff}')
-    return N_relevant_states, state_strs_relevant, sfreqs_relevant, mols_relevant, sfreqs_not_relevant
+        # ax[0].set(xlabel='pH',ylabel='Probability [%]')
+        ax[0].set_xlabel('pH', fontsize=12)
+        ax[0].set_ylabel('Probability [%]', fontsize=12)
+        ax[0].grid(alpha=0.3)
 
-def is_jupyter() -> bool:
-    """ Check if a jupyter notebook/lab is run."""
-    try:
-        from IPython import get_ipython
-        return get_ipython() is not None and "IPKernelApp" in get_ipython().config
-    except ImportError:
-        return False
+        ax[1].plot(self.pHs,self.net_charges,style,color='black')
 
-def plot_relevant_states(mols_relevant: list[Mol], name: str, path_figs: str) -> None:
-    """ Plot rdkit molecules for relevant states together with state strings. """
+        for idx, (q, pka) in enumerate(self.pkas_macro.items()):
+            x = np.argmin(np.abs(self.pHs-pka))
+            if q+1 > 0:
+                color_rb = 'tab:blue'
+            else:
+                color_rb = 'tab:red'
+            ax[1].plot(self.pHs[x],self.net_charges[x],'o',color=color_rb,markersize=5)
+            ax[1].text(self.pHs[x]+0.1,self.net_charges[x]+0.05,f'{pka:.2f}',fontsize=12)
 
-    for mol in mols_relevant: tmp=AllChem.Compute2DCoords(mol) # type: ignore
+        ax[1].set_xlabel('pH', fontsize=12)
+        ax[1].set_ylabel('Net charge', fontsize=12)
 
-    for mol in mols_relevant:
-        for atom in mol.GetAtoms(): # type: ignore
-            atom.SetAtomMapNum(0)
+        ax[1].grid(alpha=0.3)
+
+        if len(self.pHs) > 1:
+            for idx in range(2):
+                ax[idx].set(xlim=(self.pHs[0],self.pHs[-1]))
+                ax[idx].set_xticks(np.arange(self.pHs[0],self.pHs[-1]+0.001,1))
+                ax[idx].tick_params(axis='both', which='major', labelsize=12)
+
+        ax[0].set_title(self.name)
+
+        fig_scan.tight_layout()
+        plt.close(fig_scan)
+        return fig_scan
     
-    img=MolsToGridImage(mols_relevant,molsPerRow=4,subImgSize=(150,150),legends=[x.GetProp("_Name") for x in mols_relevant],returnPNG=False,useSVG=True) # type: ignore
+    def export_scan(self, file: str, fig_scan: Any, fig_mols: Any,
+                    size_x: float = 150., size_y: float = 150.): # Fix Typing
 
-    if is_jupyter():
-        img_data: str = img.data
-    else:
-        img_data: str = img
-    img_data = img_data.replace('fill:#FFFFFF', 'fill:none')
+        N_relevant_states = len(self.state_strs_relevant)
 
-    with open(f'{path_figs}/{name}_relevant_states.svg','w') as f:
-        f.write(img_data)
+        with tempfile.NamedTemporaryFile(suffix=".svg", mode="w", delete=True) as f:
+            fig_scan.savefig(f.name, transparent=True)
+            f.flush()
+            svg_scan = SVG(f.name)
 
-def plot_optimal_state(mol: Mol, name: str, path_figs: str) -> None:
-    """ Plot state with highest frequency at pH_output. """
+        if is_jupyter():
+            img_data: str = fig_mols.data
+        else:
+            img_data: str = fig_mols
+        img_data = img_data.replace('fill:#FFFFFF', 'fill:none')
 
-    tmp=AllChem.Compute2DCoords(mol) # type: ignore
-    MolToFile(mol, f'{path_figs}/{name}_opti.svg', size=(800,630), imageType='svg') # type: ignore
-    cairosvg.svg2pdf(url=f'{path_figs}/{name}_opti.svg',write_to=f'{path_figs}/{name}_opti.pdf')
-    os.system(f'rm {path_figs}/{name}_opti.svg')
+        with tempfile.NamedTemporaryFile(suffix=".svg", mode="w", delete=True) as f:
+            f.write(img_data)
+            f.flush()
+            svg_mols = SVG(f.name)
 
-def compose_image(N_relevant_states: int, name: str, path_figs: str) -> None:
-    """ Combine pH scan and plotted rdkit molecules. """
-    if N_relevant_states % 4 == 0:
-        y = 350 + (N_relevant_states//4) * 150
-    else:
-        y = 350 + (N_relevant_states//4 + 1) * 150
-    Figure(
-        "600px", f"{y}px",
-        SVG(f'{path_figs}/{name}_ph_scan.svg').move(30, 0),
-        SVG(f'{path_figs}/{name}_relevant_states.svg').move(0, 350)
-    ).save(f'{path_figs}/{name}_combined.svg')
+        self.compose_image(svg_scan, svg_mols, file, N_relevant_states, size_y = size_y)
 
-    cairosvg.svg2pdf(url=f'{path_figs}/{name}_combined.svg',write_to=f'{path_figs}/{name}_scan.pdf')
-    os.system(f'rm {path_figs}/{name}_ph_scan.svg')
-    os.system(f'rm {path_figs}/{name}_relevant_states.svg')
-    os.system(f'rm {path_figs}/{name}_combined.svg')
+    @staticmethod
+    def compose_image(svg_scan: SVG, svg_mols: SVG, file: str, N_relevant_states: int,
+                      size_y: float = 150.):
+        if N_relevant_states % 4 == 0:
+            # y = 350 + (N_relevant_states//4) * size_y
+            y = 420 + (N_relevant_states//4) * size_y
+        else:
+            # y = 350 + (N_relevant_states//4 + 1) * size_y
+            y = 420 + (N_relevant_states//4 + 1) * size_y
+
+        with tempfile.NamedTemporaryFile(suffix=".svg", mode="w", delete=True) as f:
+            Figure(
+                "600px", f"{y}px",
+                svg_scan.move(0, 0),
+                # svg_mols.move(0, 350),
+                svg_mols.move(0, 420),
+            ).save(f.name)#f'{file[:-4]}.svg')
+
+            # cairosvg.svg2pdf(url=f'{file[:-4]}.svg',write_to=f'{file}')
+            cairosvg.svg2pdf(url=f.name,write_to=f'{file}')
+        # os.system(f'rm {file[:-4]}.svg')
+
+    def save_sdf(self, file: str) -> None:
+        """ 
+        Write sdf file with all relevant mols, optimized geometry with rdkit.
+        Includes explicit hydrogens.
+        """
+        with Chem.SDWriter(f'{file}') as f:
+            for mol in self.mols_relevant:
+                mol_3d = copy.deepcopy(mol)
+                mol_h = Chem.AddHs(mol_3d)
+                cid = AllChem.EmbedMolecule(mol_h, randomSeed=1, useRandomCoords=True) # type: ignore
+                if cid != 0:
+                    raise ValueError(f'{mol.GetProp("_Name")} could not be embedded.')
+                AllChem.UFFOptimizeMolecule(mol_h) # type: ignore
+                f.write(mol_h)
+
+# def plot_optimal_state(mol: Mol, name: str, path_out: str) -> None:
+#     """ Plot state with highest frequency at pH. """
+
+#     tmp=AllChem.Compute2DCoords(mol) # type: ignore
+#     MolToFile(mol, f'{path_out}/{name}_opti.svg', size=(800,630), imageType='svg') # type: ignore
+#     cairosvg.svg2pdf(url=f'{path_out}/{name}_opti.svg',write_to=f'{path_out}/{name}_opti.pdf')
+#     os.system(f'rm {path_out}/{name}_opti.svg')
+
+    # Figure(
+    #     "600px", f"{y}px",
+    #     SVG(f'{path_out}/{name}_ph_scan.svg').move(30, 0),
+    #     SVG(f'{path_out}/{name}_relevant_states.svg').move(0, 350)
+    # ).save(f'{path_out}/{name}_combined.svg')
+
+    # cairosvg.svg2pdf(url=f'{path_out}/{name}_combined.svg',write_to=f'{path_out}/{name}_scan.pdf')
+    # os.system(f'rm {path_out}/{name}_ph_scan.svg')
+    # os.system(f'rm {path_out}/{name}_relevant_states.svg')
+    # os.system(f'rm {path_out}/{name}_combined.svg')

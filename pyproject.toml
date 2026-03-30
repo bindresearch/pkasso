@@ -28,6 +28,8 @@ dependencies = [
     "torch",
     "torch-geometric",
     "pandas",
+    "tqdm",
+    "click",
 ]
 
 [project.optional-dependencies]
@@ -37,7 +39,7 @@ dev = [
 ]
 
 [project.scripts]
-autoprot = "autoprot.cli:main"
+autoprot = "autoprot.cli:run_cli"
 
 [tool.setuptools.packages.find]
 where = ["."]
