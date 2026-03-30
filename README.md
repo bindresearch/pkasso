@@ -1,6 +1,14 @@
 # Autoprot
 
-Autoprot determines protonation states for small molecules based on pKa calculations from MolGpKa (https://github.com/Xundrug/MolGpKa). Autoprot enumerates protonation microstates (one microstate describes a unique charge pattern on the protonable sites of the molecule), screens pKa values between connected microstates and predicts pH-dependent microstate frequencies based on the graph of free energy differences between microstates. Macroscopic pKa values are calculated from the pooled frequencies of microstates that share the same net charge.
+Autoprot determines protonation states for small molecules based on pKa calculations from MolGpKa (https://github.com/Xundrug/MolGpKa). 
+
+Autoprot enumerates protonation microstates (one microstate describes a unique charge pattern on the protonable sites of the molecule), screens pKa values between connected microstates and predicts pH-dependent microstate frequencies based on the graph of free energy differences between microstates. 
+
+The program runs in different modes: 
+
+1) Calculate single pH-dependent microstate probabilities given a SMILES string
+2) Batch process a .smi file to calculate pH-dependent microstates
+3) Screen a pH range and plot the microstate frequencies (for a single molecule); calculate macro-pKa values.
 
 # Installation
 
@@ -8,13 +16,7 @@ Autoprot determines protonation states for small molecules based on pKa calculat
 pip install .
 ```
 
-# Use
-
-ADD INFORMATION ABOUT MODE SINGLE VS MODE SCAN HERE.
-
-There are several easy ways to use autoprot.
-
-## Command line interface
+# Command line interface
 
 Basic example:
 
@@ -34,7 +36,7 @@ autoprot batch --help
 autoprot scan --help
 ```
 
-## Python interface (e.g. in a notebook)
+# Python interface (e.g. in a notebook)
 
 Also see the example jupyter notebook in `example/example.ipynb`
 
