@@ -1,10 +1,12 @@
 from svgutils.compose import Figure, SVG # type: ignore
-import svgutils.transform as sg
-# import cairosvg before anything in rdkit.Chem.Draw, breaks otherwise !!
+import svgutils.transform as sg # type: ignore
+
+### import cairosvg before anything in rdkit.Chem.Draw, svgutils breaks otherwise !!
 import cairosvg  # type: ignore
 
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.figure import Figure as Figure_plt
 
 from .utils import *
 
@@ -25,6 +27,8 @@ from typing import Any
 
 @dataclass
 class Microstate:
+    """ Single microstate class. """
+
     name: str
     name_state: str
     mol: Mol
@@ -34,22 +38,28 @@ class Microstate:
 
 @dataclass
 class Molecule:
+    """ Molecule class storing the microstate output from autoprot. """
+
     name: str
     microstates: list[Microstate]
     
-    def __post_init__(self):
+    def __post_init__(self) -> None:
+        """ Add attributes to list properties of all microstates of a molecule. """
+
         self.smiles = [m.smiles for m in self.microstates]
         self.mols = [m.mol for m in self.microstates]
         self.freqs = [m.freq for m in self.microstates]
         self.qs = [m.q for m in self.microstates]
 
-    def draw(self):
+    def draw(self) -> Any:
+        """ Draw all microstates of a molecule. """
+
         mols = [state.mol for state in self.microstates]
-        img = MolsToGridImage(
+        img = MolsToGridImage( # type: ignore
             mols,molsPerRow=len(mols),subImgSize=(250,200),
             legends=[x.GetProp("_Name") for x in mols],
             returnPNG=False,useSVG=True
-            ) # type: ignore
+            )
         return img
     
     def save(self, file: str) -> None:
@@ -57,6 +67,7 @@ class Molecule:
         Write sdf file with all relevant mols, optimized geometry with rdkit.
         Includes explicit hydrogens.
         """
+
         with Chem.SDWriter(f'{file}') as f:
             for mol in self.mols:
                 mol_3d = copy.deepcopy(mol)
@@ -80,7 +91,7 @@ def combine_results(name: str, state_strs: list[str], state_freqs: list[float], 
         mol.SetProp("Frequency", f'{sfreq}')
         for atom in mol.GetAtoms(): # type: ignore
             atom.SetAtomMapNum(0)
-        tmp=AllChem.Compute2DCoords(mol)
+        tmp=AllChem.Compute2DCoords(mol) # type: ignore
         smiles = Chem.MolToSmiles(mol)
         sfreq_out = sfreq/np.sum(state_freqs)
         q = state_qs[state_str]
@@ -93,9 +104,13 @@ def combine_results(name: str, state_strs: list[str], state_freqs: list[float], 
 
 @dataclass
 class Batch:
+    """
+    Store the outputs of an autoprot batch processing run.
+    """
+
     molecules: dict[str, Molecule]
 
-    def to_pandas(self):
+    def to_pandas(self) -> pd.DataFrame:
         df = pd.DataFrame()
         for name, molecule in self.molecules.items():
             for m in molecule.microstates:
@@ -108,6 +123,11 @@ class Batch:
 
 @dataclass
 class Scan:
+    """ 
+    Store the output of a pH scan.
+    Includes postprocessing methods for plotting.
+    """
+
     name: str
     indices: list[int]
     state_strs_relevant: list[str]
@@ -118,10 +138,10 @@ class Scan:
     sfreqs_not_relevant: list[np.ndarray]
     pkas_macro: dict[int, float]
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         self.state_strs_conv = [state_str_to_q(state_str) for state_str in self.state_strs_relevant]
 
-    def export_macro_pkas(self, file) -> None:
+    def export_macro_pkas(self, file: str) -> None:
         """ Write macro pKas from pooled microstates. """
         with open(f'{file}','w') as f:
             f.write('idx,q0,q1,pka\n')
@@ -129,12 +149,18 @@ class Scan:
                 f.write(f'pKa{idx+1},{q},{q+1},{pka:.5f}\n')
 
     def print_macro_pkas(self) -> None:
+        """ Print macro pKa values. """
         print(f'Macro-pKa values:')
         for idx, (q, pka) in enumerate(self.pkas_macro.items()):
             print(f'pKa{idx+1} | {q+1} --> {q} | {pka:.3f}')
 
-    def plot_mols(self, size_x: float = 200, size_y: float = 175) -> None:# name: str, path_out: str) -> None:
-        """ Plot rdkit molecules for relevant states together with state strings. """
+    def plot_mols(self, size_x: float = 200, size_y: float = 175) -> Any:
+        """ Plot rdkit molecules for relevant states together with state strings. 
+        
+        Returns IPython.core.display.SVG when called from notebook
+        or str when called from script
+        
+        """
 
         for mol in self.mols_relevant: tmp=AllChem.Compute2DCoords(mol) # type: ignore
         for mol in self.mols_relevant:
@@ -144,18 +170,8 @@ class Scan:
         fig_mols = MolsToGridImage(self.mols_relevant,molsPerRow=4,subImgSize=(size_x,size_y), legends=[state_str_to_q(x.GetProp("_Name")) for x in self.mols_relevant],returnPNG=False,useSVG=True) # type: ignore
         return fig_mols
 
-    # @staticmethod
-    # def export_mols(file: str, img: Any) -> None: # FIX TYPING
-    #     if is_jupyter():
-    #         img_data: str = img.data
-    #     else:
-    #         img_data: str = img
-    #     img_data = img_data.replace('fill:#FFFFFF', 'fill:none')
-    #     with open(file,'w') as f:
-    #         f.write(img_data)
-
     def plot_scan(self,
-        ) -> None:
+        ) -> Figure_plt:
         """ Plot scan of microstate frequencies for different pH values. """
         
         if len(self.pHs) == 1:
@@ -221,8 +237,9 @@ class Scan:
         plt.close(fig_scan)
         return fig_scan
     
-    def export_scan(self, file: str, fig_scan: Any, fig_mols: Any,
-                    size_x: float = 150., size_y: float = 150.): # Fix Typing
+    def export_scan(self, file: str, fig_scan: Figure_plt, fig_mols: Any,
+                    size_y: float = 150.) -> None:
+        """ Combine pH scan and molecule drawings and save to file. """
 
         N_relevant_states = len(self.state_strs_relevant)
 
@@ -231,10 +248,12 @@ class Scan:
             f.flush()
             svg_scan = SVG(f.name)
 
+        img_data: str = ''
         if is_jupyter():
-            img_data: str = fig_mols.data
+            img_data = fig_mols.data
         else:
-            img_data: str = fig_mols
+            img_data = fig_mols
+
         img_data = img_data.replace('fill:#FFFFFF', 'fill:none')
 
         with tempfile.NamedTemporaryFile(suffix=".svg", mode="w", delete=True) as f:
@@ -246,7 +265,9 @@ class Scan:
 
     @staticmethod
     def compose_image(svg_scan: SVG, svg_mols: SVG, file: str, N_relevant_states: int,
-                      size_y: float = 150.):
+                      size_y: float = 150.) -> None:
+        """ Combine SVG objects of pH scan and rdkit molecule drawings. """
+
         if N_relevant_states % 4 == 0:
             # y = 350 + (N_relevant_states//4) * size_y
             y = 420 + (N_relevant_states//4) * size_y
@@ -262,15 +283,14 @@ class Scan:
                 svg_mols.move(0, 420),
             ).save(f.name)#f'{file[:-4]}.svg')
 
-            # cairosvg.svg2pdf(url=f'{file[:-4]}.svg',write_to=f'{file}')
             cairosvg.svg2pdf(url=f.name,write_to=f'{file}')
-        # os.system(f'rm {file[:-4]}.svg')
 
     def save_sdf(self, file: str) -> None:
         """ 
         Write sdf file with all relevant mols, optimized geometry with rdkit.
         Includes explicit hydrogens.
         """
+
         with Chem.SDWriter(f'{file}') as f:
             for mol in self.mols_relevant:
                 mol_3d = copy.deepcopy(mol)
@@ -280,22 +300,3 @@ class Scan:
                     raise ValueError(f'{mol.GetProp("_Name")} could not be embedded.')
                 AllChem.UFFOptimizeMolecule(mol_h) # type: ignore
                 f.write(mol_h)
-
-# def plot_optimal_state(mol: Mol, name: str, path_out: str) -> None:
-#     """ Plot state with highest frequency at pH. """
-
-#     tmp=AllChem.Compute2DCoords(mol) # type: ignore
-#     MolToFile(mol, f'{path_out}/{name}_opti.svg', size=(800,630), imageType='svg') # type: ignore
-#     cairosvg.svg2pdf(url=f'{path_out}/{name}_opti.svg',write_to=f'{path_out}/{name}_opti.pdf')
-#     os.system(f'rm {path_out}/{name}_opti.svg')
-
-    # Figure(
-    #     "600px", f"{y}px",
-    #     SVG(f'{path_out}/{name}_ph_scan.svg').move(30, 0),
-    #     SVG(f'{path_out}/{name}_relevant_states.svg').move(0, 350)
-    # ).save(f'{path_out}/{name}_combined.svg')
-
-    # cairosvg.svg2pdf(url=f'{path_out}/{name}_combined.svg',write_to=f'{path_out}/{name}_scan.pdf')
-    # os.system(f'rm {path_out}/{name}_ph_scan.svg')
-    # os.system(f'rm {path_out}/{name}_relevant_states.svg')
-    # os.system(f'rm {path_out}/{name}_combined.svg')

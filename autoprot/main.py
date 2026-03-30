@@ -12,7 +12,7 @@ from rdkit.Chem.rdchem import Mol
 from rdkit import RDLogger
 from rdkit.Chem.Draw import MolToFile, MolsToGridImage
 
-RDLogger.DisableLog("rdApp.*")
+RDLogger.DisableLog("rdApp.*") # type: ignore
 
 import numpy as np
 from numpy.typing import NDArray
@@ -568,37 +568,16 @@ class Autoprot:
     **kwargs : object
         Optional configuration parameters. Supported keys include:
 
-        If mode == 'single': Run a microstate frequency prediction 
-        at the given pH value.
-        If mode == 'scan': Like 'single', but in addition plot frequencies 
-        from a pH scan.
-
         Pipeline parameters:
-            name, cutoff_states, device, pH, pH_band,
-            pHs, sfreq_cutoff_individual, sfreq_cutoff_combined,
-            matrix_def, no_sdf, outfolder,
-            cutoff_export, verbose
-
-        Output-related parameters:
-            name, outfolder, outfolder, fout_csv, append
+            name, cutoff_states, device, pH_band,
+            sfreq_cutoff_individual, sfreq_cutoff_combined,
+            matrix_def, cutoff_export, verbose
 
     """
+
     smiles: str
-
     name: str = 'molecule'
-    # outfolder: str = 'output'
-
-    save: bool = False
-    path: str = '.'
-
-    # fout_csv: str = 'autoprot_results.csv'
-    # append_csv: bool = False
-
-    # batch: str | None = None
-
-    # pH: float = 7.0
-    device: str = 'cpu' # fixed!
-
+    
     # Internal options
     cutoff_states: int = 4000
     sfreq_cutoff_individual: float = 0.01
@@ -606,20 +585,8 @@ class Autoprot:
     cutoff_export: float = 0.2
     matrix_def: str = 'dG'
     pH_band: float = 10.0
-
-    # Output options
-    no_sdf: bool = False
-    # write_output: bool = True
+    device: str = 'cpu' # fixed!
     verbose: bool = False
-
-    # pH-scan specific options
-    # pH_scan: bool = False
-    # pHs: NDArray[np.float64] | None = None
-
-    # def __post_init__(self) -> None:
-    #     if self.pHs is None:
-    #         self.pHs: NDArray[np.float64] = np.arange(0, 14.1, 0.5)
-    #         assert self.pHs is not None
 
     def run_single(self, pH: float = 7.0) -> None:
         """
@@ -641,12 +608,13 @@ class Autoprot:
 
     def run_scan(
             self, 
-            pHs: NDArray[np.float64] = np.arange(0, 14.1, 0.5),
+            pHs: NDArray[np.float64] = np.arange(0, 14.1, 0.5, dtype=np.float64),
             file: str | None = None,
     ) -> None:
         """
         Run pH scan
         """
+
         self.pHs = pHs
         self._setup()
         self._scan_pH()
@@ -682,8 +650,10 @@ class Autoprot:
                 0., pH_band=self.pH_band, verbose=False)
         self.indices0_str = pack_indices(self.indices0)
 
-    def _calc_microstates(self, pH):
+    def _calc_microstates(self, pH: float
+) -> tuple[float, dict[int, float], list[str], list[float], dict[str, int], list[int]]:
         """ Calc microstate frequencies given a pH value """
+
         indices0_curated, q_options0 = self.calc_curated_indices(pH)
 
         # Screen coupling between residues
@@ -771,10 +741,6 @@ class Autoprot:
                     self.state_freqs_all[state_str] = np.zeros(len(self.pHs))
                 self.state_freqs_all[state_str][pH_idx] = state_freq
 
-            # Output pH-specific results for pH
-            # if abs(pH - self.pH) < 1e-8:
-                # self.prep_single_output(state_strs_sym, state_freqs_sym, state_qs, indices)
-
     def _finalize_scan(self, file: str | None = None) -> None:
         """
         Post-process results, compute macro-pKa values, and generate outputs.
@@ -788,26 +754,10 @@ class Autoprot:
 
         self.net_charges_arr = np.round(np.array(self.net_charges),decimals=4)
 
-        # verbose = True if is_jupyter() else False
         self.pkas_macro = combine_pkas_macro(self.pHs, self.freqs_macro_all)
-
-        # if self.pkas_macro and self.save:
-            # export_macro_pkas(self.pkas_macro, self.name, self.outfolder)
 
         if self.state_freqs_all:
             self.calc_relevant_states()
-
-        # reduce number of microstates for plotting
-        # if self.state_freqs_all:
-            # N_relevant_states, state_strs_relevant, sfreqs_relevant, mols_relevant, sfreqs_not_relevant = calc_relevant_states(
-                    # self.state_freqs_all, self.mols_libs[self.indices0_str], verbose=self.verbose)
-            # Plotting of pH scan
-            # self.fig_scan = plot_pH_scan(
-            #         self.name, self.indices0, self.state_strs_relevant, self.sfreqs_relevant, self.pHs, self.net_charges_arr, 
-            #         self.sfreqs_not_relevant, self.pkas_macro, verbose=self.verbose)
-            # self.fig_molecules = plot_relevant_states(self.mols_relevant) # self.name, self.outfolder,
-            # if self.save:
-                # compose_image(self.name, self.N_relevant_states, self.save, self.path)# self.name, self.outfolder)
 
     def calc_relevant_states(
         self,
@@ -1266,17 +1216,17 @@ class Autoprot:
 
         # Select states for pH-specific export
         state_strs_export: list[str] = []
-        state_freqs_export_l: list[float] = []
+        state_freqs_export: list[float] = []
 
         for state_str, state_freq in zip(state_strs, state_freqs):
             if state_freq > self.cutoff_export * state_freq_max: # Include all high prob states
                 state_strs_export.append(state_str)
-                state_freqs_export_l.append(state_freq)
+                state_freqs_export.append(state_freq)
 
-        state_freqs_export: NDArray[np.float64] = np.array(state_freqs_export_l)
-        ps = np.argsort(state_freqs_export)[::-1] # Sort by highest probability
+        state_freqs_arr: NDArray[np.float64] = np.array(state_freqs_export)
+        ps = np.argsort(state_freqs_arr)[::-1] # Sort by highest probability
 
-        state_freqs_export = state_freqs_export[ps]
+        state_freqs_export = [state_freqs_export[p] for p in ps]
         state_strs_export = [state_strs_export[p] for p in ps]
 
         indices_str = pack_indices(indices)
@@ -1289,14 +1239,6 @@ class Autoprot:
 
         self.molecule = combine_results(
             self.name, state_strs_export, state_freqs_export, self.mols_libs[indices_str], state_qs)
-
-        # if self.write_output:
-        #     export_csv(state_strs_export,self.smiles_out,self.sfreqs_out, state_qs, self.name, self.outfolder, self.fout_csv, self.append_csv)
-        #     if not self.no_sdf:
-        #         export_sdf(self.mols_out, self.name, self.outfolder)
-        #     plot_optimal_state(self.mols_out[0], self.name, self.outfolder)
-        # if self.verbose:
-        #     print(f'Optimal smiles for pH {self.pH}: {self.smiles_out[0]}')
 
     def check_chiral_consistency(
         self,
@@ -1343,5 +1285,3 @@ class Autoprot:
             smiles = Chem.MolToSmiles(mol)
             self.mols_libs[indices_str][state_str] = mol
             self.smiles_libs[indices_str][state_str] = smiles
-
-######################################################################
