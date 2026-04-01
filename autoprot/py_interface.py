@@ -1,3 +1,6 @@
+"""High-level Python interface for running AutoProt predictions."""
+
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -31,7 +34,7 @@ def protonate(smiles: str, pH: float = 7.0, **kwargs: Any) -> Molecule:
     return ap.molecule
 
 def batch_protonate(
-        batch_file: str,
+        batch_file: Path,
         pH: float = 7.0,
         **kwargs: Any) -> Batch:
     """

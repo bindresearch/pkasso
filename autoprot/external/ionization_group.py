@@ -3,7 +3,6 @@ from __future__ import division, unicode_literals
 import os
 from importlib import resources
 
-import numpy as np
 import pandas as pd
 from pandas import DataFrame
 from rdkit import Chem
@@ -103,7 +102,7 @@ def get_ionization_aid(
     """
     df_smarts_acid, df_smarts_base = split_acid_base_pattern()
 
-    if mol == None:
+    if not mol:
         raise RuntimeError("No mol found for get_ionization_aid")
     acid_matches = match_acid(df_smarts_acid, mol)
     base_matches = match_base(df_smarts_base, mol)

@@ -1,3 +1,6 @@
+"""Utility helpers for protonation state processing."""
+
+from pathlib import Path
 from typing import cast
 
 import numpy as np
@@ -86,7 +89,7 @@ def state_str_to_q(state_str: str) -> str:
 
 #### INPUT / OUTPUT ####
 
-def read_smi(smi: str) -> tuple[list[str], list[str]]:
+def read_smi(smi: Path) -> tuple[list[str], list[str]]:
     """Parse input .smi files"""
 
     smiles_batch = []
