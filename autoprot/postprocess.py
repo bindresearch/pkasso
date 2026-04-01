@@ -1,29 +1,20 @@
-from svgutils.compose import Figure, SVG # type: ignore
-import svgutils.transform as sg # type: ignore
+import copy
+import tempfile
+from dataclasses import dataclass
+from typing import Any
 
 ### import cairosvg before anything in rdkit.Chem.Draw, svgutils breaks otherwise !!
 import cairosvg  # type: ignore
-
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
 from matplotlib.figure import Figure as Figure_plt
-
-from .utils import *
-
 from rdkit import Chem
 from rdkit.Chem import AllChem, Mol
-from rdkit.Chem.Draw import MolToFile, MolsToGridImage
+from rdkit.Chem.Draw import MolsToGridImage
+from svgutils.compose import SVG, Figure  # type: ignore
 
-import pandas as pd
-
-import copy
-import os
-import io
-import tempfile
-
-from dataclasses import dataclass
-
-from typing import Any
+from utils import state_str_to_q, is_jupyter
 
 @dataclass
 class Microstate:
@@ -78,7 +69,12 @@ class Molecule:
                 AllChem.UFFOptimizeMolecule(mol_h) # type: ignore
                 f.write(mol_h)
 
-def combine_results(name: str, state_strs: list[str], state_freqs: list[float], mols_lib: dict[str, Mol], state_qs: dict[str, int]
+def combine_results(
+        name: str,
+        state_strs: list[str],
+        state_freqs: list[float],
+        mols_lib: dict[str, Mol],
+        state_qs: dict[str, int],
 ) -> Molecule:
     """ Clean up smiles and mols for output. """
 
@@ -91,7 +87,7 @@ def combine_results(name: str, state_strs: list[str], state_freqs: list[float], 
         mol.SetProp("Frequency", f'{sfreq}')
         for atom in mol.GetAtoms(): # type: ignore
             atom.SetAtomMapNum(0)
-        tmp=AllChem.Compute2DCoords(mol) # type: ignore
+        _ = AllChem.Compute2DCoords(mol) # type: ignore
         smiles = Chem.MolToSmiles(mol)
         sfreq_out = sfreq/np.sum(state_freqs)
         q = state_qs[state_str]
@@ -150,7 +146,7 @@ class Scan:
 
     def print_macro_pkas(self) -> None:
         """ Print macro pKa values. """
-        print(f'Macro-pKa values:')
+        print('Macro-pKa values:')
         for idx, (q, pka) in enumerate(self.pkas_macro.items()):
             print(f'pKa{idx+1} | {q+1} --> {q} | {pka:.3f}')
 
@@ -162,12 +158,14 @@ class Scan:
         
         """
 
-        for mol in self.mols_relevant: tmp=AllChem.Compute2DCoords(mol) # type: ignore
         for mol in self.mols_relevant:
+            _ = AllChem.Compute2DCoords(mol) # type: ignore
             for atom in mol.GetAtoms(): # type: ignore
                 atom.SetAtomMapNum(0)
         
-        fig_mols = MolsToGridImage(self.mols_relevant,molsPerRow=4,subImgSize=(size_x,size_y), legends=[state_str_to_q(x.GetProp("_Name")) for x in self.mols_relevant],returnPNG=False,useSVG=True) # type: ignore
+        fig_mols = MolsToGridImage(self.mols_relevant,molsPerRow=4,subImgSize=(size_x,size_y), 
+                                   legends=[state_str_to_q(x.GetProp("_Name")) for x in self.mols_relevant],
+                                   returnPNG=False, useSVG=True) # type: ignore
         return fig_mols
 
     def plot_scan(self,

@@ -1,21 +1,17 @@
-#!/usr/bin/env python
-# coding: utf-8
+from __future__ import division, unicode_literals
 
-from __future__ import division
-from __future__ import unicode_literals
+import os
+from importlib import resources
+
 import numpy as np
+import pandas as pd
+from pandas import DataFrame
 from rdkit import Chem
 from rdkit.Chem import Mol
 
-import os
-import pandas as pd
-from pandas import DataFrame
-
-from importlib import resources
 pkg_base = resources.files('autoprot')
 root = f'{pkg_base}/data'
 
-# root = os.path.abspath("")
 SMARTS_FILE = os.path.join(root, "smarts_pattern.tsv")
 
 def split_acid_base_pattern() -> tuple[DataFrame, DataFrame]:

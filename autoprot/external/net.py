@@ -1,14 +1,14 @@
-import torch.nn.functional as F
+from typing import Any
 
+import torch.nn.functional as F
 from torch import nn
-from torch.nn import Linear
-from torch.nn import BatchNorm1d
+from torch.nn import BatchNorm1d, Linear
+from torch_geometric.nn import AttentionalAggregation  # type: ignore
+
 from .gcn_conv import GCNConv
-from torch_geometric.nn import AttentionalAggregation # type: ignore
+
 n_features = 29
 hidden = 1024
-
-from typing import Any
 
 class GCNNet(nn.Module):
     def __init__(self) -> None:

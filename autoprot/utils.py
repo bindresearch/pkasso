@@ -1,11 +1,8 @@
+from typing import cast
 
 import numpy as np
-from rdkit import Chem
-from rdkit.Chem.rdchem import Mol, Atom
 from numpy.typing import NDArray
-
-from typing import Iterable, cast
-import copy
+from rdkit.Chem.rdchem import Atom, Mol
 
 
 def pack_vec(state_vec: np.ndarray) -> str:
@@ -67,7 +64,7 @@ def is_jupyter() -> bool:
     """ Check if a jupyter notebook/lab is run."""
 
     try:
-        from IPython import get_ipython # type: ignore
+        from IPython import get_ipython  # type: ignore
         return get_ipython() is not None and "IPKernelApp" in get_ipython().config # type: ignore
     except ImportError:
         return False

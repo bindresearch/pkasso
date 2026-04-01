@@ -46,3 +46,9 @@ where = ["."]
 
 [tool.setuptools.package-data]
 "autoprot" = ["data/*.csv", "data/*.pth", "data/*.tsv"]
+
+[tool.ruff]
+line-length = 127
+
+[tool.ruff.lint]
+select = ["E", "F"]

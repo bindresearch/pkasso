@@ -1,10 +1,12 @@
-from .utils import *
-from .transitions import calc_state_diffs, calc_freqs_from_states
+from typing import Any
+
 import numpy as np
 from rdkit import Chem
 from rdkit.Chem.rdchem import Mol
 
-from typing import Any
+from .transitions import calc_freqs_from_states, calc_state_diffs
+from .utils import unpack_vec
+
 
 def match_pattern(mol: Mol, pattern: Mol) -> tuple[bool, list[list[int]]]:
     """ Match pattern in rdkit molecule.

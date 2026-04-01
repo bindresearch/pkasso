@@ -1,18 +1,11 @@
-from rdkit import Chem
-from rdkit.Chem import AllChem
-from rdkit import RDLogger
-# RDLogger.DisableLog('rdApp.*')
-from rdkit.Chem import rdmolops
+from typing import Any
 
 import numpy as np
-from .ionization_group import get_ionization_aid
-
 import torch
-from torch_geometric.data import Data # type: ignore
-
+from rdkit import Chem
+from rdkit.Chem import AllChem
 from rdkit.Chem.rdchem import Mol
-
-from typing import Any
+from torch_geometric.data import Data  # type: ignore
 
 def one_hot(x: Any, allowable_set: list[Any]) -> list[bool]:
     if x not in allowable_set:
