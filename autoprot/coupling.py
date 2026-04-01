@@ -1,3 +1,5 @@
+"""Helper functions to test pKa coupling between protonation sites."""
+
 import numpy as np
 from numpy.typing import NDArray
 
@@ -89,7 +91,7 @@ def construct_coupling_matrix(
     """
 
     coupling_matrix: NDArray[np.int64] = np.zeros((len(indices),len(indices)), dtype=np.int64)
-    # print(indices)
+
     for state_str, state_vec in zip(state_strs[1:], state_vecs[1:]):
         changed_rel_idx = np.where(state_vec != 1)[0][0]
         coupling_matrix[changed_rel_idx] += np.where(base_pka_diffs[state_str] >= coupling_cutoff, 1, 0)

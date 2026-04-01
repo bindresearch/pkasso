@@ -1,3 +1,5 @@
+"""Special-case handling for protonation state generation."""
+
 from typing import Any
 
 import numpy as np
@@ -146,12 +148,10 @@ def add_exceptions(mol: Mol, verbose: bool = False) -> tuple[list[int], dict[int
     phosphate_found, phosphate_groups = has_phosphate(mol) # returns map indices
 
     if phosphate_found:
-        # ids_phosphate = phosphate_matches(mol)
         if verbose:
             print(f'phosphate ids: {phosphate_groups}')
         for p_idx, oh_ids in phosphate_groups.items():
             oh_ids = sorted(oh_ids)
-            # deprotonate_ohs.append(oh_ids[0])
             for map_idx in oh_ids:
                 if map_idx not in except_indices:
                     except_indices.append(map_idx)

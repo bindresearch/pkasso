@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import torch
 from rdkit.Chem.rdchem import Mol
 
@@ -6,7 +8,7 @@ from .ionization_group import get_ionization_aid
 from .net import GCNNet
 
 
-def load_model(model_file: str, device: str = "cpu") -> GCNNet:
+def load_model(model_file: Path, device: str = "cpu") -> GCNNet:
     """ Load molgpka ML torch model. """
 
     model= GCNNet().to(device)
@@ -66,7 +68,6 @@ def predict_acid_base(
         for at_idx, pka in base.items():
             atom = mol_h.GetAtomWithIdx(at_idx) 
             map_idx = atom.GetAtomMapNum()
-            # print(at_idx, map_idx)
             base_curated[map_idx] = pka
         if verbose:
             print('base')

@@ -1,3 +1,5 @@
+"""Transition matrix utilities for protonation microstates."""
+
 import networkx as nx  # type: ignore
 import numpy as np
 from numpy.typing import NDArray

@@ -1,6 +1,9 @@
+"""Postprocessing utilities for AutoProt outputs."""
+
 import copy
 import tempfile
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 ### import cairosvg before anything in rdkit.Chem.Draw, svgutils breaks otherwise !!
@@ -13,8 +16,8 @@ from rdkit import Chem
 from rdkit.Chem import AllChem, Mol
 from rdkit.Chem.Draw import MolsToGridImage
 from svgutils.compose import SVG, Figure  # type: ignore
+from utils import is_jupyter, state_str_to_q
 
-from utils import state_str_to_q, is_jupyter
 
 @dataclass
 class Microstate:
@@ -53,13 +56,13 @@ class Molecule:
             )
         return img
     
-    def save(self, file: str) -> None:
+    def save(self, file: Path) -> None:
         """ 
         Write sdf file with all relevant mols, optimized geometry with rdkit.
         Includes explicit hydrogens.
         """
 
-        with Chem.SDWriter(f'{file}') as f:
+        with Chem.SDWriter(file) as f:
             for mol in self.mols:
                 mol_3d = copy.deepcopy(mol)
                 mol_h = Chem.AddHs(mol_3d)
@@ -137,9 +140,9 @@ class Scan:
     def __post_init__(self) -> None:
         self.state_strs_conv = [state_str_to_q(state_str) for state_str in self.state_strs_relevant]
 
-    def export_macro_pkas(self, file: str) -> None:
+    def export_macro_pkas(self, file: Path) -> None:
         """ Write macro pKas from pooled microstates. """
-        with open(f'{file}','w') as f:
+        with open(file,'w') as f:
             f.write('idx,q0,q1,pka\n')
             for idx, (q, pka) in enumerate(self.pkas_macro.items()):
                 f.write(f'pKa{idx+1},{q},{q+1},{pka:.5f}\n')
@@ -177,12 +180,10 @@ class Scan:
         else:
             style = '-'
 
-        # fsave = f'{path}/{name}_ph_scan.svg'
         cmap = plt.cm.get_cmap("Spectral_r")
 
         px = 1/plt.rcParams['figure.dpi']
 
-        # fig_scan, ax = plt.subplots(2,1,figsize=(700*px,500*px),height_ratios=[0.6,0.4])
         fig_scan, ax = plt.subplots(2,1,figsize=(820*px,600*px),height_ratios=[0.6,0.4])
 
         for idx, sfreq in enumerate(self.sfreqs_not_relevant):
@@ -202,7 +203,6 @@ class Scan:
         elif len(self.state_strs_conv) > 1:
             ax[0].legend(ncol=1,fontsize=10)
 
-        # ax[0].set(xlabel='pH',ylabel='Probability [%]')
         ax[0].set_xlabel('pH', fontsize=12)
         ax[0].set_ylabel('Probability [%]', fontsize=12)
         ax[0].grid(alpha=0.3)
@@ -235,7 +235,7 @@ class Scan:
         plt.close(fig_scan)
         return fig_scan
     
-    def export_scan(self, file: str, fig_scan: Figure_plt, fig_mols: Any,
+    def export_scan(self, file: Path, fig_scan: Figure_plt, fig_mols: Any,
                     size_y: float = 150.) -> None:
         """ Combine pH scan and molecule drawings and save to file. """
 
@@ -262,34 +262,31 @@ class Scan:
         self.compose_image(svg_scan, svg_mols, file, N_relevant_states, size_y = size_y)
 
     @staticmethod
-    def compose_image(svg_scan: SVG, svg_mols: SVG, file: str, N_relevant_states: int,
+    def compose_image(svg_scan: SVG, svg_mols: SVG, file: Path, N_relevant_states: int,
                       size_y: float = 150.) -> None:
         """ Combine SVG objects of pH scan and rdkit molecule drawings. """
 
         if N_relevant_states % 4 == 0:
-            # y = 350 + (N_relevant_states//4) * size_y
             y = 420 + (N_relevant_states//4) * size_y
         else:
-            # y = 350 + (N_relevant_states//4 + 1) * size_y
             y = 420 + (N_relevant_states//4 + 1) * size_y
 
         with tempfile.NamedTemporaryFile(suffix=".svg", mode="w", delete=True) as f:
             Figure(
                 "600px", f"{y}px",
                 svg_scan.move(0, 0),
-                # svg_mols.move(0, 350),
                 svg_mols.move(0, 420),
-            ).save(f.name)#f'{file[:-4]}.svg')
+            ).save(f.name)
 
-            cairosvg.svg2pdf(url=f.name,write_to=f'{file}')
+            cairosvg.svg2pdf(url=f.name,write_to=file)
 
-    def save_sdf(self, file: str) -> None:
+    def save_sdf(self, file: Path) -> None:
         """ 
         Write sdf file with all relevant mols, optimized geometry with rdkit.
         Includes explicit hydrogens.
         """
 
-        with Chem.SDWriter(f'{file}') as f:
+        with Chem.SDWriter(file) as f:
             for mol in self.mols_relevant:
                 mol_3d = copy.deepcopy(mol)
                 mol_h = Chem.AddHs(mol_3d)

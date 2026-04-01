@@ -1,7 +1,10 @@
+"""Core AutoProt workflow implementation."""
+
 import copy
 import itertools
 from dataclasses import dataclass
 from importlib import resources
+from pathlib import Path
 
 import numpy as np
 from numpy.typing import NDArray
@@ -586,7 +589,7 @@ class Autoprot:
         """
         Run the full Autoprot pipeline.
 
-        1. Setup of models, file paths, and preprocessing.
+        1. Setup of models and preprocessing.
         2. pH-dependent state enumeration and thermodynamic evaluation.
         3. Final analysis, pKa aggregation, and visualization.
         """
@@ -595,15 +598,10 @@ class Autoprot:
         self._setup()
         net_charge, freqs_macro, state_strs_sym, state_freqs_sym, state_qs, indices = self._calc_microstates(self.pH)
         self.prep_single_output(state_strs_sym, state_freqs_sym, state_qs, indices)
-        # if save:
-        #     mols = [m.mol for m in self.molecule.microstates]
-        #     print(mols)
-        #     export_sdf(mols, self.name, self.path)#mols: list[Mol], name: str, path_out: str) -> None:
 
     def run_scan(
             self, 
             pHs: NDArray[np.float64] = np.arange(0, 14.1, 0.5, dtype=np.float64),
-            file: str | None = None,
     ) -> None:
         """
         Run pH scan
@@ -612,12 +610,9 @@ class Autoprot:
         self.pHs = pHs
         self._setup()
         self._scan_pH()
-        self._finalize_scan(file=file)
+        self._finalize_scan()
 
     #########################
-
-    # def _single_pH(self) -> None:
-        # """ Calculate microstates for single pH value only. """
 
     def _setup(self) -> None:
         """
@@ -736,7 +731,7 @@ class Autoprot:
                     self.state_freqs_all[state_str] = np.zeros(len(self.pHs))
                 self.state_freqs_all[state_str][pH_idx] = state_freq
 
-    def _finalize_scan(self, file: str | None = None) -> None:
+    def _finalize_scan(self) -> None:
         """
         Post-process results, compute macro-pKa values, and generate outputs.
 
@@ -794,9 +789,6 @@ class Autoprot:
         if self.verbose:
             print(f'Final N relevant states: {self.N_relevant_states} with cutoff {cutoff}')
 
-
-    
-
     #########################
 
     def initialize_paths_models_libs(self) -> None:
@@ -804,13 +796,9 @@ class Autoprot:
         Initialize output directories, load ML models, and reset internal libraries.
         """
 
-        # if self.write_output:
-        # if self.save:
-            # os.makedirs(self.path, exist_ok=True)
-
         # molgpka ML models
-        model_file_base: str = f'{ROOT}/weight_base.pth'
-        model_file_acid: str = f'{ROOT}/weight_acid.pth'
+        model_file_base: Path = f'{ROOT}/weight_base.pth'
+        model_file_acid: Path = f'{ROOT}/weight_acid.pth'
 
         self.model_base = load_model(model_file_base,device=self.device)
         self.model_acid = load_model(model_file_acid,device=self.device)
