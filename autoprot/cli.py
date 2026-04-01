@@ -1,13 +1,12 @@
-from .py_interface import protonate, batch_protonate, scan_pH
-
-import sys
 import os
-import click
+import sys
+from typing import Any
 
+import click
 import numpy as np
 from numpy.typing import NDArray
 
-from typing import Any
+from .py_interface import batch_protonate, protonate, scan_pH
 
 COMMANDS = {"single", "batch", "scan"}
 

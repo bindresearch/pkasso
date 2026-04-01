@@ -1,10 +1,9 @@
+import networkx as nx  # type: ignore
 import numpy as np
 from numpy.typing import NDArray
+from scipy.sparse import csr_matrix  # type: ignore
 
-from scipy.sparse import csr_matrix # type: ignore
-import networkx as nx # type: ignore
 from .utils import pack_vec
-
 
 MISSING = -1000.
 

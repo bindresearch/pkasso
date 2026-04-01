@@ -1,13 +1,13 @@
+from typing import Any, Optional, Tuple
+
 import torch
-from torch.nn import Parameter
 from torch import Tensor
-from torch_geometric.nn.conv import MessagePassing # type: ignore
-from torch_geometric.utils import add_remaining_self_loops # type: ignore
+from torch.nn import Parameter
+from torch_geometric.nn.conv import MessagePassing  # type: ignore
+from torch_geometric.utils import add_remaining_self_loops  # type: ignore
 
 from .inits import glorot, zeros
 from .scatter import scatter_add
-
-from typing import Any, Optional, Tuple
 
 class GCNConv(MessagePassing): # type: ignore
     r"""The graph convolutional operator from the `"Semi-supervised
@@ -95,6 +95,7 @@ class GCNConv(MessagePassing): # type: ignore
             edge_index, edge_weight, fill_value, num_nodes)
 
         row, col = edge_index
+        assert edge_weight is not None
         deg = scatter_add(edge_weight, row, dim=0, dim_size=num_nodes)
         deg_inv_sqrt = deg.pow(-0.5)
         deg_inv_sqrt[deg_inv_sqrt == float('inf')] = 0

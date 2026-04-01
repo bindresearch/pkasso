@@ -1,10 +1,10 @@
 import torch
+from rdkit.Chem.rdchem import Mol
 
-from .ionization_group import get_ionization_aid
 from .descriptor import mol2vec
+from .ionization_group import get_ionization_aid
 from .net import GCNNet
 
-from rdkit.Chem.rdchem import Mol
 
 def load_model(model_file: str, device: str = "cpu") -> GCNNet:
     """ Load molgpka ML torch model. """

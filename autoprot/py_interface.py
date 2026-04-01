@@ -1,15 +1,12 @@
-from .main import Autoprot
-from .postprocess import Molecule, Microstate, Batch, Scan
-from .utils import *
-
-from dataclasses import dataclass
-from tqdm import tqdm # type: ignore
+from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
-import pandas as pd
+from tqdm import tqdm  # type: ignore
 
-from typing import Any
+from .main import Autoprot
+from .postprocess import Batch, Molecule, Scan
+from .utils import read_smi
 
 def protonate(smiles: str, pH: float = 7.0, **kwargs: Any) -> Molecule:
     """

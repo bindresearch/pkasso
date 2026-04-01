@@ -1,29 +1,23 @@
-from .external.pka import predict_acid_base, load_model
-from .transitions import *
-from .postprocess import *
-from .utils import *
-from .coupling import *
-from .special_cases import *
-
-from rdkit import Chem
-from rdkit.Chem.MolStandardize import rdMolStandardize
-from rdkit.Chem import RegistrationHash
-from rdkit.Chem.rdchem import Mol
-from rdkit import RDLogger
-from rdkit.Chem.Draw import MolToFile, MolsToGridImage
-
-RDLogger.DisableLog("rdApp.*") # type: ignore
+import copy
+import itertools
+from dataclasses import dataclass
+from importlib import resources
 
 import numpy as np
 from numpy.typing import NDArray
+from rdkit import Chem, RDLogger
+from rdkit.Chem import AllChem, RegistrationHash
+from rdkit.Chem.MolStandardize import rdMolStandardize
+from rdkit.Chem.rdchem import Mol
 
-import copy
-import itertools
-import os
+from . import coupling, special_cases, utils
+from .external.pka import load_model, predict_acid_base
+from .postprocess import combine_results
+from .transitions import calc_freqs_from_states, calc_state_diffs
+from .utils import pack_indices, pack_vec, unpack_vec
 
-from dataclasses import dataclass
+RDLogger.DisableLog("rdApp.*") # type: ignore
 
-from importlib import resources
 pkg_base = resources.files('autoprot')
 
 ROOT = f'{pkg_base}/data'
@@ -234,7 +228,7 @@ def construct_mol(mol0: Mol, indices: list[int], state_vec: NDArray[np.int64]) -
     rw = Chem.RWMol(Chem.AddHs(mol_cand))
 
     for map_idx, q in zip(indices,qs):
-        atom = get_atom_with_map_idx(rw, map_idx)
+        atom = utils.get_atom_with_map_idx(rw, map_idx)
         if atom is None:
             raise
         atom.SetFormalCharge(int(q))
@@ -339,7 +333,7 @@ def combine_clusters(
         for c_idx, s_idx in enumerate(s_idxs):
             state_str += state_strs_clusters[c_idx][s_idx]
             state_freq *= state_freqs_clusters[c_idx][s_idx]
-        state_str = sort_string(state_str,ps) # match sorted indices                 
+        state_str = utils.sort_string(state_str,ps) # match sorted indices                 
         if state_freq >= sfreq_cutoff_combined:
             state_strs.append(state_str)
             state_freqs_list.append(state_freq)
@@ -675,8 +669,9 @@ class Autoprot:
 
         # Inject phosphate clusters:
         if self.phosphate_groups:
-            state_strs_poh, state_freqs_poh, oh_ids_poh = calc_phosphate_clusters(self.phosphate_groups,pH,self.matrix_def,
-                                                            verbose=self.verbose)
+            state_strs_poh, state_freqs_poh, oh_ids_poh = special_cases.calc_phosphate_clusters(
+                    self.phosphate_groups,pH,self.matrix_def,
+                    verbose=self.verbose)
             for state_strs, state_freqs, oh_ids in zip(state_strs_poh,state_freqs_poh,oh_ids_poh):
                 state_strs_clusters.append(state_strs)
                 state_freqs_clusters.append(state_freqs)
@@ -843,8 +838,8 @@ class Autoprot:
         """
 
         self.mol0, self.smiles0 = preprocess(self.smiles, verbose=self.verbose)
-        self.exclude_base_indices, self.exclude_acid_indices = add_exclusions(self.mol0, verbose=self.verbose)
-        self.except_indices, self.phosphate_groups = add_exceptions(self.mol0, verbose=self.verbose)
+        self.exclude_base_indices, self.exclude_acid_indices = special_cases.add_exclusions(self.mol0, verbose=self.verbose)
+        self.except_indices, self.phosphate_groups = special_cases.add_exceptions(self.mol0, verbose=self.verbose)
 
         if self.verbose:
             print('Processed:')
@@ -890,12 +885,19 @@ class Autoprot:
         if self.verbose:
             print('='*50)
             print(f'pH: {pH}',flush=True)
-        indices0, q_options0 = find_candidate_sites(self.base0, self.acid0, self.exclude_base_indices, self.exclude_acid_indices,
-                                                    pH, pH_band=self.pH_band, verbose=False)
+        indices0, q_options0 = find_candidate_sites(
+            self.base0,
+            self.acid0,
+            self.exclude_base_indices,
+            self.exclude_acid_indices,
+            pH,
+            pH_band=self.pH_band,
+            verbose=False
+        )
         if self.verbose:
             print(f'indices0: {indices0}')
             print(f'q_options0: {q_options0}')
-        indices0_curated, q_options0 = split_exceptions(indices0, q_options0, self.except_indices)
+        indices0_curated, q_options0 = special_cases.split_exceptions(indices0, q_options0, self.except_indices)
 
         if self.verbose:
             print(f'curated indices0: {indices0_curated}')
@@ -947,7 +949,7 @@ class Autoprot:
         q_options = q_options0[cluster]
         state_vecs = construct_state_vectors(q_options, self.cutoff_states)
 
-        state_strs = calc_state_strs(state_vecs)
+        state_strs = utils.calc_state_strs(state_vecs)
 
         self.construct_mols(state_strs, state_vecs, indices)
         self.run_acid_base_calcs(state_strs, state_vecs, indices)
@@ -995,8 +997,8 @@ class Autoprot:
 
         indices_str = pack_indices(indices)
 
-        state_vecs = construct_state_vectors_single(indices, q_options)
-        state_strs = calc_state_strs(state_vecs)
+        state_vecs = coupling.construct_state_vectors_single(indices, q_options)
+        state_strs = utils.calc_state_strs(state_vecs)
         self.construct_mols(state_strs, state_vecs, indices)
         self.run_acid_base_calcs(state_strs, state_vecs, indices)
 
@@ -1004,14 +1006,14 @@ class Autoprot:
         base_pka_diffs = {}
         acid_pka_diffs = {}
         for state_str1 in state_strs[1:]:
-            base_pka_diffs[state_str1], acid_pka_diffs[state_str1] = compare_pkas(
+            base_pka_diffs[state_str1], acid_pka_diffs[state_str1] = coupling.compare_pkas(
                     indices, q_options, state_str0, state_str1, 
                     self.base_libs[indices_str], self.acid_libs[indices_str])
         
-        coupling_matrix = construct_coupling_matrix(
+        coupling_matrix = coupling.construct_coupling_matrix(
                 indices, state_strs, state_vecs, base_pka_diffs, acid_pka_diffs, 
                 coupling_cutoff)
-        clusters = cluster_coupling_matrix(coupling_matrix)
+        clusters = coupling.cluster_coupling_matrix(coupling_matrix)
         return clusters
 
     def screen_clusters(self, indices0: list[int], q_options0: NDArray[np.int64]) -> list[list[int]]:
@@ -1051,7 +1053,7 @@ class Autoprot:
                 q_options = q_options0[cluster]
                 state_vecs = construct_state_vectors(q_options, self.cutoff_states)
                 N_states = len(state_vecs)
-                if N_states > self.cutoff_states: # This should never happen, as construct_state_vectors should return an empty list in that case.
+                if N_states > self.cutoff_states: # Construct_state_vectors should return an empty list
                     raise
                 if (N_states == 0):
                     accept_clusters = False
@@ -1211,7 +1213,6 @@ class Autoprot:
         """
 
         # Max freq
-        idx_max = np.argmax(state_freqs)
         state_freq_max = np.max(state_freqs)
 
         # Select states for pH-specific export
