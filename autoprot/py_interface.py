@@ -9,7 +9,6 @@ from tqdm import tqdm  # type: ignore
 
 from .main import Autoprot
 from .postprocess import Batch, Molecule, Scan
-from .utils import read_smi
 
 def protonate(smiles: str, pH: float = 7.0, **kwargs: Any) -> Molecule:
     """
@@ -34,31 +33,32 @@ def protonate(smiles: str, pH: float = 7.0, **kwargs: Any) -> Molecule:
     return ap.molecule
 
 def batch_protonate(
-        batch_file: Path,
+        smiles_dict: dict[str, str],
         pH: float = 7.0,
         **kwargs: Any) -> Batch:
     """
-    Batch process a .smi input file.
+    Batch process a dict of names and smiles input files.
 
     Use:
     ```
     from autoprot import batch_protonate
 
-    batch_file = 'example_molecules.smi'
-    batch = batch_protonate(batch_file, pH=7., cutoff_export=0.2)
+    batch_input = {
+        'fasudil' : 'C1CNCCN(C1)S(=O)(=O)C2=CC=CC3=C2C=CN=C3',
+        'mymolecule' : 'OC(=O)C(c1ccc(O)cc1)CNCCN',
+        'histamine' : 'C1=C(NC=N1)CCN',
+    }
+
+    batch = batch_protonate(batch_input, pH=7., cutoff_export=0.2)
 
     for name, molecule in batch.molecules.items():
         print(name, molecule.smiles)
     ```
     """
 
-    print(batch_file)
-    names_batch, smiles_batch = read_smi(batch_file)
-
-    # mols: dict[str, Mol] = {}
     batch_dict: dict[str, Molecule] = {}
 
-    for name, smiles in tqdm(zip(names_batch, smiles_batch),total=len(names_batch)):
+    for name, smiles in tqdm(smiles_dict.items(),total=len(smiles_dict)):
         ap = Autoprot(
             smiles, name=name, **kwargs)
         ap.run_single(pH=pH)

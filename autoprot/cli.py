@@ -11,6 +11,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from .py_interface import batch_protonate, protonate, scan_pH
+from .utils import read_smi
 
 COMMANDS = {"single", "batch", "scan"}
 
@@ -195,8 +196,11 @@ def batch(
     (optionally write sdf files of individual molecules)"""
 
     click.echo("Batch")
+
+    batch_input = read_smi(smi)
+
     bat = batch_protonate(
-        smi,
+        batch_input,
         pH=ph,
         matrix_def=matrix_def,
         cutoff_states=cutoff_states,
@@ -224,7 +228,7 @@ def batch(
 @click.option('--pkas-out', required=False, type=click.Path(path_type=Path), help='File for macro pkas')
 @common_options
 def scan(
-    name:str,
+    name: str,
     smiles: str,
     min_ph: float,
     max_ph: float,

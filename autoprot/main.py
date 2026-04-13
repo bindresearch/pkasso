@@ -2,6 +2,7 @@
 
 import copy
 import itertools
+import logging
 from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path
@@ -19,13 +20,14 @@ from .postprocess import combine_results
 from .transitions import calc_freqs_from_states, calc_state_diffs
 from .utils import pack_indices, pack_vec, unpack_vec
 
+logger = logging.getLogger(__name__)
 RDLogger.DisableLog("rdApp.*") # type: ignore
 
 pkg_base = resources.files('autoprot')
 
 ROOT = f'{pkg_base}/data'
 
-def preprocess(smiles_raw: str, verbose: bool = False) -> tuple[Mol,  str]:
+def preprocess(smiles_raw: str) -> tuple[Mol,  str]:
     """ 
     Construct and standardize an RDKit molecule from a SMILES string.
     Charges that cannot be neutralized (e.g., quaternary ammonium) are preserved.
@@ -34,35 +36,30 @@ def preprocess(smiles_raw: str, verbose: bool = False) -> tuple[Mol,  str]:
 
     Parameters
     ----------
-    smiles_raw : str
+    smiles_raw
         Input SMILES string representing the molecule.
-    verbose : bool, optional
-        Prints verbose information. Default is False.
 
     Returns
     -------
-    mol : rdkit.Chem.rdchem.Mol
+    mol
         The standardized RDKit molecule with atom map numbers set to
         1-based indices.
-    smiles : str
+    smiles
         Canonical SMILES representation of the processed molecule.
     """
 
-    if verbose:
-        print('Raw:')
-        print(smiles_raw)
+    logger.debug('Raw:')
+    logger.debug(smiles_raw)
     mol = Chem.MolFromSmiles(smiles_raw, sanitize=True)
     smiles = Chem.MolToSmiles(mol,canonical=True)
     
-    if verbose:
-        print('Canonical')
-        print(smiles)
+    logger.debug('Canonical')
+    logger.debug(smiles)
     mol = Chem.MolFromSmiles(smiles, sanitize=True)
 
-    if verbose:
-        print('Formal charges before cleanup')
-        charges = [at.GetFormalCharge() for at in mol.GetAtoms()] # type: ignore
-        print(charges)
+    logger.debug('Formal charges before cleanup')
+    charges = [at.GetFormalCharge() for at in mol.GetAtoms()] # type: ignore
+    logger.debug(charges)
 
     mol = rdMolStandardize.Cleanup(mol)
     uncharger = rdMolStandardize.Uncharger(force=True)
@@ -78,10 +75,9 @@ def preprocess(smiles_raw: str, verbose: bool = False) -> tuple[Mol,  str]:
     for atom in mol.GetAtoms(): # type: ignore
         atom.SetAtomMapNum(atom.GetIdx() + 1)
 
-    if verbose:
-        print('Formal charges after cleanup')
-        symbols = [at.GetFormalCharge() for at in mol.GetAtoms()] # type: ignore
-        print(symbols)
+    logger.debug('Formal charges after cleanup')
+    symbols = [at.GetFormalCharge() for at in mol.GetAtoms()] # type: ignore
+    logger.debug(symbols)
 
     return mol, smiles
 
@@ -90,9 +86,9 @@ def find_candidate_sites(
         acid: dict[int, float],
         exclude_base_indices: list[int],
         exclude_acid_indices: list[int],
+        charged_indices: list[int],
         pH: float,
         pH_band: float = 8.,
-        verbose: bool = False,
 ) -> tuple[list[int], NDArray[np.int64]]:
     """
     Determine possible protonation and deprotonation sites for a molecule.
@@ -100,27 +96,27 @@ def find_candidate_sites(
 
     Parameters
     ----------
-    base : dict
+    base
         Mapping of atom map indices to predicted basic pKa values.
-    acid : dict
+    acid
         Mapping of atom map indices to predicted acidic pKa values.
-    exclude_base_indices : list[int]
-        Atom indices that must not be considered for protonation.
-    exclude_acid_indices : list[int]
-        Atom indices that must not be considered for deprotonation.
-    pH : float
+    exclude_base_indices
+        Atom map indices that must not be considered for protonation.
+    exclude_acid_indices
+        Atom map indices that must not be considered for deprotonation.
+    charged_indices
+        Atom map indices that could not be neutralized
+    pH
         Target pH value used to evaluate protonation states.
-    pH_band : float, optional
+    pH_band
         Allowed pKa tolerance around the pH when determining candidate
         sites. Default is 8.
-    verbose : bool, optional
-        If True, prints the list of relevant atom indices.
 
     Returns
     -------
-    indices : list[int]
+    indices
         Sorted atom map indices considered for protonation state changes.
-    q_options : NDArray[np.int64]
+    q_options
         Array of shape (n_sites, 3) indicating allowed states per site:
         [deprotonated, unchanged, protonated].
     """
@@ -129,11 +125,18 @@ def find_candidate_sites(
     deprot_candidates = list(acid.keys())
 
     indices = list(sorted(set(prot_candidates + deprot_candidates)))
-    if verbose:
-        print(f'relevant indices: {indices}')
+    indices_curated: list[int] = []
 
-    q_options = np.zeros((len(indices),3),dtype=np.int64) # deprot=0, stay=1, prot=2
-    for rel_idx, map_idx in enumerate(indices):
+    logger.debug(f'relevant indices: {indices}')
+
+    for map_idx in indices:
+        if map_idx not in charged_indices:
+            indices_curated.append(map_idx)
+
+    logger.debug(f'relevant indices (after charged removal): {indices_curated}')
+
+    q_options = np.zeros((len(indices_curated),3),dtype=np.int64) # deprot=0, stay=1, prot=2
+    for rel_idx, map_idx in enumerate(indices_curated):
         q_options[rel_idx,1] = 1 # always allow stay
         if map_idx in prot_candidates:
             if map_idx not in exclude_base_indices:
@@ -143,7 +146,7 @@ def find_candidate_sites(
             if map_idx not in exclude_acid_indices:
                 if acid[map_idx] <= pH + pH_band:
                     q_options[rel_idx,0] = 1 # allow deprotonation
-    return indices, q_options
+    return indices_curated, q_options
 
 def construct_state_vectors(
     q_options: NDArray[np.int64],
@@ -159,16 +162,16 @@ def construct_state_vectors(
 
     Parameters
     ----------
-    q_options :  NDArray[np.int64]
+    q_options
         Array of shape (n_sites, 3) indicating allowed states per site,
         where columns correspond to [deprotonated, unchanged, protonated]
         and entries are 1 (allowed) or 0 (disallowed).
-    cutoff_states : int
+    cutoff_states
         Maximum number of state combinations to enumerate.
 
     Returns
     -------
-    list[NDArray[np.int64]]
+    state_vecs
         Array of shape (n_states, n_sites) containing all valid state vectors,
         or an empty list if the number of combinations exceeds ``cutoff_states``.
     """
@@ -184,9 +187,9 @@ def construct_state_vectors(
     
     N_trial_vecs = np.prod([len(qs) for qs in q_options_nonzero])
     if N_trial_vecs > cutoff_states:
-        return []#np.array([])
+        return []
     else:
-        state_vecs = list([np.array(x) for x in list(itertools.product(*q_options_nonzero))])
+        state_vecs = [np.array(x) for x in list(itertools.product(*q_options_nonzero))]
         return state_vecs
 
 #########################################
@@ -204,21 +207,21 @@ def construct_mol(mol0: Mol, indices: list[int], state_vec: NDArray[np.int64]) -
 
     Parameters
     ----------
-    mol0 : rdkit.Chem.rdchem.Mol
+    mol0
         Reference molecule (neutral standardized structure)
         with atom map numbers assigned.
-    indices : list[int]
+    indices
         Atom map indices corresponding to the sites whose states are
         defined in ``state_vec``.
-    state_vec :  NDArray[np.int64]
+    state_vec
         Protonation state vector for the selected sites. Values are encoded
         as [0, 1, 2] corresponding to [deprotonated, unchanged, protonated].
 
     Returns
     -------
-    mol : rdkit.Chem.rdchem.Mol
+    mol
         RDKit molecule with the specified protonation states applied.
-    smiles : str
+    smiles
         Non-canonical SMILES representation of the constructed molecule.
     """
 
@@ -233,7 +236,7 @@ def construct_mol(mol0: Mol, indices: list[int], state_vec: NDArray[np.int64]) -
     for map_idx, q in zip(indices,qs):
         atom = utils.get_atom_with_map_idx(rw, map_idx)
         if atom is None:
-            raise
+            raise ValueError(f"Could not find atom with map index {map_idx}.")
         atom.SetFormalCharge(int(q))
         if q == -1:
             for nbr in atom.GetNeighbors():
@@ -257,7 +260,6 @@ def combine_clusters(
     indices_clusters: list[list[int]],
     sfreq_cutoff_individual: float = 0.01,
     sfreq_cutoff_combined: float = 0.001,
-    verbose: bool = False
 ) -> tuple[list[int], list[str], dict[str, float]]:
 
     """
@@ -276,28 +278,26 @@ def combine_clusters(
 
     Parameters
     ----------
-    state_strs_clusters : list[str]
+    state_strs_clusters
         Microstate string labels for each cluster.
-    state_freqs_clusters : list[NDArray[np.float64]]
+    state_freqs_clusters
         Corresponding state frequency arrays for each cluster.
-    indices_clusters : list[list[int]]
+    indices_clusters
         Atom indices associated with each cluster (must be non-overlapping).
-    sfreq_cutoff_individual : float, optional
+    sfreq_cutoff_individual
         Minimum frequency required for a state to be considered during
         cluster-wise filtering. Default is 0.01.
-    sfreq_cutoff_combined : float, optional
+    sfreq_cutoff_combined
         Minimum frequency required for a combined microstate to be kept.
         Default is 0.001.
-    verbose : bool, optional
-        If True, prints intermediate information during processing.
 
     Returns
     -------
-    indices : list[int]
+    indices
         Sorted list of all atom indices across clusters.
-    state_strs : list[str]
+    state_strs
         Combined microstate string representations passing frequency filters.
-    state_freqs_lib : dict[str, float]
+    state_freqs_lib
         Dictionary mapping microstate strings to their normalized
         probabilities. Used downstream for calc_symmetry().
     """
@@ -307,9 +307,8 @@ def combine_clusters(
 
     cluster_state_ids: list[list[int]] = []
 
-    if verbose:
-        print(state_strs_clusters)
-        print(state_freqs_clusters)
+    logger.debug(state_strs_clusters)
+    logger.debug(state_freqs_clusters)
 
     for state_freqs in state_freqs_clusters:
         cluster_state_ids.append([])
@@ -318,8 +317,7 @@ def combine_clusters(
                 cluster_state_ids[-1].append(s_idx)
 
     combinations = list(itertools.product(*cluster_state_ids))
-    if verbose:
-        print(f'N microstate combinations from clusters: {len(combinations)}')
+    logger.debug(f'N microstate combinations from clusters: {len(combinations)}')
 
     state_strs = []
     state_freqs_list = []
@@ -340,9 +338,8 @@ def combine_clusters(
         if state_freq >= sfreq_cutoff_combined:
             state_strs.append(state_str)
             state_freqs_list.append(state_freq)
-
-    if verbose:
-        print(f'N chosen microstate combinations: {len(state_strs)}')
+        
+    logger.debug(f'N chosen microstate combinations: {len(state_strs)}')
     # Correct freqs for removal of very unlikely states
     state_freqs = np.array(state_freqs_list)
     state_freqs /= np.sum(state_freqs)
@@ -378,14 +375,14 @@ def calc_hashes(state_strs: list[str], mols_lib: dict[str, Mol]) -> list[str]:
 
     Parameters
     ----------
-    state_strs : iterable of str
+    state_strs
         Microstate identifiers used as keys in ``mols_lib``.
-    mols_lib : dict[str, rdkit.Chem.rdchem.Mol]
+    mols_lib
         Mapping from microstate strings to RDKit molecule objects.
 
     Returns
     -------
-    list[str]
+    hashes
         Registration hashes corresponding to the input microstates,
         in the same order as ``state_strs``.
     """
@@ -401,7 +398,6 @@ def calc_symmetry(
     state_strs: list[str],
     state_freqs_lib: dict[str, float],
     mols_lib: dict[str, Mol],
-    verbose: bool = False,
 ) -> tuple[list[str], list[float]]:
     """
     Merge symmetry-equivalent microstates based on molecular hashes.
@@ -412,20 +408,19 @@ def calc_symmetry(
 
     Parameters
     ----------
-    state_strs : list[str]
+    state_strs
         Microstate identifiers.
-    state_freqs_lib : dict[str, float]
+    state_freqs_lib
         Mapping from microstate strings to their probabilities.
-    mols_lib : dict[str, Mol]
+    mols_lib
         Mapping from microstate strings to RDKit molecule objects.
-    verbose : bool, optional
-        If True, prints intermediate grouping information.
 
     Returns
     -------
-    tuple[list[str], list[float]]
-        Symmetry-reduced microstate strings and their corresponding
-        combined frequencies.
+    state_strs_symm
+        Symmetry-reduced microstate strings.
+    state_freqs_symm
+        Corresponding combined frequencies.
     """
 
     state_hashes = calc_hashes(state_strs,mols_lib)
@@ -437,8 +432,7 @@ def calc_symmetry(
         else:
             state_dict[state_hash] = [state_str]
 
-    if verbose:
-        print(state_dict)
+    logger.debug(state_dict)
 
     state_strs_symm: list[str] = []
     state_freqs_symm: list[float] = []
@@ -467,19 +461,21 @@ def calc_macro_props(
 
     Parameters
     ----------
-    state_strs : list[str]
+    state_strs
         Microstate identifiers.
-    state_freqs : list[float]
+    state_freqs
         Corresponding normalized microstate probabilities.
-    mols_lib : dict[str, Mol]
+    mols_lib
         Mapping from microstate strings to RDKit molecule objects.
 
     Returns
     -------
-    tuple[float, dict[str, int], dict[int, float]]
-        - Net charge (frequency-weighted sum)
-        - Dictionary mapping microstate strings to formal charges
-        - Dictionary mapping formal charges to their total frequency
+    net_charge
+        Net charge (frequency-weighted sum)
+    state_qs
+        Dictionary mapping microstate strings to formal charges
+    freqs_macro
+        Dictionary mapping formal charges to their total frequency
     """
 
     state_qs: dict[str, int] = {}
@@ -512,15 +508,15 @@ def combine_pkas_macro(pHs: NDArray[np.float64], freqs_macro_all: list[dict[int,
 
     Parameters
     ----------
-    pHs : NDArray[np.float64]
+    pHs
         Array of pH values corresponding to the frequency datasets.
-    freqs_macro_all : list[dict[int, float]]
+    freqs_macro_all
         List of macrostate frequency dictionaries, one per pH value.
         Each dictionary maps formal charge (int) to its frequency.
 
     Returns
     -------
-    dict[int, float]
+    pkas_combined
         Combined macrostate pKa values indexed by charge state.
         Represents pKa between q and q+1.
     """
@@ -560,15 +556,15 @@ class Autoprot:
 
     Parameters
     ----------
-    smiles_raw : str
+    smiles_raw
         Input SMILES string of the molecule to be processed.
-    **kwargs : object
+    **kwargs
         Optional configuration parameters. Supported keys include:
 
         Pipeline parameters:
             name, cutoff_states, device, pH_band,
             sfreq_cutoff_individual, sfreq_cutoff_combined,
-            matrix_def, cutoff_export, verbose
+            matrix_def, cutoff_export
 
     """
 
@@ -583,7 +579,6 @@ class Autoprot:
     matrix_def: str = 'dG'
     pH_band: float = 10.0
     device: str = 'cpu' # fixed!
-    verbose: bool = False
 
     def run_single(self, pH: float = 7.0) -> None:
         """
@@ -627,16 +622,16 @@ class Autoprot:
         - Determining the full set of indices with protonable sites
         """
 
-        if self.verbose:
-            print(self.name)
-            print(self.smiles, flush=True)
+        logger.debug(self.name)
+        logger.debug(self.smiles, flush=True)
 
         self.initialize_paths_models_libs()
         self.prepare_neutral_state()
 
         self.indices0, _ = find_candidate_sites(
                 self.base0, self.acid0, self.exclude_base_indices, self.exclude_acid_indices,
-                0., pH_band=self.pH_band, verbose=False)
+                self.charged_indices,
+                0., pH_band=self.pH_band)
         self.indices0_str = pack_indices(self.indices0)
 
     def _calc_microstates(self, pH: float
@@ -647,8 +642,7 @@ class Autoprot:
 
         # Screen coupling between residues
         clusters = self.screen_clusters(indices0_curated, q_options0)
-        if self.verbose:
-            print(f'Clusters: {clusters}')
+        logger.debug(f'Clusters: {clusters}')
 
         state_freqs_clusters = []
         state_strs_clusters = []
@@ -666,7 +660,7 @@ class Autoprot:
         if self.phosphate_groups:
             state_strs_poh, state_freqs_poh, oh_ids_poh = special_cases.calc_phosphate_clusters(
                     self.phosphate_groups,pH,self.matrix_def,
-                    verbose=self.verbose)
+            )
             for state_strs, state_freqs, oh_ids in zip(state_strs_poh,state_freqs_poh,oh_ids_poh):
                 state_strs_clusters.append(state_strs)
                 state_freqs_clusters.append(state_freqs)
@@ -677,7 +671,7 @@ class Autoprot:
             state_strs_clusters, state_freqs_clusters, indices_clusters, 
             sfreq_cutoff_individual=self.sfreq_cutoff_individual,
             sfreq_cutoff_combined=self.sfreq_cutoff_combined,
-            verbose=self.verbose)
+        )
 
         indices_str = pack_indices(indices)
         # Check if indices from clusters have been combined correctly to the full list of indices
@@ -689,7 +683,7 @@ class Autoprot:
 
         # Symmetry (combine frequencies for chemically identical microstates)
         state_strs_sym, state_freqs_sym = calc_symmetry(
-            state_strs, state_freqs_lib, self.mols_libs[indices_str], verbose=self.verbose)
+            state_strs, state_freqs_lib, self.mols_libs[indices_str])
 
         # Macro-pka properties from combined microstates
         net_charge, state_qs, freqs_macro = calc_macro_props(
@@ -786,8 +780,7 @@ class Autoprot:
         self.sfreqs_relevant = [sfreqs_relevant[p] for p in ps]
         self.mols_relevant = [mols_relevant[p] for p in ps]
         self.sfreqs_not_relevant = sfreqs_not_relevant
-        if self.verbose:
-            print(f'Final N relevant states: {self.N_relevant_states} with cutoff {cutoff}')
+        logger.debug(f'Final N relevant states: {self.N_relevant_states} with cutoff {cutoff}')
 
     #########################
 
@@ -825,26 +818,25 @@ class Autoprot:
         instance attributes for downstream pipeline steps.
         """
 
-        self.mol0, self.smiles0 = preprocess(self.smiles, verbose=self.verbose)
-        self.exclude_base_indices, self.exclude_acid_indices = special_cases.add_exclusions(self.mol0, verbose=self.verbose)
-        self.except_indices, self.phosphate_groups = special_cases.add_exceptions(self.mol0, verbose=self.verbose)
+        self.mol0, self.smiles0 = preprocess(self.smiles)
+        self.charged_indices = special_cases.find_charged(self.mol0)
+        self.exclude_base_indices, self.exclude_acid_indices = special_cases.add_exclusions(self.mol0)
+        self.except_indices, self.phosphate_groups = special_cases.add_exceptions(self.mol0)
 
-        if self.verbose:
-            print('Processed:')
-            print(self.smiles0)
-            print(f'Exclude base indices: {self.exclude_base_indices}')
-            print(f'Exclude acid indices: {self.exclude_acid_indices}')
-            print(f'Except indices: {self.except_indices}')
+        logger.debug('Processed:')
+        logger.debug(self.smiles0)
+        logger.debug(f'Exclude base indices: {self.exclude_base_indices}')
+        logger.debug(f'Exclude acid indices: {self.exclude_acid_indices}')
+        logger.debug(f'Except indices: {self.except_indices}')
 
         if self.phosphate_groups:
-            if self.verbose:
-                print(self.phosphate_groups)
+            logger.debug(self.phosphate_groups)
 
         mol0_h = Chem.rdmolops.AddHs(self.mol0)
 
         self.base0, self.acid0 = predict_acid_base(mol0_h,
                                          self.model_base,self.model_acid,
-                                         device=self.device,verbose=self.verbose) # returns pkas for map indices
+                                         device=self.device) # returns pkas for map indices
 
     def calc_curated_indices(self, pH: float) -> tuple[list[int], NDArray[np.int64]]:
         """
@@ -860,36 +852,34 @@ class Autoprot:
 
         Parameters
         ----------
-        pH : float
+        pH
             Target pH value for state evaluation.
 
         Returns
         -------
-        tuple[list[int], list[int], NDArray[np.int64]]
-            - Curated indices after applying exception rules.
-            - Corresponding state option matrix (q_options).
+        indices0_curated
+            Curated indices after applying exception rules.
+        q_options0
+            Corresponding state option matrix.
         """
 
-        if self.verbose:
-            print('='*50)
-            print(f'pH: {pH}',flush=True)
+        logger.debug('='*50)
+        logger.debug(f'pH: {pH}',flush=True)
         indices0, q_options0 = find_candidate_sites(
             self.base0,
             self.acid0,
             self.exclude_base_indices,
             self.exclude_acid_indices,
+            self.charged_indices,
             pH,
             pH_band=self.pH_band,
-            verbose=False
         )
-        if self.verbose:
-            print(f'indices0: {indices0}')
-            print(f'q_options0: {q_options0}')
+        logger.debug(f'indices0: {indices0}')
+        logger.debug(f'q_options0: {q_options0}')
         indices0_curated, q_options0 = special_cases.split_exceptions(indices0, q_options0, self.except_indices)
 
-        if self.verbose:
-            print(f'curated indices0: {indices0_curated}')
-            print(f'curated q_options0: {q_options0}')
+        logger.debug(f'curated indices0: {indices0_curated}')
+        logger.debug(f'curated q_options0: {q_options0}')
 
         return indices0_curated, q_options0
 
@@ -905,29 +895,29 @@ class Autoprot:
 
         Parameters
         ----------
-        cluster : list[int]
+        cluster
             Indices (relative to `indices0_curated`) defining the sites
             that belong to the current coupled cluster.
-        indices0_curated : list[int]
+        indices0_curated
             Absolute indices of all protonable sites after exclusion
             and exception handling.
-        q_options0 : NDArray[np.int64]
+        q_options0
             Array of shape (n_sites, 3) encoding protonation options for
             each site:
                 0 → deprotonation allowed
                 1 → neutral state allowed
                 2 → protonation allowed
-        pH : float
+        pH
             Current pH value in the pH scan.
 
         Returns
         -------
-        state_strs : list[str]
+        state_strs
             Encoded microstate representations for the cluster.
-        state_freqs : NDArray[np.float64]
+        state_freqs
             Corresponding normalized microstate frequencies,
             ordered identically to `state_strs`.
-        indices : list[int]
+        indices
             Absolute atom map ids (GetAtomMapNum()) corresponding to this cluster.
         """
 
@@ -945,7 +935,7 @@ class Autoprot:
         ps_all = calc_state_diffs(
             state_strs, state_vecs, indices,
             self.base_libs[indices_str], self.acid_libs[indices_str], 
-            pH=pH, matrix_def=self.matrix_def, verbose=self.verbose)
+            pH=pH, matrix_def=self.matrix_def)
         
         state_strs, state_freqs = calc_freqs_from_states(state_strs,state_vecs,ps_all,self.matrix_def)
         return state_strs, state_freqs, indices
@@ -968,17 +958,17 @@ class Autoprot:
 
         Parameters
         ----------
-        indices : list[int]
+        indices
             Absolute atom map indices of the protonable sites being analyzed.
-        q_options : np.ndarray
+        q_options
             Array encoding allowed protonation states for each site.
-        coupling_cutoff : float
+        coupling_cutoff
             Threshold used to determine whether two sites are considered
             coupled based on their pKa differences.
 
         Returns
         -------
-        clusters : list[list[int]]
+        clusters
             List of clusters, where each cluster contains indices of
             mutually coupled sites.
         """
@@ -990,7 +980,7 @@ class Autoprot:
         self.construct_mols(state_strs, state_vecs, indices)
         self.run_acid_base_calcs(state_strs, state_vecs, indices)
 
-        state_str0 = state_strs[0]
+        state_str0 = state_strs[0] # Neutral state
         base_pka_diffs = {}
         acid_pka_diffs = {}
         for state_str1 in state_strs[1:]:
@@ -1019,22 +1009,21 @@ class Autoprot:
 
         Parameters
         ----------
-        indices0 : list[int]
+        indices0
             Absolute atom map indices of candidate protonation sites.
-        q_options0 : NDArray[np.int64]
+        q_options0
             Array encoding allowed protonation states for each site.
 
         Returns
         -------
-        clusters : list[list[int]]
+        clusters
             Final set of stable coupling clusters.
         """
 
         accept_clusters = False
         coupling_cutoff = 0.0
         while not accept_clusters:
-            if self.verbose:
-                print(f'coupling cutoff: {coupling_cutoff}')
+            logger.debug(f'coupling cutoff: {coupling_cutoff}')
             accept_clusters = True
             clusters = self.coupling_assay(indices0, q_options0, coupling_cutoff)
             for c_idx, cluster in enumerate(clusters):
@@ -1047,7 +1036,7 @@ class Autoprot:
                     accept_clusters = False
                     coupling_cutoff += 0.2
         if coupling_cutoff > 1.5:
-            print(f'Coupling cutoff high: {coupling_cutoff}')
+            logger.info(f'Coupling cutoff high: {coupling_cutoff}')
         return clusters
 
     def construct_mols(self, state_strs: list[str], state_vecs: list[NDArray[np.int64]], indices: list[int]) -> None:
@@ -1066,11 +1055,11 @@ class Autoprot:
 
         Parameters
         ----------
-        state_strs : list[str]
+        state_strs
             Encoded representations of protonation states.
-        state_vecs : list[NDArray[np.int64]
+        state_vecs
             Vector representations corresponding to `state_strs`.
-        indices : list[int]
+        indices
             Absolute atom map indices defining the current cluster.
         """
 
@@ -1109,11 +1098,11 @@ class Autoprot:
 
         Parameters
         ----------
-        state_strs : list[str]
+        state_strs
             Encoded representations of protonation states.
-        state_vecs : NDArray[np.int64]
+        state_vecs
             Protonation state vectors corresponding to `state_strs`.
-        indices : list[int]
+        indices
             Absolute atom map indices defining the current cluster.
         """
 
@@ -1127,8 +1116,7 @@ class Autoprot:
             if state_str in self.base_libs[indices_str]:
                 continue
 
-            if self.verbose:
-                print(state_str)
+            logger.debug(state_str)
 
             state_vec_base = np.maximum(state_vec,1) # disregard de-protonations of other sites to assess base probability
             state_str_base = pack_vec(state_vec_base)
@@ -1138,7 +1126,7 @@ class Autoprot:
 
             base_tmp, _ = predict_acid_base(
                     mol_base_h,self.model_base,self.model_acid,device=self.device,
-                    pred_acid=False,verbose=self.verbose)
+                    pred_acid=False)
             base = {}
             for map_idx, b in base_tmp.items():
                 if map_idx not in indices:
@@ -1155,7 +1143,7 @@ class Autoprot:
 
             _, acid_tmp = predict_acid_base(
                     mol_acid_h,self.model_base,self.model_acid,device=self.device,
-                    pred_base=False,verbose=self.verbose)
+                    pred_base=False)
             
             acid = {}
             for map_idx, a in acid_tmp.items():
@@ -1190,13 +1178,13 @@ class Autoprot:
 
         Parameters
         ----------
-        state_strs : list[str]
+        state_strs
             Encoded microstate representations.
-        state_freqs : list[float]
+        state_freqs
             Corresponding microstate probabilities.
-        state_qs : dict[str, int]
+        state_qs
             Formal charges associated with each microstate.
-        indices : list[int]
+        indices
             Absolute atom map indices defining the active protonation sites.
         """
 
@@ -1221,10 +1209,9 @@ class Autoprot:
         indices_str = pack_indices(indices)
         self.check_chiral_consistency(state_strs, indices)
 
-        if self.verbose:
-            print(f'Export at pH {self.pH}:',flush=True)
-            for e_idx, (state_str, sfreq) in enumerate(zip(state_strs_export, state_freqs_export)):
-                print(e_idx, state_str, sfreq)
+        logger.debug(f'Export at pH {self.pH}:',flush=True)
+        for e_idx, (state_str, sfreq) in enumerate(zip(state_strs_export, state_freqs_export)):
+            logger.debug(e_idx, state_str, sfreq)
 
         self.molecule = combine_results(
             self.name, state_strs_export, state_freqs_export, self.mols_libs[indices_str], state_qs)
@@ -1247,9 +1234,9 @@ class Autoprot:
 
         Parameters
         ----------
-        state_strs : list[str]
+        state_strs
             Encoded microstate representations to validate.
-        indices : list[int]
+        indices
             Absolute atom indices defining the current cluster.
         """
 
@@ -1261,7 +1248,7 @@ class Autoprot:
 
             cid = AllChem.EmbedMolecule(mol_h, randomSeed=1, useRandomCoords=True) # type: ignore
             if cid != 0:
-                print(f'WARNING: Need to remove chirality for embedding for {state_str}!')
+                logger.warning(f'Needed to remove chirality for embedding for {state_str}!')
                 for atom in mol_h.GetAtoms(): # type: ignore
                     atom.SetChiralTag(Chem.ChiralType.CHI_UNSPECIFIED) 
             cid = AllChem.EmbedMolecule(mol_h, randomSeed=1, useRandomCoords=True) # type: ignore

@@ -1,6 +1,7 @@
 """Postprocessing utilities for AutoProt outputs."""
 
 import copy
+import logging
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -16,8 +17,10 @@ from rdkit import Chem
 from rdkit.Chem import AllChem, Mol
 from rdkit.Chem.Draw import MolsToGridImage
 from svgutils.compose import SVG, Figure  # type: ignore
-from utils import is_jupyter, state_str_to_q
 
+from .utils import is_jupyter, state_str_to_q
+
+logger = logging.getLogger(__name__)
 
 @dataclass
 class Microstate:
