@@ -1,9 +1,14 @@
 """Helper functions to test pKa coupling between protonation sites."""
 
+import logging
+
 import numpy as np
 from numpy.typing import NDArray
 
-def construct_state_vectors_single(indices: list[int], q_options: np.ndarray) -> list[np.ndarray]:
+logger = logging.getLogger(__name__)
+
+
+def construct_state_vectors_single(indices: list[int], q_options: NDArray[np.int64]) -> list[NDArray[np.int64]]:
     """
     Construct single-site perturbation state vectors.
 
@@ -12,27 +17,34 @@ def construct_state_vectors_single(indices: list[int], q_options: np.ndarray) ->
     with states where exactly one site is protonated or deprotonated,
     provided that transition is allowed by `q_options`.
 
+    Parameters
+    ----------
+    indices
+        Atom map indices for protonable sites.
+    q_options
+        Array indicating which sites can be protonated or deprotonated.
+
     Returns
     -------
-    state_vecs : list[np.ndarray]
+    state_vecs
         List of protonation state vectors.
     """
 
     state_vecs = []
-    state_vec = np.ones((len(indices)),dtype=int) #[1 for _ in indices]
-    state_vecs.append(state_vec)
+    state_vec = np.ones((len(indices)),dtype=int)
+    state_vecs.append(state_vec) # Add neutral state
 
     for rel_idx, map_idx in enumerate(indices):
         for q in [0,2]:
             if q_options[rel_idx][q] == 1:
-                state_vec = np.ones((len(indices)),dtype=int) #[1 for _ in indices]
+                state_vec = np.ones((len(indices)),dtype=int)
                 state_vec[rel_idx] = q
                 state_vecs.append(state_vec)
     return state_vecs
 
 def compare_pkas(
     indices: list[int],
-    q_options: np.ndarray,
+    q_options: NDArray[np.int64],
     state_str0: str,
     state_str1: str,
     base_lib: dict[str, dict[int, float]],
@@ -46,6 +58,21 @@ def compare_pkas(
     state (`state_str1`). Missing predictions are treated as large
     differences to indicate strong coupling.
 
+    Parameters
+    ----------
+    indices
+        Atom map indices for protonable sites.
+    q_options
+        Array indicating which sites can be protonated or deprotonated.
+    state_str0
+        State string of reference state.
+    state_str1
+        State string of perturbed state.
+    base_lib:
+        Library of molgpka pKa base predictions (specific to indices).
+    acid_lib:
+        Library of molgpka pKa acid predictions (specific to indices).
+
     Returns
     -------
     base_pka_diff : NDArray[np.float64]
@@ -54,8 +81,8 @@ def compare_pkas(
         Absolute differences in predicted acid pKa values per site.
     """
 
-    base_pka_diff = np.zeros((len(indices)))
-    acid_pka_diff = np.zeros((len(indices)))
+    base_pka_diff = np.zeros(len(indices))
+    acid_pka_diff = np.zeros(len(indices))
     for rel_idx, at_idx in enumerate(indices):
         if (q_options[rel_idx][2] == 1): # allowed for base
             if (at_idx in base_lib[state_str0]) and (at_idx in base_lib[state_str1]):
@@ -84,9 +111,26 @@ def construct_coupling_matrix(
     site affects the predicted pKa values of other sites. Entries are
     incremented when pKa differences exceed the specified cutoff.
 
+    Parameters
+    ----------
+    indices
+        Atom map indices for protonable sites.
+    state_strs
+        State strings for microstates.
+    state_vecs
+        State vectors corresponding to state strings.
+    base_pka_diffs
+        Library of base pKa differences w.r.t. the neutral reference state.
+        Each entry of the dictionary is [state_str, pKa_diffs].
+    acid_pka_diffs
+        Library of acid pKa differences w.r.t. the neutral reference state.
+        Each entry of the dictionary is [state_str, pKa_diffs].
+    coupling_cutoff
+        pKa difference cutoff above which two sites are coupled.
+
     Returns
     -------
-    coupling_matrix : NDArray[np.int64]
+    coupling_matrix
         Square matrix indicating pairwise coupling strength between sites.
     """
 
@@ -105,9 +149,14 @@ def cluster_coupling_matrix(M: NDArray[np.int64]) -> list[list[int]]:
     Identify connected components in the coupling matrix, grouping
     sites that influence each other into clusters.
 
+    Parameters
+    ----------
+    coupling_matrix
+        Square matrix indicating pairwise coupling strength between sites.
+
     Returns
     -------
-    clusters : list[list[int]]
+    clusters
         Lists of site indices belonging to each coupling cluster.
     """
 

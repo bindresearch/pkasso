@@ -1,30 +1,33 @@
 """Special-case handling for protonation state generation."""
 
+import logging
 from typing import Any
 
 import numpy as np
+from numpy.typing import NDArray
 from rdkit import Chem
 from rdkit.Chem.rdchem import Mol
 
 from .transitions import calc_freqs_from_states, calc_state_diffs
 from .utils import unpack_vec
 
+logger = logging.getLogger(__name__)
 
 def match_pattern(mol: Mol, pattern: Mol) -> tuple[bool, list[list[int]]]:
     """ Match pattern in rdkit molecule.
     
     Parameters:
     -----------
-    mol : Mol
+    mol
         Rdkit molecule
-    pattern: Mol
+    pattern
         Pattern mol to match.
 
     Returns
     -------
-    found : bool
+    found
         Boolean returning if at least one match was found.
-    matches : list[list[int]]
+    matches
         Atom indices for each match.
     """
 
@@ -32,7 +35,26 @@ def match_pattern(mol: Mol, pattern: Mol) -> tuple[bool, list[list[int]]]:
     matches = mol.GetSubstructMatches(pattern)
     return found, matches
 
-def add_exclusions(mol: Mol, verbose: bool = False) -> tuple[list[int], list[int]]:
+def find_charged(mol: Mol) -> list[int]:
+    """
+    Find map indices that could not be neutralized during preprocessing.
+    These are removed from consideration.
+    """
+
+    mol_h = Chem.rdmolops.AddHs(mol)
+    q0s = np.array([at.GetFormalCharge() for at in mol.GetAtoms()]) # type: ignore
+
+    charged_indices = []
+    for at_idx, q in enumerate(q0s):
+        atom = mol_h.GetAtomWithIdx(at_idx) 
+        map_idx = atom.GetAtomMapNum()
+
+        if q != 0:
+            charged_indices.append(map_idx)
+
+    return charged_indices
+
+def add_exclusions(mol: Mol) -> tuple[list[int], list[int]]:
     """ 
     Exclusions act on the q_options level. Exclusions are removed from consideration
     for protonation/deprotonation. This is specified separately for acids and bases.
@@ -42,17 +64,15 @@ def add_exclusions(mol: Mol, verbose: bool = False) -> tuple[list[int], list[int
     
     Parameters
     ----------
-    mol : rdkit.Chem.Mol
+    mol
         Input molecule with atom mapping numbers used to track sites.
-    verbose : bool, optional
-        If True, print diagnostic information about applied exclusions.
 
     Returns
     -------
-    exclude_base_indices : list[int]
+    exclude_base_indices
         Atom map indices for which protonation (base behavior) should
         be excluded.
-    exclude_acid_indices : list[int]
+    exclude_acid_indices
         Atom map indices for which deprotonation (acid behavior) should
         be excluded.
     """
@@ -86,9 +106,8 @@ def add_exclusions(mol: Mol, verbose: bool = False) -> tuple[list[int], list[int
                             
                             if map_idx not in exclude_base_indices:
                                 exclude_base_indices.append(map_idx)
-                            if verbose:
-                                print('Excluding N next to carbonyl as base')
-                                print(at_idx, map_idx)
+                            logger.debug('Excluding N next to carbonyl as base')
+                            logger.debug(at_idx, map_idx)
                     for match in matches_imine: # ...N-C(=N)...
                         if atom.GetIdx() in match:
                             accept = True
@@ -96,27 +115,24 @@ def add_exclusions(mol: Mol, verbose: bool = False) -> tuple[list[int], list[int
                                 if bond.GetBondType() == Chem.BondType.DOUBLE:
                                     accept = False
                             if accept:
-                                
                                 if map_idx not in exclude_base_indices:
                                     exclude_base_indices.append(map_idx)
-                                if verbose:
-                                    print('Excluding N next to imine as base')
-                                    print(at_idx, map_idx)
+                                logger.debug('Excluding N next to imine as base')
+                                logger.debug(at_idx, map_idx)
                     for match in matches_sulfonamide:
                         if atom.GetIdx() in match:
                             
                             if map_idx not in exclude_base_indices:
                                 exclude_base_indices.append(map_idx)
-                            if verbose:
-                                print('Excluding N next to sulfonamide as base')
-                                print(at_idx, map_idx)
+                            logger.debug('Excluding N next to sulfonamide as base')
+                            logger.debug(at_idx, map_idx)
 
     exclude_base_indices = sorted(exclude_base_indices)
     exclude_acid_indices = sorted(exclude_acid_indices)
 
     return exclude_base_indices, exclude_acid_indices
     
-def add_exceptions(mol: Mol, verbose: bool = False) -> tuple[list[int], dict[int, list[int]]]:
+def add_exceptions(mol: Mol) -> tuple[list[int], dict[int, list[int]]]:
     """
     Identify indices that should be treated as separate protonation clusters.
 
@@ -126,9 +142,9 @@ def add_exceptions(mol: Mol, verbose: bool = False) -> tuple[list[int], dict[int
 
     Returns
     -------
-    except_indices : list[int]
+    except_indices
         Atom map indices that should be removed from normal clustering.
-    phosphate_groups : dict[int, list[int]]
+    phosphate_groups
         Mapping from phosphate P atom map indices to their protonable OH
         atom map indices.
     """
@@ -141,15 +157,14 @@ def add_exceptions(mol: Mol, verbose: bool = False) -> tuple[list[int], dict[int
         atom = mol.GetAtomWithIdx(at_idx) 
         map_idx = atom.GetAtomMapNum()
         if q != 0.:
-            print(f'NOTE: Input molecule is charged at idx {at_idx}, map_idx {map_idx}!')
+            logger.info(f'Input molecule is charged at idx {at_idx}, map_idx {map_idx}!')
             if map_idx not in except_indices:
                 except_indices.append(map_idx)
 
     phosphate_found, phosphate_groups = has_phosphate(mol) # returns map indices
 
     if phosphate_found:
-        if verbose:
-            print(f'phosphate ids: {phosphate_groups}')
+        logger.debug(f'phosphate ids: {phosphate_groups}')
         for p_idx, oh_ids in phosphate_groups.items():
             oh_ids = sorted(oh_ids)
             for map_idx in oh_ids:
@@ -168,9 +183,9 @@ def has_phosphate(mol: Mol) -> tuple[bool, dict[int, list[int]]]:
 
     Returns
     -------
-    found : bool
+    found
         True if at least one phosphate group is detected.
-    phosphate_groups : dict[int, list[int]]
+    phosphate_groups
         Mapping from phosphate P atom map indices to protonable OH
         atom map indices.
     """
@@ -199,7 +214,11 @@ def has_phosphate(mol: Mol) -> tuple[bool, dict[int, list[int]]]:
 
     return found, phosphate_groups
 
-def split_exceptions(indices: list[int], q_options: np.ndarray, except_indices: list[int]) -> tuple[list[int], np.ndarray]:
+def split_exceptions(
+        indices: list[int],
+        q_options: NDArray[np.int64],
+        except_indices: list[int],
+) -> tuple[list[int], NDArray[np.int64]]:
     """
     Remove exception indices from candidate protonation sites.
 
@@ -209,9 +228,9 @@ def split_exceptions(indices: list[int], q_options: np.ndarray, except_indices: 
 
     Returns
     -------
-    indices_curated : list[int]
+    indices_curated
         Filtered list of atom map indices.
-    q_options_curated : np.ndarray
+    q_options_curated
         Protonation option matrix corresponding to the curated indices.
     """
 
@@ -228,8 +247,7 @@ def calc_phosphate_clusters(
     phosphate_groups: dict[int, list[int]],
     pH: float,
     matrix_def: str,
-    verbose: bool = False,
-) -> tuple[list[list[str]], list[np.ndarray], list[list[int]]]:
+) -> tuple[list[list[str]], list[list[float]], list[list[int]]]:
     """
     Compute protonation state distributions for phosphate groups.
 
@@ -240,11 +258,11 @@ def calc_phosphate_clusters(
 
     Returns
     -------
-    state_strs_poh : list[list[str]]
+    state_strs_poh
         Protonation state encodings for each phosphate cluster.
-    state_freqs_poh : list[np.ndarray]
+    state_freqs_poh
         Corresponding microstate frequencies.
-    oh_ids_poh : list[list[int]]
+    oh_ids_poh
         Atom map indices of protonable OH atoms for each cluster.
     """
 
@@ -291,8 +309,7 @@ def calc_phosphate_clusters(
             poh_acid_pkas = poh_acid_pkas_double
             base_lib_poh = base_lib_poh_double
         else:
-            if verbose:
-                print(f'Did not find protonable O for phosphate {p_idx}')
+            logger.debug(f'Did not find protonable O for phosphate {p_idx}')
             continue
         acid_lib_poh: dict[str, dict[int, float]] = {}
         for key, val in poh_acid_pkas.items():
@@ -300,12 +317,11 @@ def calc_phosphate_clusters(
             for jdx, oh_id in enumerate(oh_ids):
                 acid_lib_poh[key][oh_id] = val[jdx]
 
-        if verbose:
-            print(oh_ids)
-            print(acid_lib_poh)
+        logger.debug(oh_ids)
+        logger.debug(acid_lib_poh)
         
         ps_all = calc_state_diffs(state_strs, state_vecs, oh_ids, base_lib_poh, acid_lib_poh, 
-                                    pH=pH,matrix_def=matrix_def,verbose=verbose)
+                                    pH=pH,matrix_def=matrix_def)
         
         state_strs_curated, state_freqs = calc_freqs_from_states(state_strs,state_vecs,ps_all,matrix_def)
 

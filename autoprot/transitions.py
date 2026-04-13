@@ -1,11 +1,15 @@
 """Transition matrix utilities for protonation microstates."""
 
+import logging
+
 import networkx as nx  # type: ignore
 import numpy as np
 from numpy.typing import NDArray
 from scipy.sparse import csr_matrix  # type: ignore
 
 from .utils import pack_vec
+
+logger = logging.getLogger(__name__)
 
 MISSING = -1000.
 
@@ -49,7 +53,7 @@ def calc_state_freqs_sparse(tmatrix: NDArray[np.float64]) -> NDArray[np.float64]
 
 def calc_raw_matrix(
     state_strs: list[str],
-    state_vecs: list[np.ndarray],
+    state_vecs: list[NDArray[np.int64]],
     ps_all: list[dict[str, dict[int, float]]],
     N_states: int,
     matrix_def: str
@@ -100,10 +104,10 @@ def calc_raw_matrix(
 
 def calc_tmatrix(
     state_strs: list[str],
-    state_vecs: list[np.ndarray],
+    state_vecs: list[NDArray[np.int64]],
     ps_all: list[dict[str, dict[int, float]]],
     N_states: int,
-    ) -> np.ndarray:
+    ) -> NDArray[np.float64]:
     """ Construct normalized transition matrix between protonation states. """
 
     tmatrix_raw, nonzero_entries = calc_raw_matrix(state_strs,state_vecs,ps_all,N_states,'msm')
@@ -128,10 +132,10 @@ def calc_tmatrix(
 
 def calc_dGmatrix(
     state_strs: list[str],
-    state_vecs: list[np.ndarray],
+    state_vecs: list[NDArray[np.int64]],
     ps_all: list[dict[str, dict[int, float]]],
     N_states: int,
-    ) -> np.ndarray:
+    ) -> list[NDArray[np.float64]]:
     """Construct matrix of pairwise free-energy differences between states."""
 
     matrix_raw, nonzero_entries = calc_raw_matrix(state_strs,state_vecs,ps_all,N_states,'dG')
@@ -143,7 +147,7 @@ def calc_dGmatrix(
         matrix_mean[idx,jdx] = np.mean(matrix_raw[idx][jdx])
     return matrix_mean
 
-def find_dGclusters(dG_matrix: np.ndarray) -> list[list[int]]:
+def find_dGclusters(dG_matrix: NDArray[np.float64]) -> list[list[int]]:
     """
     Identify all clusters (connected components) in dG_matrix.
 
@@ -176,8 +180,8 @@ def find_dGclusters(dG_matrix: np.ndarray) -> list[list[int]]:
 def remove_orphans(
     dG_clusters: list[list[int]],
     state_strs: list[str],
-    dG_matrix: np.ndarray,
-    ) -> tuple[list[str], np.ndarray]:
+    dG_matrix: NDArray[np.float64],
+    ) -> tuple[list[str], NDArray[np.float64]]:
     """Keep the largest connected cluster and discard isolated states."""
 
     nmax = 0
@@ -191,7 +195,7 @@ def remove_orphans(
     dG_matrix_keep = dG_matrix[np.ix_(keep_ids, keep_ids)]
     return state_strs_keep, dG_matrix_keep
 
-def check_connectivity(dG_matrix: np.ndarray) -> bool:
+def check_connectivity(dG_matrix: NDArray[np.float64]) -> bool:
     """Check whether the free-energy difference graph is fully connected."""
 
     N = dG_matrix.shape[0]
@@ -208,7 +212,7 @@ def check_connectivity(dG_matrix: np.ndarray) -> bool:
     connected = bool(nx.is_connected(G))
     return connected
 
-def reconstruct_free_energies_incomplete_half(dG_matrix: np.ndarray) -> np.ndarray:
+def reconstruct_free_energies_incomplete_half(dG_matrix: NDArray[np.float64]) -> NDArray[np.float64]:
     """ Reconstruct absolute free energies from incomplete pairwise deltaG data. """
     N = dG_matrix.shape[0]
     rows, rhs = [], []
@@ -248,10 +252,10 @@ def calc_populations(Gs: NDArray[np.float64]) -> NDArray[np.float64]:
 
 def calc_freqs_from_states(
     state_strs: list[str],
-    state_vecs: list[np.ndarray],
+    state_vecs: list[NDArray[np.int64]],
     ps_all: list[dict[str, dict[int, float]]],
     matrix_def: str,
-    ) -> tuple[list[str], np.ndarray]:
+    ) -> tuple[list[str], NDArray[np.float64]]:
     """Compute microstate frequencies using MSM or dG reconstruction."""
 
     N_states = len(state_vecs)
@@ -271,22 +275,20 @@ def calc_freqs_from_states(
 
 def calc_state_diffs(
     state_strs: list[str],
-    state_vecs: list[np.ndarray],
+    state_vecs: list[NDArray[np.int64]],
     indices: list[int],
     base_lib: dict[str, dict[int, float]],
     acid_lib: dict[str, dict[int, float]],
     pH: float = 7.0,
     matrix_def: str = 'dG',
-    verbose: bool = False,
     ) -> list[dict[str, dict[int, float]]]:
     """ Compute state transition values from predicted acid/base pKa values. """
 
     ps_all = [] # pH specific
 
     for state_str, state_vec in zip(state_strs, state_vecs):
-        if verbose:
-            print('='*20)
-            print(f'{state_str}')
+        logger.debug('='*20)
+        logger.debug(f'{state_str}')
         ps_up = {}
         ps_down = {}
 
@@ -298,8 +300,7 @@ def calc_state_diffs(
             p_up, p_down = calc_p_up_down(pka,pH,matrix_def)
 
             rel_idx = indices.index(map_idx)
-            if verbose:
-                print(f'rel_idx:{rel_idx} | map_idx:{map_idx} | base {pka} up:{p_up:.2f} stay:{p_down:.2f}')
+            logger.debug(f'rel_idx:{rel_idx} | map_idx:{map_idx} | base {pka} up:{p_up:.2f} stay:{p_down:.2f}')
             if state_vec[rel_idx] <= 1:
                 ps_up[rel_idx] = p_up
 
@@ -309,8 +310,7 @@ def calc_state_diffs(
             p_up, p_down = calc_p_up_down(pka,pH,matrix_def)
 
             rel_idx = indices.index(map_idx)
-            if verbose:
-                print(f'rel_idx:{rel_idx} | map_idx:{map_idx} | acid {pka} stay:{p_up:.2f} down:{p_down:.2f}')
+            logger.debug(f'rel_idx:{rel_idx} | map_idx:{map_idx} | acid {pka} stay:{p_up:.2f} down:{p_down:.2f}')
             if state_vec[rel_idx] >= 1:
                 ps_down[rel_idx] = p_down
 
