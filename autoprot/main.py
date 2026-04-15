@@ -632,7 +632,13 @@ class Autoprot:
                 self.base0, self.acid0, self.exclude_base_indices, self.exclude_acid_indices,
                 self.charged_indices,
                 0., pH_band=100)
-
+        
+        # Add indices that should be considered specially but not recognized by molgpka
+        for map_idx in self.except_indices:
+            if map_idx not in self.indices0:
+                self.indices0.append(map_idx)
+        
+        self.indices0 = list(sorted(self.indices0))
         self.indices0_str = pack_indices(self.indices0)
 
     def _calc_microstates(self, pH: float
@@ -826,6 +832,7 @@ class Autoprot:
         """
 
         self.mol0, self.smiles0 = preprocess(self.smiles)
+        print(self.smiles0)
         self.charged_indices = special_cases.find_charged(self.mol0)
         self.exclude_base_indices, self.exclude_acid_indices = special_cases.add_exclusions(self.mol0)
         self.except_indices, self.phosphate_groups, self.invalid_amine_map_idx = special_cases.add_exceptions(self.mol0)
