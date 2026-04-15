@@ -171,7 +171,13 @@ def add_exceptions(mol: Mol) -> tuple[list[int], dict[int, list[int]]]:
                 if map_idx not in except_indices:
                     except_indices.append(map_idx)
 
-    return except_indices, phosphate_groups
+    invalid_amine_map_idx = has_invalid_amine(mol) # too short amine, breaks in molgpka
+
+    if invalid_amine_map_idx > 0:
+        if invalid_amine_map_idx not in except_indices:
+            except_indices.append(invalid_amine_map_idx)
+
+    return except_indices, phosphate_groups, invalid_amine_map_idx
 
 def has_phosphate(mol: Mol) -> tuple[bool, dict[int, list[int]]]:
     """
@@ -330,3 +336,100 @@ def calc_phosphate_clusters(
         oh_ids_poh.append(oh_ids)
 
     return state_strs_poh, state_freqs_poh, oh_ids_poh
+
+
+def is_methyl(atom):
+    # carbon with 3 hydrogens and only bonded to N
+    return (
+        atom.GetAtomicNum() == 6 and
+        atom.GetDegree() == 1 and
+        atom.GetTotalNumHs() == 3
+    )
+
+def is_ethyl(atom, parent_n):
+    # first carbon: CH2 attached to N
+    if atom.GetAtomicNum() != 6:
+        return False
+    
+    if atom.GetTotalNumHs() != 2:
+        return False
+    
+    neighbors = [n for n in atom.GetNeighbors() if n.GetIdx() != parent_n.GetIdx()]
+    
+    if len(neighbors) != 1:
+        return False
+    
+    second = neighbors[0]
+    
+    # second carbon must be CH3
+    return (
+        second.GetAtomicNum() == 6 and
+        second.GetTotalNumHs() == 3 and
+        second.GetDegree() == 1
+    )
+
+def has_invalid_amine(mol):
+    """ Special case amine with only ethyl or methyl (or no) substituents
+    e.g.
+    CCNCC
+    NCC
+    NC
+    CN(CC)CC
+    """
+    for atom in mol.GetAtoms():
+        if atom.GetAtomicNum() != 7:
+            continue
+        
+        map_idx = atom.GetAtomMapNum()
+
+        neighbors = atom.GetNeighbors()
+        
+        invalid = True
+        for nbr in neighbors:
+            if nbr.GetAtomicNum() == 1:
+                continue
+            
+            if is_methyl(nbr):
+                continue
+            
+            if is_ethyl(nbr, atom):
+                continue
+            
+            invalid = False
+            break
+        
+        if invalid:
+            return map_idx
+    
+    return 0
+
+def calc_invalid_amine_cluster(
+    pH: float,
+    matrix_def: str,
+) -> tuple[list[str], list[float]]:
+    """ Fix the pka for an amine with only methyl or ethyl substituents (molgpka bug)"""
+
+    state_strs = ['1','2']
+    state_vecs = [unpack_vec(state_str) for state_str in state_strs]
+
+    pka = 10.4 # rough average value from different short amines in IUPAC list
+
+    base_lib: dict[str, dict[int, float]] = {
+        '1' : {0: pka},
+        '2' : {0: pka},
+    }
+
+    acid_lib: dict[str, dict[int, float]] = {
+        '1' : {},
+        '2' : {},
+    }
+
+    ids = [0] # pseudo index
+
+    ps_all = calc_state_diffs(state_strs, state_vecs, ids, base_lib, acid_lib, 
+                                    pH=pH,matrix_def=matrix_def)
+    
+
+    state_strs_curated, state_freqs = calc_freqs_from_states(state_strs,state_vecs,ps_all,matrix_def)
+
+    return state_strs_curated, state_freqs

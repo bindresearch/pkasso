@@ -6,6 +6,8 @@ import networkx as nx  # type: ignore
 import numpy as np
 from numpy.typing import NDArray
 from scipy.sparse import csr_matrix  # type: ignore
+from rdkit.Chem import GetFormalCharge
+from rdkit.Chem.rdchem import Mol
 
 from .utils import pack_vec
 
@@ -22,7 +24,14 @@ def calc_charge(pka: float, pH: float = 7.0) -> float:
     ppos = 1. / ( 1 + 10**(pH-pka) ) # fraction of more positively charged res
     return ppos
 
-def calc_p_up_down(pka: float, pH: float, matrix_def: str) -> tuple[float, float]:
+def calc_p_up_down(
+    pka: float,
+    pH: float,
+    matrix_def: str,
+    # q_up: int,
+    # q_down: int,
+    # alpha_q: float = 0.0,
+) -> tuple[float, float]:
     """Compute upward/downward transition values from a pKa at given pH.
 
     Returns either transition probabilities (`msm`) or free-energy
@@ -33,8 +42,10 @@ def calc_p_up_down(pka: float, pH: float, matrix_def: str) -> tuple[float, float
         p_up = calc_charge(pka,pH=pH) # probability for higher + state
         p_down = 1 - p_up
     elif matrix_def == 'dG':
-        p_up = np.log(10) * (pH - pka) # -ln(p+/p0)
-        p_down = np.log(10) * (pka - pH) # -ln(p0/p+)
+        p_up = np.log(10) * (pH - pka)# + alpha_q * np.abs(q_up))# - alpha_q * q_up) # -ln(p+/p0)
+        p_down = -p_up
+        # p_down = np.log(10) * (pka - pH) # -ln(p0/p+)
+        # print(p_up, p_down)
     else:
         raise
     return p_up, p_down
@@ -279,6 +290,7 @@ def calc_state_diffs(
     indices: list[int],
     base_lib: dict[str, dict[int, float]],
     acid_lib: dict[str, dict[int, float]],
+    # mols_lib: dict[str, Mol],
     pH: float = 7.0,
     matrix_def: str = 'dG',
     ) -> list[dict[str, dict[int, float]]]:
@@ -294,10 +306,12 @@ def calc_state_diffs(
 
         base = base_lib[state_str]
         acid = acid_lib[state_str]
+        # q = GetFormalCharge(mols_lib[state_str])
+
         for map_idx, pka in base.items():
             if map_idx not in indices: # Excluded at the start
                 continue
-            p_up, p_down = calc_p_up_down(pka,pH,matrix_def)
+            p_up, p_down = calc_p_up_down(pka,pH,matrix_def)#,q+1,q)
 
             rel_idx = indices.index(map_idx)
             logger.debug(f'rel_idx:{rel_idx} | map_idx:{map_idx} | base {pka} up:{p_up:.2f} stay:{p_down:.2f}')
@@ -307,7 +321,7 @@ def calc_state_diffs(
         for map_idx, pka in acid.items():
             if map_idx not in indices: # Excluded at the start
                 continue
-            p_up, p_down = calc_p_up_down(pka,pH,matrix_def)
+            p_up, p_down = calc_p_up_down(pka,pH,matrix_def)#,q-1,q)
 
             rel_idx = indices.index(map_idx)
             logger.debug(f'rel_idx:{rel_idx} | map_idx:{map_idx} | acid {pka} stay:{p_up:.2f} down:{p_down:.2f}')

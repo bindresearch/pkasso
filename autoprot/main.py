@@ -631,7 +631,8 @@ class Autoprot:
         self.indices0, _ = find_candidate_sites(
                 self.base0, self.acid0, self.exclude_base_indices, self.exclude_acid_indices,
                 self.charged_indices,
-                0., pH_band=self.pH_band)
+                0., pH_band=100)
+
         self.indices0_str = pack_indices(self.indices0)
 
     def _calc_microstates(self, pH: float
@@ -665,6 +666,12 @@ class Autoprot:
                 state_strs_clusters.append(state_strs)
                 state_freqs_clusters.append(state_freqs)
                 indices_clusters.append(oh_ids)
+
+        if (self.invalid_amine_map_idx > 0) and (self.invalid_amine_map_idx in self.indices0):
+            state_strs_invalid_amine, state_freqs_invalid_amine = special_cases.calc_invalid_amine_cluster(pH,self.matrix_def)
+            state_strs_clusters.append(state_strs_invalid_amine)
+            state_freqs_clusters.append(state_freqs_invalid_amine)
+            indices_clusters.append([self.invalid_amine_map_idx])
 
         # Combine clusters and their frequencies
         indices, state_strs, state_freqs_lib = combine_clusters(
@@ -821,7 +828,7 @@ class Autoprot:
         self.mol0, self.smiles0 = preprocess(self.smiles)
         self.charged_indices = special_cases.find_charged(self.mol0)
         self.exclude_base_indices, self.exclude_acid_indices = special_cases.add_exclusions(self.mol0)
-        self.except_indices, self.phosphate_groups = special_cases.add_exceptions(self.mol0)
+        self.except_indices, self.phosphate_groups, self.invalid_amine_map_idx = special_cases.add_exceptions(self.mol0)
 
         logger.debug('Processed:')
         logger.debug(self.smiles0)
@@ -934,7 +941,8 @@ class Autoprot:
 
         ps_all = calc_state_diffs(
             state_strs, state_vecs, indices,
-            self.base_libs[indices_str], self.acid_libs[indices_str], 
+            self.base_libs[indices_str], self.acid_libs[indices_str],
+            # self.mols_libs[indices_str], 
             pH=pH, matrix_def=self.matrix_def)
         
         state_strs, state_freqs = calc_freqs_from_states(state_strs,state_vecs,ps_all,self.matrix_def)
