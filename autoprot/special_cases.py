@@ -50,6 +50,7 @@ def find_charged(mol: Mol) -> list[int]:
         map_idx = atom.GetAtomMapNum()
 
         if q != 0:
+            logger.info(f'Input molecule is charged at idx {at_idx}, map_idx {map_idx}!')
             charged_indices.append(map_idx)
 
     return charged_indices
@@ -156,10 +157,10 @@ def add_exceptions(mol: Mol) -> tuple[list[int], dict[int, list[int]]]:
     for at_idx, q in enumerate(q0s):
         atom = mol.GetAtomWithIdx(at_idx) 
         map_idx = atom.GetAtomMapNum()
-        if q != 0.:
-            logger.info(f'Input molecule is charged at idx {at_idx}, map_idx {map_idx}!')
-            if map_idx not in except_indices:
-                except_indices.append(map_idx)
+        # if q != 0.:
+            # logger.info(f'Input molecule is charged at idx {at_idx}, map_idx {map_idx}!')
+            # if map_idx not in except_indices:
+                # except_indices.append(map_idx)
 
     phosphate_found, phosphate_groups = has_phosphate(mol) # returns map indices
 

@@ -19,6 +19,7 @@ from .external.pka import load_model, predict_acid_base
 from .postprocess import combine_results
 from .transitions import calc_freqs_from_states, calc_state_diffs
 from .utils import pack_indices, pack_vec, unpack_vec
+from .tautomers import best_tautomer_smiles
 
 logger = logging.getLogger(__name__)
 RDLogger.DisableLog("rdApp.*") # type: ignore
@@ -27,7 +28,7 @@ pkg_base = resources.files('autoprot')
 
 ROOT = f'{pkg_base}/data'
 
-def preprocess(smiles_raw: str) -> tuple[Mol,  str]:
+def preprocess(smiles_raw: str, tautomer_search: bool = False) -> tuple[Mol,  str]:
     """ 
     Construct and standardize an RDKit molecule from a SMILES string.
     Charges that cannot be neutralized (e.g., quaternary ammonium) are preserved.
@@ -38,6 +39,8 @@ def preprocess(smiles_raw: str) -> tuple[Mol,  str]:
     ----------
     smiles_raw
         Input SMILES string representing the molecule.
+    tautomer_search
+        Perform rough tautomer search using xtb energies for neutral state
 
     Returns
     -------
@@ -69,6 +72,10 @@ def preprocess(smiles_raw: str) -> tuple[Mol,  str]:
     smiles = Chem.MolToSmiles(mol,canonical=True)
     mol = Chem.MolFromSmiles(smiles, sanitize=True)
     smiles = Chem.MolToSmiles(mol,canonical=True)
+
+    if tautomer_search:
+        smiles = best_tautomer_smiles(smiles)
+
     mol = Chem.MolFromSmiles(smiles, sanitize=True)
     smiles = Chem.MolToSmiles(mol,canonical=True)
 
@@ -579,6 +586,7 @@ class Autoprot:
     matrix_def: str = 'dG'
     pH_band: float = 10.0
     device: str = 'cpu' # fixed!
+    tautomer_search: bool = False
 
     def run_single(self, pH: float = 7.0) -> None:
         """
@@ -831,8 +839,8 @@ class Autoprot:
         instance attributes for downstream pipeline steps.
         """
 
-        self.mol0, self.smiles0 = preprocess(self.smiles)
-        print(self.smiles0)
+        self.mol0, self.smiles0 = preprocess(self.smiles, tautomer_search=self.tautomer_search)
+
         self.charged_indices = special_cases.find_charged(self.mol0)
         self.exclude_base_indices, self.exclude_acid_indices = special_cases.add_exclusions(self.mol0)
         self.except_indices, self.phosphate_groups, self.invalid_amine_map_idx = special_cases.add_exceptions(self.mol0)
