@@ -77,14 +77,10 @@ def best_tautomer_smiles(smiles, max_tautomers: int = 100):
                 best_mol = taut
 
         except Exception as e:
-            print(f"Skipping tautomer {i}: {e}")
+            logger.info(f"Skipping tautomer {i}: {e}")
 
     if best_mol is None:
-        return None
+        logger.info('Did not find good tautomer, using input smiles.')
+        return smiles
 
     return Chem.MolToSmiles(best_mol)
-
-# # Example usage
-# smiles = "Oc1nc2cc3ccccc3cc2[nH]1"
-# # smiles = "Cn1c(O)nc2c(O)ncnc21"
-# print(best_tautomer_smiles(smiles))

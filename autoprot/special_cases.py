@@ -408,7 +408,7 @@ def calc_phosphate_clusters(
 from rdkit import Chem
 from collections import deque
 
-def substituent_valid(n_atom, mol):
+def short_alkyl(n_atom, mol):
     n_idx = n_atom.GetIdx()
 
     visited = set([n_idx])
@@ -469,10 +469,10 @@ def has_invalid_amine(mol):
             if nbr.GetAtomicNum() != 6:
                 return 0
 
-            if not substituent_valid(atom, mol):
+            if not short_alkyl(atom, mol):
                 return 0
-
         return map_idx
+    return 0
 
 
 def calc_invalid_amine_cluster(
