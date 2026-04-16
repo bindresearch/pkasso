@@ -1,10 +1,13 @@
 import os
+import logging
 import subprocess
 import tempfile
 from rdkit import Chem
 from rdkit.Chem import AllChem
 from rdkit.Chem.MolStandardize import rdMolStandardize
 import re
+
+logger = logging.getLogger(__name__)
 
 def mol_to_xyz(mol, filename):
     conf = mol.GetConformer()
@@ -16,8 +19,12 @@ def mol_to_xyz(mol, filename):
 
 
 def run_xtb(xyz_file, workdir):
-    cmd = ["xtb", xyz_file, "--opt", "--gfn2", "--alpb", "water"]
-    result = subprocess.run(cmd, cwd=workdir, capture_output=True, text=True)
+
+    env = os.environ.copy()
+    env["OMP_NUM_THREADS"] = "1"
+
+    cmd = ["xtb", xyz_file, "--gfn2", "--alpb", "water"] # "--opt",
+    result = subprocess.run(cmd, env=env, cwd=workdir, capture_output=True, text=True)
 
     energy = None
     for line in result.stdout.splitlines():
@@ -36,7 +43,8 @@ def prepare_3d(mol):
     AllChem.UFFOptimizeMolecule(mol)
     return mol
 
-def best_tautomer_smiles(smiles):
+def best_tautomer_smiles(smiles, max_tautomers: int = 100):
+
     mol = Chem.MolFromSmiles(smiles)
 
     enumerator = rdMolStandardize.TautomerEnumerator()
@@ -44,7 +52,10 @@ def best_tautomer_smiles(smiles):
 
     if len(tautomers) == 1:
         return Chem.MolToSmiles(tautomers[0])
-
+    if len(tautomers) > max_tautomers:
+        logger.info('Exceeding max tautomers, using input smiles.')
+        return smiles
+    
     best_energy = None
     best_mol = None
 

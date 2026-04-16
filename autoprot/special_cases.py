@@ -339,70 +339,141 @@ def calc_phosphate_clusters(
     return state_strs_poh, state_freqs_poh, oh_ids_poh
 
 
-def is_methyl(atom):
-    # carbon with 3 hydrogens and only bonded to N
-    return (
-        atom.GetAtomicNum() == 6 and
-        atom.GetDegree() == 1 and
-        atom.GetTotalNumHs() == 3
-    )
+# def is_methyl(atom):
+#     # carbon with 3 hydrogens and only bonded to N
+#     return (
+#         atom.GetAtomicNum() == 6 and
+#         atom.GetDegree() == 1 and
+#         atom.GetTotalNumHs() == 3
+#     )
 
-def is_ethyl(atom, parent_n):
-    # first carbon: CH2 attached to N
-    if atom.GetAtomicNum() != 6:
-        return False
+# def is_ethyl(atom, parent_n):
+#     # first carbon: CH2 attached to N
+#     if atom.GetAtomicNum() != 6:
+#         return False
     
-    if atom.GetTotalNumHs() != 2:
-        return False
+#     if atom.GetTotalNumHs() != 2:
+#         return False
     
-    neighbors = [n for n in atom.GetNeighbors() if n.GetIdx() != parent_n.GetIdx()]
+#     neighbors = [n for n in atom.GetNeighbors() if n.GetIdx() != parent_n.GetIdx()]
     
-    if len(neighbors) != 1:
-        return False
+#     if len(neighbors) != 1:
+#         return False
     
-    second = neighbors[0]
+#     second = neighbors[0]
     
-    # second carbon must be CH3
-    return (
-        second.GetAtomicNum() == 6 and
-        second.GetTotalNumHs() == 3 and
-        second.GetDegree() == 1
-    )
+#     # second carbon must be CH3
+#     return (
+#         second.GetAtomicNum() == 6 and
+#         second.GetTotalNumHs() == 3 and
+#         second.GetDegree() == 1
+#     )
+
+# def has_invalid_amine(mol):
+#     """ Special case amine with only ethyl or methyl (or no) substituents
+#     e.g.
+#     CCNCC
+#     NCC
+#     NC
+#     CN(CC)CC
+#     """
+#     for atom in mol.GetAtoms():
+#         if atom.GetAtomicNum() != 7:
+#             continue
+        
+#         map_idx = atom.GetAtomMapNum()
+
+#         neighbors = atom.GetNeighbors()
+        
+#         invalid = True
+#         for nbr in neighbors:
+#             if nbr.GetAtomicNum() == 1:
+#                 continue
+            
+#             if is_methyl(nbr):
+#                 continue
+            
+#             if is_ethyl(nbr, atom):
+#                 continue
+            
+#             invalid = False
+#             break
+        
+#         if invalid:
+#             return map_idx
+    
+#     return 0
+
+
+from rdkit import Chem
+from collections import deque
+
+def substituent_valid(n_atom, mol):
+    n_idx = n_atom.GetIdx()
+
+    visited = set([n_idx])
+    queue = deque([(n_atom, 0)])
+
+    max_dist = 0
+
+    while queue:
+        atom, dist = queue.popleft()
+
+        for nbr in atom.GetNeighbors():
+            idx = nbr.GetIdx()
+
+            if idx == n_idx:
+                continue
+
+            # distance tracking
+            if idx not in visited:
+                visited.add(idx)
+
+                # atom type constraint
+                if nbr.GetAtomicNum() not in (1, 6):
+                    return False
+
+                # ignore hydrogens in distance logic
+                if nbr.GetAtomicNum() == 1:
+                    continue
+
+                new_dist = dist + 1
+                max_dist = max(max_dist, new_dist)
+
+                if max_dist > 2:
+                    return False
+
+                queue.append((nbr, new_dist))
+
+    return True
+
 
 def has_invalid_amine(mol):
-    """ Special case amine with only ethyl or methyl (or no) substituents
+    """ Special case amine with only ethyl or methyl or isopropyl (or no) substituents
     e.g.
     CCNCC
     NCC
     NC
     CN(CC)CC
+    CC(C)NC(C)C
     """
     for atom in mol.GetAtoms():
         if atom.GetAtomicNum() != 7:
             continue
-        
+
         map_idx = atom.GetAtomMapNum()
 
-        neighbors = atom.GetNeighbors()
-        
-        invalid = True
-        for nbr in neighbors:
+        for nbr in atom.GetNeighbors():
             if nbr.GetAtomicNum() == 1:
                 continue
-            
-            if is_methyl(nbr):
-                continue
-            
-            if is_ethyl(nbr, atom):
-                continue
-            
-            invalid = False
-            break
-        
-        if invalid:
-            return map_idx
-    
-    return 0
+            if nbr.GetAtomicNum() != 6:
+                return 0
+
+            if not substituent_valid(atom, mol):
+                return 0
+
+        return map_idx
+
 
 def calc_invalid_amine_cluster(
     pH: float,

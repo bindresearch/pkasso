@@ -28,7 +28,7 @@ pkg_base = resources.files('autoprot')
 
 ROOT = f'{pkg_base}/data'
 
-def preprocess(smiles_raw: str, tautomer_search: bool = False) -> tuple[Mol,  str]:
+def preprocess(smiles_raw: str, tautomer_search: bool = False, max_tautomers: int = 100) -> tuple[Mol,  str]:
     """ 
     Construct and standardize an RDKit molecule from a SMILES string.
     Charges that cannot be neutralized (e.g., quaternary ammonium) are preserved.
@@ -74,7 +74,7 @@ def preprocess(smiles_raw: str, tautomer_search: bool = False) -> tuple[Mol,  st
     smiles = Chem.MolToSmiles(mol,canonical=True)
 
     if tautomer_search:
-        smiles = best_tautomer_smiles(smiles)
+        smiles = best_tautomer_smiles(smiles, max_tautomers=max_tautomers)
 
     mol = Chem.MolFromSmiles(smiles, sanitize=True)
     smiles = Chem.MolToSmiles(mol,canonical=True)
@@ -587,6 +587,7 @@ class Autoprot:
     pH_band: float = 10.0
     device: str = 'cpu' # fixed!
     tautomer_search: bool = False
+    max_tautomers: int = 100
 
     def run_single(self, pH: float = 7.0) -> None:
         """
@@ -839,7 +840,10 @@ class Autoprot:
         instance attributes for downstream pipeline steps.
         """
 
-        self.mol0, self.smiles0 = preprocess(self.smiles, tautomer_search=self.tautomer_search)
+        self.mol0, self.smiles0 = preprocess(
+            self.smiles,
+            tautomer_search=self.tautomer_search,
+            max_tautomers=self.max_tautomers)
 
         self.charged_indices = special_cases.find_charged(self.mol0)
         self.exclude_base_indices, self.exclude_acid_indices = special_cases.add_exclusions(self.mol0)
