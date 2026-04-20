@@ -12,7 +12,7 @@ from rdkit.Chem.rdchem import Mol
 from .main import Autoprot
 from .postprocess import Molecule, Scan
 
-def protonate(smiles: str, pH: float = 7.0, **kwargs: Any) -> Molecule:
+def protonate(inp: str | Mol, pH: float = 7.0, **kwargs: Any) -> Molecule:
     """
     Helper function to run autoprot via:
 
@@ -28,6 +28,11 @@ def protonate(smiles: str, pH: float = 7.0, **kwargs: Any) -> Molecule:
     ```
     """
 
+    if isinstance(inp, Mol):
+        smiles: str = MolToSmiles(inp)
+    else:
+        smiles: str = inp
+
     ap = Autoprot(
         smiles, **kwargs)
     ap.run_single(pH=pH)
@@ -35,7 +40,7 @@ def protonate(smiles: str, pH: float = 7.0, **kwargs: Any) -> Molecule:
     return ap.molecule.smiles, ap.molecule.mols
 
 def batch_protonate(
-        input: list[Any], # dict[str, str],
+        input_list: list[str | Mol], # dict[str, str],
         pH: float = 7.0,
         **kwargs: Any) -> tuple[list[list[str]], list[list[Mol]]]:
     """
@@ -55,17 +60,12 @@ def batch_protonate(
     ```
     """
 
-    if isinstance(input[0], Mol):
-        smiles_list: list[str] = [MolToSmiles(mol) for mol in input]
-    else:
-        smiles_list: list[str] = input
-    
     batch_smiles: list[list[str]] = []
     batch_mols: list[list[Mol]] = []
 
-    for smiles in tqdm(smiles_list):
+    for inp in tqdm(input_list):
         ap = Autoprot(
-            smiles, **kwargs) # name=name,
+            inp, **kwargs) # name=name,
         ap.run_single(pH=pH)
 
         batch_smiles.append(ap.molecule.smiles)
@@ -74,7 +74,7 @@ def batch_protonate(
     return batch_smiles, batch_mols
 
 def scan_pH(
-        smiles: str,
+        inp: str | Mol,
         pHs: NDArray[np.float64] | list[float] = np.arange(0, 14.1, 0.25, dtype=np.float64), 
         **kwargs: Any
 ) -> Scan:
@@ -101,7 +101,7 @@ def scan_pH(
     pHs_arr: NDArray[np.float64] = np.array(pHs)
 
     ap = Autoprot(
-        smiles, **kwargs)
+        inp, **kwargs)
     ap.run_scan(pHs=pHs_arr)
 
     scan = Scan(
