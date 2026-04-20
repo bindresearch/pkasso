@@ -22,17 +22,6 @@ from .utils import is_jupyter, state_str_to_q
 
 logger = logging.getLogger(__name__)
 
-@dataclass
-class Microstate:
-    """ Single microstate class. """
-
-    name: str
-    name_state: str
-    mol: Mol
-    smiles: str
-    freq: float
-    q: int
-
 def draw_mols(mols, subImgSize=(250,200)):
     img = MolsToGridImage( # type: ignore
     mols,molsPerRow=len(mols),subImgSize=subImgSize,
@@ -52,6 +41,17 @@ def save_sdf(mols: list[Mol], file: Path):
                 raise ValueError(f'{mol.GetProp("_Name")} could not be embedded.')
             AllChem.UFFOptimizeMolecule(mol_h) # type: ignore
             f.write(mol_h)
+
+@dataclass
+class Microstate:
+    """ Single microstate class. """
+
+    name: str
+    name_state: str
+    mol: Mol
+    smiles: str
+    freq: float
+    q: int
 
 @dataclass
 class Molecule:
@@ -79,21 +79,21 @@ class Molecule:
     #         )
     #     return img
     
-    def save(self, file: Path) -> None:
-        """ 
-        Write sdf file with all relevant mols, optimized geometry with rdkit.
-        Includes explicit hydrogens.
-        """
+    # def save(self, file: Path) -> None:
+    #     """ 
+    #     Write sdf file with all relevant mols, optimized geometry with rdkit.
+    #     Includes explicit hydrogens.
+    #     """
 
-        with Chem.SDWriter(file) as f:
-            for mol in self.mols:
-                mol_3d = copy.deepcopy(mol)
-                mol_h = Chem.AddHs(mol_3d)
-                cid = AllChem.EmbedMolecule(mol_h, randomSeed=1, useRandomCoords=True) # type: ignore
-                if cid != 0:
-                    raise ValueError(f'{mol.GetProp("_Name")} could not be embedded.')
-                AllChem.UFFOptimizeMolecule(mol_h) # type: ignore
-                f.write(mol_h)
+    #     with Chem.SDWriter(file) as f:
+    #         for mol in self.mols:
+    #             mol_3d = copy.deepcopy(mol)
+    #             mol_h = Chem.AddHs(mol_3d)
+    #             cid = AllChem.EmbedMolecule(mol_h, randomSeed=1, useRandomCoords=True) # type: ignore
+    #             if cid != 0:
+    #                 raise ValueError(f'{mol.GetProp("_Name")} could not be embedded.')
+    #             AllChem.UFFOptimizeMolecule(mol_h) # type: ignore
+    #             f.write(mol_h)
 
 def combine_results(
         name: str,
@@ -127,8 +127,8 @@ def combine_results(
     molecule = Molecule(name, microstates)
     return molecule
 
-def df_from_mols(mols):
-    pass
+# def df_from_mols(mols):
+    # pass
     # def to_pandas(self) -> pd.DataFrame:
     #     df = pd.DataFrame()
     #     for name, molecule in self.molecules.items():
