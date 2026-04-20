@@ -12,6 +12,7 @@ from numpy.typing import NDArray
 
 from .py_interface import batch_protonate, protonate, scan_pH
 from .utils import read_smi
+from .postprocess import save_sdf
 
 COMMANDS = {"single", "batch", "scan"}
 
@@ -87,7 +88,7 @@ def cli() -> None:
 @click.option('--name', required=False, type=str, default='molecule', help='Molecule name')
 @click.option('--smiles', required=True, type=str, help='SMILES string')
 @click.option('--ph', required=False, type=float, default=7., help='pH value (for sdf and csv output)')
-@click.option('--out', required=False, type=click.Path(path_type=Path), help='sdf output file name')
+@click.option('--sdf-out', required=False, type=click.Path(path_type=Path), help='sdf output file name')
 @click.option(
     "--cutoff-export",
     type=float,
@@ -101,7 +102,7 @@ def single(
     name: str,
     smiles: str,
     ph: float,
-    out: Path,
+    sdf_out: Path,
     cutoff_export: float,
     matrix_def: str,
     cutoff_states: int,
@@ -111,13 +112,9 @@ def single(
 ) -> None:
     """ Run single protonation state prediction given a smiles string and pH values. """
 
-    click.echo(f"Single: {name}")
-    if not out:
-        out_path = Path(f'{name}_output.sdf')
-    else:
-        out_path = Path(out)
+    # click.echo(f"Single: {name}")
 
-    molecule = protonate(
+    smiles_out, mols_out = protonate(
         smiles,
         pH=ph,
         matrix_def=matrix_def,
@@ -128,10 +125,16 @@ def single(
         cutoff_export=cutoff_export
     )
     print(f'{name} | pH: {ph}')
-    print('Microstate SMILES Probability')
-    for m in molecule.microstates:
-        print(m.name_state, m.smiles, m.freq)
-    molecule.save(out_path)
+    print('Microstate SMILES Probability Net_Charge')
+    print('----------------------------------------')
+    for sm, mol in zip(smiles_out, mols_out):
+        name_state = mol.GetProp('_Name')
+        probability = float(mol.GetProp('Probability'))
+        net_charge = float(mol.GetProp('net_charge'))
+        print(name_state, sm, f'{probability:.5f}', net_charge)
+    
+    if sdf_out:
+        save_sdf(mols_out, sdf_out)
 
 ### Batch processing ###
 
@@ -150,23 +153,16 @@ def single(
     help='pH value (for sdf and csv output)'
 )
 @click.option(
-    '--csv-out',
-    required=False,
-    type=click.Path(path_type=Path),
-    default=Path('batch_results.csv'),
-    help='Output file for summary csv'
-)
-@click.option(
-    '--save-sdf',
+    '--overwrite',
     is_flag=True,
     default=True,
-    help='Save sdf file for each molecule'
+    help='Overwrite sdf file if exists'
 )
 @click.option(
-    '--sdf-folder',
+    '--path-out',
     required=False,
     type=click.Path(path_type=Path),
-    default=Path('output'),
+    default=Path('autoprot_output'),
     help='Output folder for sdf files'
 )
 @click.option(
@@ -181,40 +177,44 @@ def single(
 def batch(
     smi: Path,
     ph: float,
-    csv_out: Path,
-    save_sdf: bool,
-    sdf_folder: Path,
+    path_out: Path,
+    overwrite: bool,
     cutoff_export: float,
     matrix_def: str,
     cutoff_states: int,
     sfreq_cutoff_individual: float,
     sfreq_cutoff_combined: float,
     ph_band: float,
-    
+
 ) -> None:
     """ Batch process an input .smi file and write output microstates to csv 
     (optionally write sdf files of individual molecules)"""
 
-    click.echo("Batch")
+    # click.echo("Batch")
 
     batch_input = read_smi(smi)
 
-    bat = batch_protonate(
-        batch_input,
-        pH=ph,
-        matrix_def=matrix_def,
-        cutoff_states=cutoff_states,
-        sfreq_cutoff_individual=sfreq_cutoff_individual,
-        sfreq_cutoff_combined=sfreq_cutoff_combined,
-        pH_band=ph_band,
-        cutoff_export=cutoff_export
-    )
-    df = bat.to_pandas()
-    df.to_csv(csv_out)
-    if save_sdf:
-        os.makedirs(sdf_folder, exist_ok=True)
-        for name, molecule in bat.molecules.items():
-            molecule.save(sdf_folder / f'{name}.sdf')
+    for name, smiles in batch_input.items():
+        smiles_out, mols_out = protonate(
+            smiles,
+            name=name,
+            pH=ph,
+            matrix_def=matrix_def,
+            cutoff_states=cutoff_states,
+            sfreq_cutoff_individual=sfreq_cutoff_individual,
+            sfreq_cutoff_combined=sfreq_cutoff_combined,
+            pH_band=ph_band,
+            cutoff_export=cutoff_export
+        )
+        print(name, smiles_out)
+
+        # Save sdf files
+        if path_out:
+            os.makedirs(path_out, exist_ok=True)
+            filename = path_out / f'{name}.sdf'
+            if (not overwrite) and (os.path.isfile(filename)):
+                raise FileExistsError('File {file_name} exists and overwrite == False!')
+            save_sdf(mols_out, filename)
 
 ### pH scan ###
 
