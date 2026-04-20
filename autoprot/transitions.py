@@ -265,6 +265,7 @@ def calc_freqs_from_states(
     state_strs: list[str],
     state_vecs: list[NDArray[np.int64]],
     ps_all: list[dict[str, dict[int, float]]],
+    # mols_lib: dict[str, Mol],
     matrix_def: str,
     ) -> tuple[list[str], NDArray[np.float64]]:
     """Compute microstate frequencies using MSM or dG reconstruction."""
@@ -281,8 +282,36 @@ def calc_freqs_from_states(
         if not is_connected:
             raise ValueError('Matrix not connected (or not symmetric)')
         Gs = reconstruct_free_energies_incomplete_half(dGmatrix)
+        # Gs = reweight_Gs(state_strs, Gs, mols_lib)
         state_freqs = calc_populations(Gs)
     return state_strs, state_freqs
+
+def Gs_from_prob(freqs):
+    return np.log(freqs)
+
+def reweight_states(state_strs: list[str], state_freqs_lib: dict[str, float], mols_lib: dict[str, Mol]) -> dict[str, float]:
+    """ Reweight free energies of states according to some criterion. """
+
+    state_freqs_lib_reweighted = {}
+
+    Gs_reweighted = np.zeros((len(state_strs)))
+
+    for idx, state_str in enumerate(state_strs):
+        G = -np.log(state_freqs_lib[state_str])
+        mol = mols_lib[state_str]
+        charges = [at.GetFormalCharge() for at in mol.GetAtoms()] # type: ignore
+        ct_pos = charges.count(1)
+
+        penalty = ct_pos**2
+
+        G_reweighted = G + penalty
+        Gs_reweighted[idx] = G_reweighted
+
+    state_freqs_rew = calc_populations(Gs_reweighted)
+    for state_str, state_freq in zip(state_strs, state_freqs_rew):
+        state_freqs_lib_reweighted[state_str] = state_freq
+
+    return state_freqs_lib_reweighted
 
 def calc_state_diffs(
     state_strs: list[str],

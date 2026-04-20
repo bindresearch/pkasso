@@ -2,11 +2,11 @@ from pathlib import Path
 
 import torch
 from rdkit.Chem.rdchem import Mol
+from rdkit.Chem import rdmolops
 
 from .descriptor import mol2vec
 from .ionization_group import get_ionization_aid
 from .net import GCNNet
-
 
 def load_model(model_file: Path, device: str = "cpu") -> GCNNet:
     """ Load molgpka ML torch model. """
@@ -66,7 +66,9 @@ def predict_acid_base(
         base_curated = {} # atom mapping
 
         for at_idx, pka in base.items():
-            atom = mol_h.GetAtomWithIdx(at_idx) 
+            if has_cation_base_proximity(at_idx, mol_h, max_distance=3):
+                pka -= 3.
+            atom = mol_h.GetAtomWithIdx(at_idx)
             map_idx = atom.GetAtomMapNum()
             base_curated[map_idx] = pka
         if verbose:
@@ -114,3 +116,42 @@ def get_acid_neighbors(mol_h: Mol, acid: dict[int, float], verbose: bool = False
                 print(f'pka: {pka}')
             acid_heavy[neighbor_idx] = pka
     return acid_heavy
+
+
+############
+
+def has_cation_base_proximity(at_idx, mol, max_distance=3):
+    """
+    Detect whether any neutral/basic nitrogen is within
+    <= max_distance bonds of a positively charged nitrogen.
+    """
+
+    # Collect atom indices
+    cation_nitrogens = []
+
+    atom0 = mol.GetAtomWithIdx(at_idx)
+    if atom0.GetAtomicNum() != 7:
+        return False
+    
+    for atom in mol.GetAtoms():
+        if atom.GetAtomicNum() != 7:
+            continue
+        
+        charge = atom.GetFormalCharge()
+
+        # positively charged nitrogen
+        if charge > 0:
+            cation_nitrogens.append(atom.GetIdx())
+
+    # If no candidates, exit early
+    if not cation_nitrogens:
+        return False
+
+    dist_matrix = rdmolops.GetDistanceMatrix(mol)
+
+    # Check all pairs
+    for c_idx in cation_nitrogens:
+        if dist_matrix[c_idx][at_idx] <= max_distance:
+            return True
+
+    return False
