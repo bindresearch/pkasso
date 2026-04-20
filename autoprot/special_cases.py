@@ -7,6 +7,7 @@ import numpy as np
 from numpy.typing import NDArray
 from rdkit import Chem
 from rdkit.Chem.rdchem import Mol
+from collections import deque
 
 from .transitions import calc_freqs_from_states, calc_state_diffs
 from .utils import unpack_vec
@@ -89,22 +90,56 @@ def add_exclusions(mol: Mol) -> tuple[list[int], list[int]]:
     pattern_imine = Chem.MolFromSmarts("NC(=N)")
     found_imine, matches_imine = match_pattern(mol,pattern_imine)
     pattern_sulfonamide = Chem.MolFromSmarts("NS(=O)(=O)")
-    found_sulfonamide, matches_sulfonamide = match_pattern(mol,pattern_sulfonamide)
+    found_sulfonamide, matches_sulfonamide = match_pattern(mol, pattern_sulfonamide)
+    pattern_diphenylamine = Chem.MolFromSmarts('N(c)c')
+    found_diphenylamine, matches_diphenylamine = match_pattern(mol, pattern_diphenylamine)
+    pattern_Ncnn = Chem.MolFromSmarts('Nc(n)n')
+    found_Ncnn, matches_Ncnn = match_pattern(mol, pattern_Ncnn)
+    pattern_Nccn = Chem.MolFromSmarts('Nc(c)n')
+    found_Nccn, matches_Nccn = match_pattern(mol, pattern_Nccn)
+    pattern_nnn = Chem.MolFromSmarts('nnn')
+    found_nnn, matches_nnn = match_pattern(mol, pattern_nnn)
+    pattern_ncnn = Chem.MolFromSmarts('ncnn')
+    found_ncnn, matches_ncnn = match_pattern(mol, pattern_ncnn)
+    pattern_nco = Chem.MolFromSmarts('nco')
+    found_nco, matches_nco = match_pattern(mol, pattern_nco)
+    pattern_cNO = Chem.MolFromSmarts('C=NO')
+    _, matches_cNO = match_pattern(mol, pattern_cNO)
+    pattern_NNC = Chem.MolFromSmarts('N-N=C')
+    _, matches_NNC = match_pattern(mol, pattern_NNC)
+    #
+    pattern_ONphos = Chem.MolFromSmarts('OC=NP(=O)(O)O')
+    _, matches_ONphos = match_pattern(mol, pattern_ONphos)
 
     for at_idx, q in enumerate(q0s):
-        atom = mol_h.GetAtomWithIdx(at_idx) 
+        atom = mol_h.GetAtomWithIdx(at_idx)
         map_idx = atom.GetAtomMapNum()
 
         if q == 0:
             # atom = mol_h.GetAtomWithIdx(at_idx)
+            for match in matches_ONphos:
+                if (atom.GetIdx() in match) and (atom.GetSymbol() == 'O'):
+                    correct_O = False
+                    neighbors = atom.GetNeighbors()
+                    for nbr in neighbors:
+                        if nbr.GetAtomicNum() == 6:
+                            correct_O = True # O=CN part of the match
+                    if correct_O:
+                        if map_idx not in exclude_acid_indices:
+                            exclude_acid_indices.append(map_idx)
+
             if atom.GetSymbol() == 'N':
                 if atom.GetIsAromatic():
                     if atom.GetDegree() == 3: # arom. N with lone pair needed for ring
                         exclude_base_indices.append(map_idx)
+                    for matches in [matches_nnn, matches_ncnn, matches_nco]:
+                        for match in matches:
+                            if atom.GetIdx() in match:
+                                if map_idx not in exclude_base_indices:
+                                    exclude_base_indices.append(map_idx)
                 else:
                     for match in matches_carbonyl: # ...N-C(=O)...
                         if atom.GetIdx() in match:
-                            
                             if map_idx not in exclude_base_indices:
                                 exclude_base_indices.append(map_idx)
                             logger.debug('Excluding N next to carbonyl as base')
@@ -122,11 +157,23 @@ def add_exclusions(mol: Mol) -> tuple[list[int], list[int]]:
                                 logger.debug(at_idx, map_idx)
                     for match in matches_sulfonamide:
                         if atom.GetIdx() in match:
-                            
                             if map_idx not in exclude_base_indices:
                                 exclude_base_indices.append(map_idx)
                             logger.debug('Excluding N next to sulfonamide as base')
                             logger.debug(at_idx, map_idx)
+                    for matches in [matches_diphenylamine, matches_Ncnn, matches_Nccn, matches_cNO, matches_NNC]:
+                        for match in matches:
+                            if atom.GetIdx() in match:
+                                if map_idx not in exclude_base_indices:
+                                    exclude_base_indices.append(map_idx)
+                    # for match in matches_Ncnn:
+                    #     if atom.GetIdx() in match:
+                    #         if map_idx not in exclude_base_indices:
+                    #             exclude_base_indices.append(map_idx)
+                    # for match in matches_Nccn:
+                    #     if atom.GetIdx() in match:
+                    #         if map_idx not in exclude_base_indices:
+                    #             exclude_base_indices.append(map_idx)
 
     exclude_base_indices = sorted(exclude_base_indices)
     exclude_acid_indices = sorted(exclude_acid_indices)
@@ -152,6 +199,21 @@ def add_exceptions(mol: Mol) -> tuple[list[int], dict[int, list[int]]]:
 
     except_indices = []
 
+    NphenNOO_indices = []
+    # n_poor_arom_indices = []
+
+    pattern_NphenNOO = Chem.MolFromSmarts("Ncccc([N+](=O)[O-])")
+    found_NphenNOO, matches_NphenNOO = match_pattern(mol,pattern_NphenNOO)
+
+    # patterns_n_poor_arom = [Chem.MolFromSmarts('nnn'), Chem.MolFromSmarts('nncn')]
+    #     #'[n;$(n1nnnn1),$(n1nnncn1),$(n1nncn1),$(n1cnnn1)]') # '[n]1[n,n][n,n][n,n][n,n]1'
+    # matches_n_poor_arom = []
+
+    # for pattern_n_poor_arom in patterns_n_poor_arom:
+    #     found_n_poor_arom, m_tmp = match_pattern(mol,pattern_n_poor_arom)
+    #     if len(m_tmp) > 0:
+    #         for m in m_tmp:
+    #             matches_n_poor_arom.append(m)
     # Except everything that couldn't be neutralized
     q0s = np.array([at.GetFormalCharge() for at in mol.GetAtoms()]) # type: ignore
     for at_idx, q in enumerate(q0s):
@@ -161,6 +223,19 @@ def add_exceptions(mol: Mol) -> tuple[list[int], dict[int, list[int]]]:
             # logger.info(f'Input molecule is charged at idx {at_idx}, map_idx {map_idx}!')
             # if map_idx not in except_indices:
                 # except_indices.append(map_idx)
+
+        if (atom.GetSymbol() == 'N') and (q == 0.) and not (atom.GetIsAromatic()):
+            for match in matches_NphenNOO:
+                if atom.GetIdx() in match:
+                    if map_idx not in except_indices:
+                        except_indices.append(map_idx)
+                        NphenNOO_indices.append(map_idx)
+        # if (atom.GetSymbol() == 'N') and (q == 0.) and (atom.GetIsAromatic()):
+        #     for match in matches_n_poor_arom:
+        #         if atom.GetIdx() in match:
+        #             if map_idx not in except_indices:
+        #                 except_indices.append(map_idx)
+        #                 n_poor_arom_indices.append(map_idx)
 
     phosphate_found, phosphate_groups = has_phosphate(mol) # returns map indices
 
@@ -178,7 +253,7 @@ def add_exceptions(mol: Mol) -> tuple[list[int], dict[int, list[int]]]:
         if invalid_amine_map_idx not in except_indices:
             except_indices.append(invalid_amine_map_idx)
 
-    return except_indices, phosphate_groups, invalid_amine_map_idx
+    return except_indices, phosphate_groups, invalid_amine_map_idx, NphenNOO_indices#, n_poor_arom_indices
 
 def has_phosphate(mol: Mol) -> tuple[bool, dict[int, list[int]]]:
     """
@@ -405,8 +480,6 @@ def calc_phosphate_clusters(
 #     return 0
 
 
-from rdkit import Chem
-from collections import deque
 
 def short_alkyl(n_atom, mol):
     n_idx = n_atom.GetIdx()
@@ -474,34 +547,36 @@ def has_invalid_amine(mol):
         return map_idx
     return 0
 
-
-def calc_invalid_amine_cluster(
+def calc_single_fixed_pka(
     pH: float,
+    pka: float,
+    ss_lower: int,
     matrix_def: str,
 ) -> tuple[list[str], list[float]]:
     """ Fix the pka for an amine with only methyl or ethyl substituents (molgpka bug)"""
 
-    state_strs = ['1','2']
+    state_strs = [f'{ss_lower}',f'{ss_lower+1}']
     state_vecs = [unpack_vec(state_str) for state_str in state_strs]
 
-    pka = 10.4 # rough average value from different short amines in IUPAC list
+    # pka = 10.4 # rough average value from different short amines in IUPAC list
 
     base_lib: dict[str, dict[int, float]] = {
-        '1' : {0: pka},
-        '2' : {0: pka},
+        f'{ss_lower}' : {0: pka},
+        f'{ss_lower+1}' : {0: pka},
     }
 
     acid_lib: dict[str, dict[int, float]] = {
-        '1' : {},
-        '2' : {},
+        f'{ss_lower}' : {},
+        f'{ss_lower+1}' : {},
     }
 
     ids = [0] # pseudo index
 
     ps_all = calc_state_diffs(state_strs, state_vecs, ids, base_lib, acid_lib, 
                                     pH=pH,matrix_def=matrix_def)
-    
 
     state_strs_curated, state_freqs = calc_freqs_from_states(state_strs,state_vecs,ps_all,matrix_def)
 
     return state_strs_curated, state_freqs
+
+

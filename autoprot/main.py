@@ -17,7 +17,7 @@ from rdkit.Chem.rdchem import Mol
 from . import coupling, special_cases, utils
 from .external.pka import load_model, predict_acid_base
 from .postprocess import combine_results
-from .transitions import calc_freqs_from_states, calc_state_diffs
+from .transitions import calc_freqs_from_states, calc_state_diffs, reweight_states
 from .utils import pack_indices, pack_vec, unpack_vec
 from .tautomers import best_tautomer_smiles
 
@@ -665,7 +665,6 @@ class Autoprot:
         indices_clusters = []
         
         for c_idx, cluster in enumerate(clusters):
-
             state_strs_cl, state_freqs_cl, indices_cl = self.process_cluster(cluster, indices0_curated, q_options0, pH)
 
             state_strs_clusters.append(state_strs_cl)
@@ -683,10 +682,30 @@ class Autoprot:
                 indices_clusters.append(oh_ids)
 
         if (self.invalid_amine_map_idx > 0) and (self.invalid_amine_map_idx in self.indices0):
-            state_strs_invalid_amine, state_freqs_invalid_amine = special_cases.calc_invalid_amine_cluster(pH,self.matrix_def)
+            pka = 10.4
+            ss_lower = 1 # state_str 1 -> 2
+            state_strs_invalid_amine, state_freqs_invalid_amine = special_cases.calc_single_fixed_pka(pH,pka,ss_lower,self.matrix_def)
             state_strs_clusters.append(state_strs_invalid_amine)
             state_freqs_clusters.append(state_freqs_invalid_amine)
             indices_clusters.append([self.invalid_amine_map_idx])
+
+        if len(self.NphenNOO_indices) > 0:
+            pka = 2.0
+            ss_lower = 1
+            for map_idx in self.NphenNOO_indices:
+                state_strs_NphenNOO, state_freqs_NphenNOO = special_cases.calc_single_fixed_pka(pH,pka,ss_lower,self.matrix_def)
+                state_strs_clusters.append(state_strs_NphenNOO)
+                state_freqs_clusters.append(state_freqs_NphenNOO)
+                indices_clusters.append([map_idx])
+
+        # if len(self.n_poor_arom_indices) > 0:
+        #     pka = 1.
+        #     ss_lower = 1
+        #     for map_idx in self.n_poor_arom_indices:
+        #         state_strs_tmp, state_freqs_tmp = special_cases.calc_single_fixed_pka(pH,pka,ss_lower,self.matrix_def)
+        #         state_strs_clusters.append(state_strs_tmp)
+        #         state_freqs_clusters.append(state_freqs_tmp)
+        #         indices_clusters.append([map_idx])
 
         # Combine clusters and their frequencies
         indices, state_strs, state_freqs_lib = combine_clusters(
@@ -703,14 +722,21 @@ class Autoprot:
         state_vecs = [unpack_vec(state_str) for state_str in state_strs]
         self.construct_mols(state_strs, state_vecs, indices)
 
+        # Reweight states by some criterion
+        # state_freqs_lib_reweighted = reweight_states(
+            # state_strs, state_freqs_lib, self.mols_libs[indices_str])
+
+        state_freqs_lib_reweighted = state_freqs_lib
+
         # Symmetry (combine frequencies for chemically identical microstates)
         state_strs_sym, state_freqs_sym = calc_symmetry(
-            state_strs, state_freqs_lib, self.mols_libs[indices_str])
+            state_strs, state_freqs_lib_reweighted, self.mols_libs[indices_str])
 
         # Macro-pka properties from combined microstates
         net_charge, state_qs, freqs_macro = calc_macro_props(
             state_strs_sym, state_freqs_sym, self.mols_libs[indices_str])
         
+
         return net_charge, freqs_macro, state_strs_sym, state_freqs_sym, state_qs, indices
 
     def _scan_pH(self) -> None:
@@ -847,7 +873,7 @@ class Autoprot:
 
         self.charged_indices = special_cases.find_charged(self.mol0)
         self.exclude_base_indices, self.exclude_acid_indices = special_cases.add_exclusions(self.mol0)
-        self.except_indices, self.phosphate_groups, self.invalid_amine_map_idx = special_cases.add_exceptions(self.mol0)
+        self.except_indices, self.phosphate_groups, self.invalid_amine_map_idx, self.NphenNOO_indices = special_cases.add_exceptions(self.mol0)
 
         logger.debug('Processed:')
         logger.debug(self.smiles0)
@@ -961,10 +987,15 @@ class Autoprot:
         ps_all = calc_state_diffs(
             state_strs, state_vecs, indices,
             self.base_libs[indices_str], self.acid_libs[indices_str],
-            # self.mols_libs[indices_str], 
             pH=pH, matrix_def=self.matrix_def)
         
-        state_strs, state_freqs = calc_freqs_from_states(state_strs,state_vecs,ps_all,self.matrix_def)
+        state_strs, state_freqs = calc_freqs_from_states(
+            state_strs,
+            state_vecs,
+            ps_all,
+            # self.mols_libs[indices_str],
+            self.matrix_def,
+        )
         return state_strs, state_freqs, indices
 
     #########################
@@ -1146,6 +1177,7 @@ class Autoprot:
             logger.debug(state_str)
 
             state_vec_base = np.maximum(state_vec,1) # disregard de-protonations of other sites to assess base probability
+            # state_vec_base = state_vec
             state_str_base = pack_vec(state_vec_base)
 
             mol_base = self.mols_libs[indices_str][state_str_base]
@@ -1163,6 +1195,7 @@ class Autoprot:
                     base[map_idx] = b
 
             state_vec_acid = np.minimum(state_vec,1) # disregard protonations of other sites to assess acid probability
+            # state_vec_acid = state_vec
             state_str_acid = pack_vec(state_vec_acid)
 
             mol_acid = self.mols_libs[indices_str][state_str_acid]
