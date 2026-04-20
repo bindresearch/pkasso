@@ -1256,7 +1256,7 @@ class Autoprot:
         state_freqs_export: list[float] = []
 
         for state_str, state_freq in zip(state_strs, state_freqs):
-            if state_freq > self.cutoff_export * state_freq_max: # Include all high prob states
+            if state_freq >= self.cutoff_export * state_freq_max: # Include all high prob states
                 state_strs_export.append(state_str)
                 state_freqs_export.append(state_freq)
 
