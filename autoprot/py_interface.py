@@ -6,9 +6,11 @@ from typing import Any
 import numpy as np
 from numpy.typing import NDArray
 from tqdm import tqdm  # type: ignore
+from rdkit.Chem import MolToSmiles
+from rdkit.Chem.rdchem import Mol
 
 from .main import Autoprot
-from .postprocess import Batch, Molecule, Scan
+from .postprocess import Molecule, Scan
 
 def protonate(smiles: str, pH: float = 7.0, **kwargs: Any) -> Molecule:
     """
@@ -30,42 +32,46 @@ def protonate(smiles: str, pH: float = 7.0, **kwargs: Any) -> Molecule:
         smiles, **kwargs)
     ap.run_single(pH=pH)
 
-    return ap.molecule
+    return ap.molecule.smiles, ap.molecule.mols
 
 def batch_protonate(
-        smiles_dict: dict[str, str],
+        input: list[Any], # dict[str, str],
         pH: float = 7.0,
-        **kwargs: Any) -> Batch:
+        **kwargs: Any) -> tuple[list[list[str]], list[list[Mol]]]:
     """
-    Batch process a dict of names and smiles input files.
+    Batch process a list of smiles or a list of rdkit Mol objects.
 
     Use:
     ```
     from autoprot import batch_protonate
 
-    batch_input = {
-        'fasudil' : 'C1CNCCN(C1)S(=O)(=O)C2=CC=CC3=C2C=CN=C3',
-        'mymolecule' : 'OC(=O)C(c1ccc(O)cc1)CNCCN',
-        'histamine' : 'C1=C(NC=N1)CCN',
-    }
+    batch_input = [
+        'C1CNCCN(C1)S(=O)(=O)C2=CC=CC3=C2C=CN=C3',
+        'OC(=O)C(c1ccc(O)cc1)CNCCN',
+        'C1=C(NC=N1)CCN',
+    ]
 
-    batch = batch_protonate(batch_input, pH=7., cutoff_export=0.2)
-
-    for name, molecule in batch.molecules.items():
-        print(name, molecule.smiles)
+    smiles_out, mols_out = batch_protonate(batch_input, pH=7., cutoff_export=0.2)
     ```
     """
 
-    batch_dict: dict[str, Molecule] = {}
+    if isinstance(input[0], Mol):
+        smiles_list: list[str] = [MolToSmiles(mol) for mol in input]
+    else:
+        smiles_list: list[str] = input
+    
+    batch_smiles: list[list[str]] = []
+    batch_mols: list[list[Mol]] = []
 
-    for name, smiles in tqdm(smiles_dict.items(),total=len(smiles_dict)):
+    for smiles in tqdm(smiles_list):
         ap = Autoprot(
-            smiles, name=name, **kwargs)
+            smiles, **kwargs) # name=name,
         ap.run_single(pH=pH)
 
-        batch_dict[name] = ap.molecule
-    batch = Batch(batch_dict)
-    return batch
+        batch_smiles.append(ap.molecule.smiles)
+        batch_mols.append(ap.molecule.mols)
+
+    return batch_smiles, batch_mols
 
 def scan_pH(
         smiles: str,

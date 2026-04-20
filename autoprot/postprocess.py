@@ -33,6 +33,26 @@ class Microstate:
     freq: float
     q: int
 
+def draw_mols(mols, subImgSize=(250,200)):
+    img = MolsToGridImage( # type: ignore
+    mols,molsPerRow=len(mols),subImgSize=subImgSize,
+    legends=[f'{x.GetProp("_Name")}\n{float(x.GetProp("Probability"))*100:.2f}'+r'%' for x in mols],
+    returnPNG=False,useSVG=True
+    )
+    return img
+
+def save_sdf(mols: list[Mol], file: Path):
+    """ Save embedded and optimized mols to sdf"""
+    with Chem.SDWriter(file) as f:
+        for mol in mols:
+            mol_3d = copy.deepcopy(mol)
+            mol_h = Chem.AddHs(mol_3d)
+            cid = AllChem.EmbedMolecule(mol_h, randomSeed=1, useRandomCoords=True) # type: ignore
+            if cid != 0:
+                raise ValueError(f'{mol.GetProp("_Name")} could not be embedded.')
+            AllChem.UFFOptimizeMolecule(mol_h) # type: ignore
+            f.write(mol_h)
+
 @dataclass
 class Molecule:
     """ Molecule class storing the microstate output from autoprot. """
@@ -48,16 +68,16 @@ class Molecule:
         self.freqs = [m.freq for m in self.microstates]
         self.qs = [m.q for m in self.microstates]
 
-    def draw(self) -> Any:
-        """ Draw all microstates of a molecule. """
+    # def draw(self) -> Any:
+    #     """ Draw all microstates of a molecule. """
 
-        mols = [state.mol for state in self.microstates]
-        img = MolsToGridImage( # type: ignore
-            mols,molsPerRow=len(mols),subImgSize=(250,200),
-            legends=[x.GetProp("_Name") for x in mols],
-            returnPNG=False,useSVG=True
-            )
-        return img
+    #     mols = [state.mol for state in self.microstates]
+    #     img = MolsToGridImage( # type: ignore
+    #         mols,molsPerRow=len(mols),subImgSize=(250,200),
+    #         legends=[x.GetProp("_Name") for x in mols],
+    #         returnPNG=False,useSVG=True
+    #         )
+    #     return img
     
     def save(self, file: Path) -> None:
         """ 
@@ -90,13 +110,16 @@ def combine_results(
         name_state = f'{name}_{e_idx}'
         mol = copy.deepcopy(mols_lib[state_str])
         mol.SetProp("_Name", name_state)
-        mol.SetProp("Frequency", f'{sfreq}')
+        mol.SetProp("Probability", f'{sfreq}')
+        mol.SetProp('state_str', state_str)
         for atom in mol.GetAtoms(): # type: ignore
             atom.SetAtomMapNum(0)
         _ = AllChem.Compute2DCoords(mol) # type: ignore
         smiles = Chem.MolToSmiles(mol)
+        mol.SetProp('SMILES', smiles)
         sfreq_out = sfreq/np.sum(state_freqs)
         q = state_qs[state_str]
+        mol.SetProp('net_charge', f'{q:.5f}')
 
         res = Microstate(name, name_state, mol, smiles, float(sfreq_out), q)
         microstates.append(res)
@@ -104,24 +127,37 @@ def combine_results(
     molecule = Molecule(name, microstates)
     return molecule
 
-@dataclass
-class Batch:
-    """
-    Store the outputs of an autoprot batch processing run.
-    """
+def df_from_mols(mols):
+    pass
+    # def to_pandas(self) -> pd.DataFrame:
+    #     df = pd.DataFrame()
+    #     for name, molecule in self.molecules.items():
+    #         for m in molecule.microstates:
+    #             df.loc[m.name_state,'name'] = m.name
+    #             df.loc[m.name_state,'SMILES'] = m.smiles
+    #             df.loc[m.name_state,'frequency'] = m.freq
+    #             df.loc[m.name_state,'q'] = m.q
+    #     df.index.rename('name_state', inplace=True)
+    #     return df
 
-    molecules: dict[str, Molecule]
+# @dataclass
+# class Batch:
+#     """
+#     Store the outputs of an autoprot batch processing run.
+#     """
 
-    def to_pandas(self) -> pd.DataFrame:
-        df = pd.DataFrame()
-        for name, molecule in self.molecules.items():
-            for m in molecule.microstates:
-                df.loc[m.name_state,'name'] = m.name
-                df.loc[m.name_state,'SMILES'] = m.smiles
-                df.loc[m.name_state,'frequency'] = m.freq
-                df.loc[m.name_state,'q'] = m.q
-        df.index.rename('name_state', inplace=True)
-        return df
+#     molecules: dict[str, Molecule]
+
+#     def to_pandas(self) -> pd.DataFrame:
+#         df = pd.DataFrame()
+#         for name, molecule in self.molecules.items():
+#             for m in molecule.microstates:
+#                 df.loc[m.name_state,'name'] = m.name
+#                 df.loc[m.name_state,'SMILES'] = m.smiles
+#                 df.loc[m.name_state,'frequency'] = m.freq
+#                 df.loc[m.name_state,'q'] = m.q
+#         df.index.rename('name_state', inplace=True)
+#         return df
 
 @dataclass
 class Scan:
