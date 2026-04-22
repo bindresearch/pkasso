@@ -15,7 +15,7 @@ import pandas as pd
 from matplotlib.figure import Figure as Figure_plt
 from rdkit import Chem
 from rdkit.Chem import AllChem, Mol
-from rdkit.Chem.Draw import MolsToGridImage
+from rdkit.Chem.Draw import MolsToGridImage, MolDrawOptions
 from svgutils.compose import SVG, Figure  # type: ignore
 
 from .utils import is_jupyter, state_str_to_q
@@ -23,10 +23,17 @@ from .utils import is_jupyter, state_str_to_q
 logger = logging.getLogger(__name__)
 
 def draw_mols(mols, subImgSize=(250,200)):
+    opts = MolDrawOptions()
+    opts.backgroundColour = (1, 1, 1, 1)  # RGBA, values 0-1
+
     img = MolsToGridImage( # type: ignore
-    mols,molsPerRow=len(mols),subImgSize=subImgSize,
+    mols,
+    molsPerRow=len(mols),
+    subImgSize=subImgSize,
     legends=[f'{x.GetProp("_Name")}\n{float(x.GetProp("Probability"))*100:.2f}'+r'%' for x in mols],
-    returnPNG=False,useSVG=True
+    returnPNG=False,
+    useSVG=True,
+    drawOptions=opts,
     )
     return img
 
@@ -291,7 +298,7 @@ class Scan:
         else:
             img_data = fig_mols
 
-        img_data = img_data.replace('fill:#FFFFFF', 'fill:none')
+        # img_data = img_data.replace('fill:#FFFFFF', 'fill:none')
 
         with tempfile.NamedTemporaryFile(suffix=".svg", mode="w", delete=True) as f:
             f.write(img_data)
