@@ -199,7 +199,7 @@ class Scan:
         for idx, (q, pka) in enumerate(self.pkas_macro.items()):
             print(f'pKa{idx+1} | {q+1} --> {q} | {pka:.3f}')
 
-    def plot_mols(self, size_x: float = 200, size_y: float = 175) -> Any:
+    def plot_mols(self, size_x: float = 200, size_y: float = 175, molsPerRow=4) -> Any:
         """ Plot rdkit molecules for relevant states together with state strings. 
         
         Returns IPython.core.display.SVG when called from notebook
@@ -207,14 +207,23 @@ class Scan:
         
         """
 
+        opts = MolDrawOptions()
+        opts.backgroundColour = (1, 1, 1, 1)  # RGBA, values 0-1
+
         for mol in self.mols_relevant:
             _ = AllChem.Compute2DCoords(mol) # type: ignore
             for atom in mol.GetAtoms(): # type: ignore
                 atom.SetAtomMapNum(0)
         
-        fig_mols = MolsToGridImage(self.mols_relevant,molsPerRow=4,subImgSize=(size_x,size_y), 
-                                   legends=[state_str_to_q(x.GetProp("_Name")) for x in self.mols_relevant],
-                                   returnPNG=False, useSVG=True) # type: ignore
+        fig_mols = MolsToGridImage(
+            self.mols_relevant,
+            molsPerRow=molsPerRow,
+            subImgSize=(size_x,size_y),
+            legends=[state_str_to_q(x.GetProp("_Name")) for x in self.mols_relevant],
+            returnPNG=False,
+            useSVG=True,
+            drawOptions=opts,
+        ) # type: ignore
         return fig_mols
 
     def plot_scan(self,
