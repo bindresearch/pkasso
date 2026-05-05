@@ -67,7 +67,7 @@ def predict_acid_base(
 
         for at_idx, pka in base.items():
             if has_cation_base_proximity(at_idx, mol_h, max_distance=3):
-                pka -= 3.
+                pka -= 2.
             atom = mol_h.GetAtomWithIdx(at_idx)
             map_idx = atom.GetAtomMapNum()
             base_curated[map_idx] = pka
