@@ -18,12 +18,16 @@ def mol_to_xyz(mol, filename):
             f.write(f"{atom.GetSymbol()} {pos.x:.6f} {pos.y:.6f} {pos.z:.6f}\n")
 
 
-def run_xtb(xyz_file, workdir):
+def run_xtb(xyz_file, workdir, optimize=False):
 
     env = os.environ.copy()
     env["OMP_NUM_THREADS"] = "1"
 
-    cmd = ["xtb", xyz_file, "--gfn2", "--alpb", "water"] # "--opt",
+    if optimize:
+        cmd = ["xtb", xyz_file, "--opt", "--gfn2", "--alpb", "water"] # "--opt",
+    else:
+        cmd = ["xtb", xyz_file, "--gfn2", "--alpb", "water"] # "--opt",
+
     result = subprocess.run(cmd, env=env, cwd=workdir, capture_output=True, text=True)
 
     energy = None
@@ -43,7 +47,7 @@ def prepare_3d(mol):
     AllChem.UFFOptimizeMolecule(mol)
     return mol
 
-def best_tautomer_smiles(smiles, max_tautomers: int = 100):
+def best_tautomer_smiles(smiles, max_tautomers: int = 100, xtb_optimize=False):
 
     mol = Chem.MolFromSmiles(smiles)
 
@@ -53,7 +57,8 @@ def best_tautomer_smiles(smiles, max_tautomers: int = 100):
     if len(tautomers) == 1:
         return Chem.MolToSmiles(tautomers[0])
     if len(tautomers) > max_tautomers:
-        logger.info('Exceeding max tautomers, using input smiles.')
+        # logger.info('Exceeding max tautomers, using input smiles.')
+        print('Exceeding max tautomers, using input smiles.')
         return smiles
     
     best_energy = None
@@ -67,7 +72,7 @@ def best_tautomer_smiles(smiles, max_tautomers: int = 100):
                 xyz_path = os.path.join(tmpdir, f"mol_{i}.xyz")
                 mol_to_xyz(taut3d, xyz_path)
 
-                energy = run_xtb(xyz_path, tmpdir)
+                energy = run_xtb(xyz_path, tmpdir, optimize=xtb_optimize)
 
             if energy is None:
                 continue

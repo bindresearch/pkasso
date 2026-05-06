@@ -20,6 +20,7 @@ from .postprocess import combine_results
 from .transitions import calc_freqs_from_states, calc_state_diffs, reweight_states
 from .utils import pack_indices, pack_vec, unpack_vec
 from .tautomers import best_tautomer_smiles
+from .special_cases import match_pattern
 
 logger = logging.getLogger(__name__)
 RDLogger.DisableLog("rdApp.*") # type: ignore
@@ -28,7 +29,22 @@ pkg_base = resources.files('autoprot')
 
 ROOT = f'{pkg_base}/data'
 
-def preprocess(smiles_raw: str, tautomer_search: bool = False, max_tautomers: int = 100) -> tuple[Mol,  str]:
+def overwrite_xtb_flag(mol):
+    smarts_complicated = [
+        r'[N]-[O]',
+        r'[N+]([O-])',
+        r'[O-][n+]',
+        r'[N]~[C](~[N])~[N]',
+        r'[n,N+]~[n,N+]',
+    ]
+    for smarts in smarts_complicated:
+        pattern = Chem.MolFromSmarts(smarts)
+        found, _ = match_pattern(mol, pattern)
+        if found:
+            return True # overwrite to more advance tautomer search
+    return False
+
+def preprocess(smiles_raw: str, tautomer_search: bool = False, max_tautomers: int = 100, xtb_optimize: bool = False) -> tuple[Mol,  str]:
     """ 
     Construct and standardize an RDKit molecule from a SMILES string.
     Charges that cannot be neutralized (e.g., quaternary ammonium) are preserved.
@@ -41,6 +57,8 @@ def preprocess(smiles_raw: str, tautomer_search: bool = False, max_tautomers: in
         Input SMILES string representing the molecule.
     tautomer_search
         Perform rough tautomer search using xtb energies for neutral state
+    xtb_optimize
+        Perform more expensive optimization for tautomer search
 
     Returns
     -------
@@ -73,11 +91,18 @@ def preprocess(smiles_raw: str, tautomer_search: bool = False, max_tautomers: in
     mol = Chem.MolFromSmiles(smiles, sanitize=True)
     smiles = Chem.MolToSmiles(mol,canonical=True)
 
+    if overwrite_xtb_flag(mol):
+        print('Complicated tautomers found, forcing xtb_optimize to True.')
+        logger.info('Complicated tautomers found, forcing xtb_optimize to True.')
+        xtb_optimize = True
+
     if tautomer_search:
-        smiles = best_tautomer_smiles(smiles, max_tautomers=max_tautomers)
+        smiles = best_tautomer_smiles(smiles, max_tautomers=max_tautomers, xtb_optimize=xtb_optimize)
 
     mol = Chem.MolFromSmiles(smiles, sanitize=True)
     smiles = Chem.MolToSmiles(mol,canonical=True)
+
+    # print(f'smiles after clean-up: {smiles}')
 
     for atom in mol.GetAtoms(): # type: ignore
         atom.SetAtomMapNum(atom.GetIdx() + 1)
@@ -588,6 +613,7 @@ class Autoprot:
     device: str = 'cpu' # fixed!
     tautomer_search: bool = False
     max_tautomers: int = 100
+    xtb_optimize: bool = False
 
     def run_single(self, pH: float = 7.0) -> None:
         """
@@ -869,7 +895,8 @@ class Autoprot:
         self.mol0, self.smiles0 = preprocess(
             self.smiles,
             tautomer_search=self.tautomer_search,
-            max_tautomers=self.max_tautomers)
+            max_tautomers=self.max_tautomers,
+            xtb_optimize=self.xtb_optimize)
 
         self.charged_indices = special_cases.find_charged(self.mol0)
         self.exclude_base_indices, self.exclude_acid_indices = special_cases.add_exclusions(self.mol0)
