@@ -1,12 +1,15 @@
 from pathlib import Path
 
 import torch
+from rdkit import Chem
 from rdkit.Chem.rdchem import Mol
 from rdkit.Chem import rdmolops
 
 from .descriptor import mol2vec
 from .ionization_group import get_ionization_aid
 from .net import GCNNet
+
+from autoprot.special_cases import match_pattern
 
 def load_model(model_file: Path, device: str = "cpu") -> GCNNet:
     """ Load molgpka ML torch model. """
@@ -88,10 +91,42 @@ def predict_acid_base(
             print('acid heavy')
             print(acid)
 
-        acid_curated = {} # atom mapping
+        pattern_ncS = Chem.MolFromSmarts('[n,nH,n+]~[c,C]~[S,s]')
+        _, matches_ncS = match_pattern(mol_h, pattern_ncS)
 
+        smarts_OHcRO = [
+            '[O;H1]-[C;R]~[C;R]~[C;R]([O-])',
+            '[O;H1]-[C;R]~[C;R]([O-])',
+            '[O;H1]-[C;R]([O-])',
+        ]
+
+        smarts_carbox_close = [
+            '[C](=O)([OH])~[#6]~[C](=O)([O-])',
+            '[C](=O)([OH])~[#6]~[#6]~[C](=O)([O-])'
+        ]
+
+        acid_curated = {} # atom mapping
         for at_idx, pka in acid.items():
-            atom = mol_h.GetAtomWithIdx(at_idx) 
+            atom = mol_h.GetAtomWithIdx(at_idx)
+
+            if atom.GetSymbol() == 'N':
+                for match in matches_ncS:
+                    if (at_idx in match):
+                        pka += 3.
+            if atom.GetSymbol() == 'O':
+                for smarts in smarts_OHcRO:
+                    pattern = Chem.MolFromSmarts(smarts)
+                    _, matches = match_pattern(mol_h, pattern)
+                    for match in matches:
+                        if (at_idx in match):
+                            pka += 3.#3.
+                for smarts in smarts_carbox_close:
+                    pattern = Chem.MolFromSmarts(smarts)
+                    _, matches = match_pattern(mol_h, pattern)
+                    for match in matches:
+                        if (at_idx in match):
+                            pka += 4.
+
             map_idx = atom.GetAtomMapNum()
             acid_curated[map_idx] = pka
         if verbose:
@@ -155,3 +190,4 @@ def has_cation_base_proximity(at_idx, mol, max_distance=3):
             return True
 
     return False
+

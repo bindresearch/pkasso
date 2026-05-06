@@ -110,6 +110,8 @@ def add_exclusions(mol: Mol) -> tuple[list[int], list[int]]:
     #
     pattern_ONphos = Chem.MolFromSmarts('OC=NP(=O)(O)O')
     _, matches_ONphos = match_pattern(mol, pattern_ONphos)
+    pattern_ONO = Chem.MolFromSmarts('[O]-[N+]([O-])')
+    _, matches_ONO = match_pattern(mol, pattern_ONO)
 
     for at_idx, q in enumerate(q0s):
         atom = mol_h.GetAtomWithIdx(at_idx)
@@ -117,16 +119,22 @@ def add_exclusions(mol: Mol) -> tuple[list[int], list[int]]:
 
         if q == 0:
             # atom = mol_h.GetAtomWithIdx(at_idx)
-            for match in matches_ONphos:
-                if (atom.GetIdx() in match) and (atom.GetSymbol() == 'O'):
-                    correct_O = False
-                    neighbors = atom.GetNeighbors()
-                    for nbr in neighbors:
-                        if nbr.GetAtomicNum() == 6:
-                            correct_O = True # O=CN part of the match
-                    if correct_O:
+            if atom.GetSymbol() == 'O':
+                for match in matches_ONphos:
+                    if (atom.GetIdx() in match):
+                        correct_O = False
+                        neighbors = atom.GetNeighbors()
+                        for nbr in neighbors:
+                            if nbr.GetAtomicNum() == 6:
+                                correct_O = True # O=CN part of the match
+                        if correct_O:
+                            if map_idx not in exclude_acid_indices:
+                                exclude_acid_indices.append(map_idx)
+                for match in matches_ONO:
+                    if (atom.GetIdx() in match):
                         if map_idx not in exclude_acid_indices:
                             exclude_acid_indices.append(map_idx)
+
 
             if atom.GetSymbol() == 'N':
                 if atom.GetIsAromatic():
