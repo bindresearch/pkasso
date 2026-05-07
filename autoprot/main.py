@@ -36,6 +36,7 @@ def overwrite_xtb_flag(mol):
         r'[O-][n+]',
         r'[N]~[C](~[N])~[N]',
         r'[n,N+]~[n,N+]',
+        # r'c(~[#7])(~[#7])',
     ]
     for smarts in smarts_complicated:
         pattern = Chem.MolFromSmarts(smarts)

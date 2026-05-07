@@ -3,13 +3,12 @@ from pathlib import Path
 import torch
 from rdkit import Chem
 from rdkit.Chem.rdchem import Mol
-from rdkit.Chem import rdmolops
 
 from .descriptor import mol2vec
 from .ionization_group import get_ionization_aid
 from .net import GCNNet
 
-from autoprot.special_cases import match_pattern
+from autoprot.special_cases import match_pattern, oh_ring_sulfonate, has_cation_base_proximity
 
 def load_model(model_file: Path, device: str = "cpu") -> GCNNet:
     """ Load molgpka ML torch model. """
@@ -100,9 +99,12 @@ def predict_acid_base(
             '[O;H1]-[C;R]([O-])',
         ]
 
+        smarts_ON = '[#7]~[#8]'
+
         smarts_carbox_close = [
             '[C](=O)([OH])~[#6]~[C](=O)([O-])',
-            '[C](=O)([OH])~[#6]~[#6]~[C](=O)([O-])'
+            '[C](=O)([OH])~[#6][#6]~[C](=O)([O-])',
+            '[C](=O)([OH])~[#6]=[#6]~[C](=O)([O-])',
         ]
 
         acid_curated = {} # atom mapping
@@ -120,12 +122,23 @@ def predict_acid_base(
                     for match in matches:
                         if (at_idx in match):
                             pka += 3.#3.
+                oh_sooo_list = oh_ring_sulfonate(mol_h)
+                if at_idx in oh_sooo_list:
+                    pka += 4
+
                 for smarts in smarts_carbox_close:
                     pattern = Chem.MolFromSmarts(smarts)
                     _, matches = match_pattern(mol_h, pattern)
                     for match in matches:
                         if (at_idx in match):
-                            pka += 4.
+                            pka += 2.
+
+                pattern = Chem.MolFromSmarts(smarts_ON)
+                _, matches = match_pattern(mol_h, pattern)
+                for match in matches:
+                    if (at_idx in match):
+                        pka += 3.
+
 
             map_idx = atom.GetAtomMapNum()
             acid_curated[map_idx] = pka
@@ -151,43 +164,3 @@ def get_acid_neighbors(mol_h: Mol, acid: dict[int, float], verbose: bool = False
                 print(f'pka: {pka}')
             acid_heavy[neighbor_idx] = pka
     return acid_heavy
-
-
-############
-
-def has_cation_base_proximity(at_idx, mol, max_distance=3):
-    """
-    Detect whether any neutral/basic nitrogen is within
-    <= max_distance bonds of a positively charged nitrogen.
-    """
-
-    # Collect atom indices
-    cation_nitrogens = []
-
-    atom0 = mol.GetAtomWithIdx(at_idx)
-    if atom0.GetAtomicNum() != 7:
-        return False
-    
-    for atom in mol.GetAtoms():
-        if atom.GetAtomicNum() != 7:
-            continue
-        
-        charge = atom.GetFormalCharge()
-
-        # positively charged nitrogen
-        if charge > 0:
-            cation_nitrogens.append(atom.GetIdx())
-
-    # If no candidates, exit early
-    if not cation_nitrogens:
-        return False
-
-    dist_matrix = rdmolops.GetDistanceMatrix(mol)
-
-    # Check all pairs
-    for c_idx in cation_nitrogens:
-        if dist_matrix[c_idx][at_idx] <= max_distance:
-            return True
-
-    return False
-

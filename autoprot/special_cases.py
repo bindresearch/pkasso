@@ -7,6 +7,7 @@ import numpy as np
 from numpy.typing import NDArray
 from rdkit import Chem
 from rdkit.Chem.rdchem import Mol
+from rdkit.Chem import rdmolops
 from collections import deque
 
 from .transitions import calc_freqs_from_states, calc_state_diffs
@@ -587,4 +588,101 @@ def calc_single_fixed_pka(
 
     return state_strs_curated, state_freqs
 
+def oh_ring_sulfonate(mol) -> list[int]:
+    """
+    Return atom indices of hydroxyl oxygens attached to the same fused/conjugated
+    aromatic ring system as a sulfonate/sulfonic acid substituent.
+    """
+
+    phenol_pat = Chem.MolFromSmarts("[c][OX2H]")  # aromatic OH
+    sulfo_pat = Chem.MolFromSmarts("[c]S(=O)(=O)[OX1H0-,OX2H1]")  # sulfonic acid / sulfonate
+
+    aromatic_rings = [
+        set(ring)
+        for ring in mol.GetRingInfo().AtomRings()
+        if all(mol.GetAtomWithIdx(i).GetIsAromatic() for i in ring)
+    ]
+
+    # Merge fused aromatic rings into aromatic ring systems
+    systems = []
+    for ring in aromatic_rings:
+        merged = False
+        for system in systems:
+            if ring & system:
+                system |= ring
+                merged = True
+                break
+        if not merged:
+            systems.append(set(ring))
+
+    # Repeat merge in case ring A merged with B, then B with C
+    changed = True
+    while changed:
+        changed = False
+        new_systems = []
+        while systems:
+            system = systems.pop()
+            overlaps = [s for s in systems if s & system]
+            systems = [s for s in systems if not (s & system)]
+            for s in overlaps:
+                system |= s
+                changed = True
+            new_systems.append(system)
+        systems = new_systems
+
+    phenol_matches = [
+        (match[0], match[1])  # aromatic atom, hydroxyl oxygen
+        for match in mol.GetSubstructMatches(phenol_pat)
+    ]
+
+    sulfo_ring_atoms = {
+        match[0]
+        for match in mol.GetSubstructMatches(sulfo_pat)
+    }
+
+    matching_oxygen_indices = set()
+
+    for aromatic_atom_idx, oxygen_idx in phenol_matches:
+        for system in systems:
+            if aromatic_atom_idx in system and system & sulfo_ring_atoms:
+                matching_oxygen_indices.add(oxygen_idx)
+                break
+
+    return sorted(matching_oxygen_indices)
+
+def has_cation_base_proximity(at_idx, mol, max_distance=3):
+    """
+    Detect whether any neutral/basic nitrogen is within
+    <= max_distance bonds of a positively charged nitrogen.
+    """
+
+    # Collect atom indices
+    cation_nitrogens = []
+
+    atom0 = mol.GetAtomWithIdx(at_idx)
+    if atom0.GetAtomicNum() != 7:
+        return False
+    
+    for atom in mol.GetAtoms():
+        if atom.GetAtomicNum() != 7:
+            continue
+        
+        charge = atom.GetFormalCharge()
+
+        # positively charged nitrogen
+        if charge > 0:
+            cation_nitrogens.append(atom.GetIdx())
+
+    # If no candidates, exit early
+    if not cation_nitrogens:
+        return False
+
+    dist_matrix = rdmolops.GetDistanceMatrix(mol)
+
+    # Check all pairs
+    for c_idx in cation_nitrogens:
+        if dist_matrix[c_idx][at_idx] <= max_distance:
+            return True
+
+    return False
 
