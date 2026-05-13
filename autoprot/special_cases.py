@@ -86,8 +86,8 @@ def add_exclusions(mol: Mol) -> tuple[list[int], list[int]]:
     exclude_base_indices: list[int] = []
     mol_h = Chem.rdmolops.AddHs(mol)
 
-    pattern_carbonyl = Chem.MolFromSmarts("NC(=O)")
-    found_carbonyl, matches_carbonyl = match_pattern(mol,pattern_carbonyl)
+    # pattern_carbonyl = Chem.MolFromSmarts("NC(=O)")
+    # found_carbonyl, matches_carbonyl = match_pattern(mol,pattern_carbonyl)
     pattern_imine = Chem.MolFromSmarts("NC(=N)")
     found_imine, matches_imine = match_pattern(mol,pattern_imine)
     pattern_sulfonamide = Chem.MolFromSmarts("NS(=O)(=O)")
@@ -98,21 +98,29 @@ def add_exclusions(mol: Mol) -> tuple[list[int], list[int]]:
     found_Ncnn, matches_Ncnn = match_pattern(mol, pattern_Ncnn)
     pattern_Nccn = Chem.MolFromSmarts('Nc(c)n')
     found_Nccn, matches_Nccn = match_pattern(mol, pattern_Nccn)
+    pattern_Ncc2 = Chem.MolFromSmarts('Nccn')
+    found_Nccn2, matches_Nccn2 = match_pattern(mol, pattern_Ncc2)
     pattern_nnn = Chem.MolFromSmarts('nnn')
     found_nnn, matches_nnn = match_pattern(mol, pattern_nnn)
     pattern_ncnn = Chem.MolFromSmarts('ncnn')
     found_ncnn, matches_ncnn = match_pattern(mol, pattern_ncnn)
-    pattern_nco = Chem.MolFromSmarts('nco')
-    found_nco, matches_nco = match_pattern(mol, pattern_nco)
+    # pattern_nco = Chem.MolFromSmarts('nco')
+    # found_nco, matches_nco = match_pattern(mol, pattern_nco)
     pattern_cNO = Chem.MolFromSmarts('C=NO')
     _, matches_cNO = match_pattern(mol, pattern_cNO)
     pattern_NNC = Chem.MolFromSmarts('N-N=C')
     _, matches_NNC = match_pattern(mol, pattern_NNC)
+    pattern_carbonyl = Chem.MolFromSmarts('[#7]~[#6X3](=[#8])')
+    found_carbonyl, matches_carbonyl = match_pattern(mol,pattern_carbonyl)
     #
     pattern_ONphos = Chem.MolFromSmarts('OC=NP(=O)(O)O')
     _, matches_ONphos = match_pattern(mol, pattern_ONphos)
     pattern_ONO = Chem.MolFromSmarts('[O]-[N+]([O-])')
     _, matches_ONO = match_pattern(mol, pattern_ONO)
+    pattern_ONCO1 = Chem.MolFromSmarts('O=N-C=O')
+    _, matches_ONCO1 = match_pattern(mol, pattern_ONCO1)
+    pattern_ONCO2 = Chem.MolFromSmarts('C=C(N=O)O')
+    _, matches_ONCO2 = match_pattern(mol, pattern_ONCO2)
 
     for at_idx, q in enumerate(q0s):
         atom = mol_h.GetAtomWithIdx(at_idx)
@@ -131,28 +139,28 @@ def add_exclusions(mol: Mol) -> tuple[list[int], list[int]]:
                         if correct_O:
                             if map_idx not in exclude_acid_indices:
                                 exclude_acid_indices.append(map_idx)
-                for match in matches_ONO:
-                    if (atom.GetIdx() in match):
-                        if map_idx not in exclude_acid_indices:
-                            exclude_acid_indices.append(map_idx)
-
-
+                for matches in [matches_ONO, matches_ONCO1, matches_ONCO2]:
+                    for match in matches:
+                        if (atom.GetIdx() in match):
+                            if map_idx not in exclude_acid_indices:
+                                exclude_acid_indices.append(map_idx)
+                
             if atom.GetSymbol() == 'N':
+                for match in matches_carbonyl: # ...N-C(=O)...
+                    if atom.GetIdx() in match:
+                        if map_idx not in exclude_base_indices:
+                            exclude_base_indices.append(map_idx)
+                        logger.debug('Excluding N next to carbonyl as base')
+                        logger.debug(at_idx, map_idx)
                 if atom.GetIsAromatic():
                     if atom.GetDegree() == 3: # arom. N with lone pair needed for ring
                         exclude_base_indices.append(map_idx)
-                    for matches in [matches_nnn, matches_ncnn, matches_nco]:
+                    for matches in [matches_nnn, matches_ncnn]:
                         for match in matches:
                             if atom.GetIdx() in match:
                                 if map_idx not in exclude_base_indices:
                                     exclude_base_indices.append(map_idx)
                 else:
-                    for match in matches_carbonyl: # ...N-C(=O)...
-                        if atom.GetIdx() in match:
-                            if map_idx not in exclude_base_indices:
-                                exclude_base_indices.append(map_idx)
-                            logger.debug('Excluding N next to carbonyl as base')
-                            logger.debug(at_idx, map_idx)
                     for match in matches_imine: # ...N-C(=N)...
                         if atom.GetIdx() in match:
                             accept = True
@@ -170,7 +178,7 @@ def add_exclusions(mol: Mol) -> tuple[list[int], list[int]]:
                                 exclude_base_indices.append(map_idx)
                             logger.debug('Excluding N next to sulfonamide as base')
                             logger.debug(at_idx, map_idx)
-                    for matches in [matches_diphenylamine, matches_Ncnn, matches_Nccn, matches_cNO, matches_NNC]:
+                    for matches in [matches_diphenylamine, matches_Ncnn, matches_Nccn, matches_Nccn2, matches_cNO, matches_NNC]:
                         for match in matches:
                             if atom.GetIdx() in match:
                                 if map_idx not in exclude_base_indices:
@@ -650,7 +658,7 @@ def oh_ring_sulfonate(mol) -> list[int]:
 
     return sorted(matching_oxygen_indices)
 
-def has_cation_base_proximity(at_idx, mol, max_distance=3):
+def has_nplus_base_proximity(at_idx, mol, max_distance=3):
     """
     Detect whether any neutral/basic nitrogen is within
     <= max_distance bonds of a positively charged nitrogen.
@@ -662,27 +670,34 @@ def has_cation_base_proximity(at_idx, mol, max_distance=3):
     atom0 = mol.GetAtomWithIdx(at_idx)
     if atom0.GetAtomicNum() != 7:
         return False
+    aromatic0 = atom0.GetIsAromatic()
     
     for atom in mol.GetAtoms():
         if atom.GetAtomicNum() != 7:
             continue
         
         charge = atom.GetFormalCharge()
-
+        aromatic = atom.GetIsAromatic()
         # positively charged nitrogen
-        if charge > 0:
+        if (charge > 0):# and aromatic:
             cation_nitrogens.append(atom.GetIdx())
+            if aromatic:
+                cation_nitrogens.append(atom.GetIdx()) # add again for aromatics
+            if aromatic0:
+                cation_nitrogens.append(atom.GetIdx()) # add again for aromatics
 
     # If no candidates, exit early
     if not cation_nitrogens:
-        return False
+        return 0
 
     dist_matrix = rdmolops.GetDistanceMatrix(mol)
 
+    count = 0
     # Check all pairs
     for c_idx in cation_nitrogens:
-        if dist_matrix[c_idx][at_idx] <= max_distance:
-            return True
+        if (c_idx != at_idx) and (dist_matrix[c_idx][at_idx] <= max_distance):
+            # return True
+            count += 1
 
-    return False
+    return count
 

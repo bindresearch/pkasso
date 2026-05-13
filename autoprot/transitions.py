@@ -42,10 +42,8 @@ def calc_p_up_down(
         p_up = calc_charge(pka,pH=pH) # probability for higher + state
         p_down = 1 - p_up
     elif matrix_def == 'dG':
-        p_up = np.log(10) * (pH - pka)# + alpha_q * np.abs(q_up))# - alpha_q * q_up) # -ln(p+/p0)
+        p_up = np.log(10) * (pH - pka)
         p_down = -p_up
-        # p_down = np.log(10) * (pka - pH) # -ln(p0/p+)
-        # print(p_up, p_down)
     else:
         raise
     return p_up, p_down
@@ -223,37 +221,39 @@ def check_connectivity(dG_matrix: NDArray[np.float64]) -> bool:
     connected = bool(nx.is_connected(G))
     return connected
 
-def reconstruct_free_energies_incomplete_half(dG_matrix: NDArray[np.float64]) -> NDArray[np.float64]:
-    """ Reconstruct absolute free energies from incomplete pairwise deltaG data. """
-    N = dG_matrix.shape[0]
-    rows, rhs = [], []
+# def reconstruct_free_energies_incomplete_half(dG_matrix: NDArray[np.float64]) -> NDArray[np.float64]:
+#     """ Reconstruct absolute free energies from incomplete pairwise deltaG data. """
+#     N = dG_matrix.shape[0]
+#     rows, rhs = [], []
 
-    if N == 1:
-        return np.array([0.])
+#     # print(dG_matrix)
 
-    for i in range(N):
-        for j in range(i+1, N):
-            if dG_matrix[i, j] == MISSING:
-                continue
+#     if N == 1:
+#         return np.array([0.])
 
-            row = np.zeros(N)
-            row[i] = -1.0
-            row[j] =  1.0
-            rows.append(row)
-            rhs.append(dG_matrix[i, j])
+#     for i in range(N):
+#         for j in range(i+1, N):
+#             if dG_matrix[i, j] == MISSING:
+#                 continue
 
-    if not rows:
-        raise ValueError("No valid transitions found.")
+#             row = np.zeros(N)
+#             row[i] = -1.0
+#             row[j] =  1.0
+#             rows.append(row)
+#             rhs.append(dG_matrix[i, j])
 
-    A = np.vstack(rows)
-    b = np.array(rhs)
+#     if not rows:
+#         raise ValueError("No valid transitions found.")
 
-    A = A[:, 1:]
-    G_reduced, *_ = np.linalg.lstsq(A, b, rcond=None)
+#     A = np.vstack(rows)
+#     b = np.array(rhs)
 
-    G = np.zeros(N)
-    G[1:] = G_reduced
-    return G
+#     A = A[:, 1:]
+#     G_reduced, *_ = np.linalg.lstsq(A, b, rcond=None)
+
+#     G = np.zeros(N)
+#     G[1:] = G_reduced
+#     return G
 
 def calc_populations(Gs: NDArray[np.float64]) -> NDArray[np.float64]:
     """Compute Boltzmann populations from free energies."""
@@ -281,37 +281,34 @@ def calc_freqs_from_states(
         is_connected = check_connectivity(dGmatrix)
         if not is_connected:
             raise ValueError('Matrix not connected (or not symmetric)')
-        Gs = reconstruct_free_energies_incomplete_half(dGmatrix)
-        # Gs = reweight_Gs(state_strs, Gs, mols_lib)
+        # Gs = reconstruct_free_energies_incomplete_half(dGmatrix)
+        Gs = reconstruct_free_energies_weighted(dGmatrix)
+        # print(state_strs)
+        # print(Gs)
         state_freqs = calc_populations(Gs)
+        # print(state_freqs)
+        # if len(state_strs) < 10:
+        #     filtered_ids = np.where(state_freqs>1e-5)[0]
+        #     # print(filtered_ids)
+        #     dGmatrix_filtered = dGmatrix[np.ix_(filtered_ids,filtered_ids)]
+        #     # print(dGmatrix_filtered)
+
+        #     if (len(filtered_ids) > 0) and (not np.mean(dGmatrix_filtered) == -1000.):
+        #         is_connected = check_connectivity(dGmatrix_filtered)
+        #         # print(is_connected)
+        #         if is_connected:
+        #             Gs_filtered = reconstruct_free_energies_incomplete_half(dGmatrix_filtered)
+        #             # print(Gs_filtered)
+        #             state_freqs = calc_populations(Gs_filtered)
+                    
+        #             state_strs = [state_strs[idx] for idx in filtered_ids]
+        #             # print(state_strs)
+        #             # print(state_freqs)
+        #             return state_strs, state_freqs
     return state_strs, state_freqs
 
 def Gs_from_prob(freqs):
     return np.log(freqs)
-
-def reweight_states(state_strs: list[str], state_freqs_lib: dict[str, float], mols_lib: dict[str, Mol]) -> dict[str, float]:
-    """ Reweight free energies of states according to some criterion. """
-
-    state_freqs_lib_reweighted = {}
-
-    Gs_reweighted = np.zeros((len(state_strs)))
-
-    for idx, state_str in enumerate(state_strs):
-        G = -np.log(state_freqs_lib[state_str])
-        mol = mols_lib[state_str]
-        charges = [at.GetFormalCharge() for at in mol.GetAtoms()] # type: ignore
-        ct_pos = charges.count(1)
-
-        penalty = ct_pos**2
-
-        G_reweighted = G + penalty
-        Gs_reweighted[idx] = G_reweighted
-
-    state_freqs_rew = calc_populations(Gs_reweighted)
-    for state_str, state_freq in zip(state_strs, state_freqs_rew):
-        state_freqs_lib_reweighted[state_str] = state_freq
-
-    return state_freqs_lib_reweighted
 
 def calc_state_diffs(
     state_strs: list[str],
@@ -364,3 +361,135 @@ def calc_state_diffs(
         ps_all.append(ps)
 
     return ps_all
+
+####
+
+def reconstruct_free_energies_weighted(
+    dG_matrix: NDArray[np.float64],
+    sigma0: float = 0.2,
+    alpha: float = 0.1,
+    max_iter: int = 50,
+    tol: float = 1e-8,
+) -> NDArray[np.float64]:
+    """
+    Reconstruct absolute free energies from incomplete pairwise deltaG data
+    using iteratively reweighted least squares.
+
+    Weighting scheme:
+        sigma_ij = sigma0 + alpha * mean(G_i, G_j)
+
+        weight_ij = 1 / sigma_ij^2
+
+    After each iteration the free energies are shifted such that:
+        min(G) = 0
+
+    This makes the weighting gauge-invariant and ensures:
+        sigma_ij > 0
+
+    Notes
+    -----
+    - Larger free energies receive lower weights.
+    - Lower free energies receive higher weights.
+    """
+
+    N = dG_matrix.shape[0]
+
+    if N == 1:
+        return np.array([0.0])
+
+    # --------------------------------------------------------------
+    # Build pair list
+    # --------------------------------------------------------------
+    pairs = []
+
+    for i in range(N):
+        for j in range(i + 1, N):
+
+            val = dG_matrix[i, j]
+
+            if np.isnan(val) or val == MISSING:
+                continue
+
+            pairs.append((i, j, val))
+
+    if not pairs:
+        raise ValueError("No valid transitions found.")
+
+    # --------------------------------------------------------------
+    # Initial ordinary least-squares solution
+    # --------------------------------------------------------------
+    rows = []
+    rhs = []
+
+    for i, j, val in pairs:
+
+        row = np.zeros(N)
+        row[i] = -1.0
+        row[j] = 1.0
+
+        rows.append(row)
+        rhs.append(val)
+
+    A = np.vstack(rows)
+    b = np.array(rhs)
+
+    # Temporary gauge fixing for solve
+    A_reduced = A[:, 1:]
+
+    G_reduced, *_ = np.linalg.lstsq(A_reduced, b, rcond=None)
+
+    G = np.zeros(N)
+    G[1:] = G_reduced
+
+    # Shift so min(G) = 0
+    G -= np.min(G)
+
+    # --------------------------------------------------------------
+    # Iterative weighted least squares
+    # --------------------------------------------------------------
+    for _ in range(max_iter):
+
+        weighted_rows = []
+        weighted_rhs = []
+
+        for i, j, val in pairs:
+
+            # Mean free energy
+            scale = 0.5 * (G[i] + G[j])
+
+            sigma_ij = sigma0 + alpha * scale
+
+            weight = 1.0 / (sigma_ij ** 2)
+
+            row = np.zeros(N)
+            row[i] = -1.0
+            row[j] = 1.0
+
+            weighted_rows.append(np.sqrt(weight) * row)
+            weighted_rhs.append(np.sqrt(weight) * val)
+
+        A_w = np.vstack(weighted_rows)
+        b_w = np.array(weighted_rhs)
+
+        A_w_reduced = A_w[:, 1:]
+
+        G_reduced_new, *_ = np.linalg.lstsq(
+            A_w_reduced,
+            b_w,
+            rcond=None
+        )
+
+        G_new = np.zeros(N)
+        G_new[1:] = G_reduced_new
+
+        # Shift gauge so minimum free energy is zero
+        G_new -= np.min(G_new)
+
+        # Convergence check
+        if np.linalg.norm(G_new - G) < tol:
+            G = G_new
+            break
+
+        G = G_new
+
+    return G

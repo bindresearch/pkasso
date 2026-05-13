@@ -8,7 +8,7 @@ from .descriptor import mol2vec
 from .ionization_group import get_ionization_aid
 from .net import GCNNet
 
-from autoprot.special_cases import match_pattern, oh_ring_sulfonate, has_cation_base_proximity
+from autoprot.special_cases import match_pattern, oh_ring_sulfonate, has_nplus_base_proximity
 
 def load_model(model_file: Path, device: str = "cpu") -> GCNNet:
     """ Load molgpka ML torch model. """
@@ -67,9 +67,33 @@ def predict_acid_base(
 
         base_curated = {} # atom mapping
 
+        # smarts_NN = '[#7]~[#7]'
+
+        pattern_ncncO = Chem.MolFromSmarts('[n;r6][c;r6][nH;r6][c;r6](=O)')
+        _, matches_ncncO = match_pattern(mol_h, pattern_ncncO)
+
         for at_idx, pka in base.items():
-            if has_cation_base_proximity(at_idx, mol_h, max_distance=3):
-                pka -= 2.
+            atom = mol_h.GetAtomWithIdx(at_idx)
+            
+            ncat = has_nplus_base_proximity(at_idx, mol_h, max_distance=5)
+            # print(ncat)
+            correction = 2.5 * max(0,(ncat-1.))
+            # print(correction)
+            pka -= correction
+
+            if atom.GetSymbol() == 'N':
+                for match in matches_ncncO:
+                    if (at_idx in match):
+                        pka -= 2.
+                        continue
+
+            # pattern = Chem.MolFromSmarts(smarts_NN)
+            # _, matches = match_pattern(mol_h, pattern)
+            # for match in matches:
+            #     if at_idx in match:
+            #         pka -= 2.
+
+            # pka -= 2.
             atom = mol_h.GetAtomWithIdx(at_idx)
             map_idx = atom.GetAtomMapNum()
             base_curated[map_idx] = pka
@@ -93,6 +117,7 @@ def predict_acid_base(
         pattern_ncS = Chem.MolFromSmarts('[n,nH,n+]~[c,C]~[S,s]')
         _, matches_ncS = match_pattern(mol_h, pattern_ncS)
 
+
         smarts_OHcRO = [
             '[O;H1]-[C;R]~[C;R]~[C;R]([O-])',
             '[O;H1]-[C;R]~[C;R]([O-])',
@@ -107,14 +132,20 @@ def predict_acid_base(
             '[C](=O)([OH])~[#6]=[#6]~[C](=O)([O-])',
         ]
 
+        pattern_ncncO = Chem.MolFromSmarts('[n;r6][c;r6][nH;r6][c;r6](=O)')
+        _, matches_ncncO = match_pattern(mol_h, pattern_ncncO)
+
         acid_curated = {} # atom mapping
         for at_idx, pka in acid.items():
             atom = mol_h.GetAtomWithIdx(at_idx)
 
             if atom.GetSymbol() == 'N':
                 for match in matches_ncS:
-                    if (at_idx in match):
-                        pka += 3.
+                    for match2 in matches_ncncO:
+                        if (at_idx in match) and (at_idx not in match2):
+                            pka += 1. # 3.
+                            continue
+
             if atom.GetSymbol() == 'O':
                 for smarts in smarts_OHcRO:
                     pattern = Chem.MolFromSmarts(smarts)
@@ -122,6 +153,7 @@ def predict_acid_base(
                     for match in matches:
                         if (at_idx in match):
                             pka += 3.#3.
+                            continue
                 oh_sooo_list = oh_ring_sulfonate(mol_h)
                 if at_idx in oh_sooo_list:
                     pka += 4
@@ -132,19 +164,21 @@ def predict_acid_base(
                     for match in matches:
                         if (at_idx in match):
                             pka += 2.
+                            continue
 
                 pattern = Chem.MolFromSmarts(smarts_ON)
                 _, matches = match_pattern(mol_h, pattern)
                 for match in matches:
                     if (at_idx in match):
-                        pka += 3.
+                        pka += 0. # 2. # 3.
+                        continue
 
 
             map_idx = atom.GetAtomMapNum()
             acid_curated[map_idx] = pka
-        if verbose:
-            print('acid curated')
-            print(acid_curated)
+        # if verbose:
+        # print('acid curated')
+        # print(acid_curated)
         acid = acid_curated
     else:
         acid = {}

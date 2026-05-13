@@ -17,7 +17,7 @@ from rdkit.Chem.rdchem import Mol
 from . import coupling, special_cases, utils
 from .external.pka import load_model, predict_acid_base
 from .postprocess import combine_results
-from .transitions import calc_freqs_from_states, calc_state_diffs, reweight_states
+from .transitions import calc_freqs_from_states, calc_state_diffs
 from .utils import pack_indices, pack_vec, unpack_vec
 from .tautomers import best_tautomer_smiles
 from .special_cases import match_pattern
@@ -36,6 +36,8 @@ def overwrite_xtb_flag(mol):
         r'[O-][n+]',
         r'[N]~[C](~[N])~[N]',
         r'[n,N+]~[n,N+]',
+        r'[SX4](=[OX1])(=[OX1])',
+        r'[#7]~[#6X3](=[#8])',
         # r'c(~[#7])(~[#7])',
     ]
     for smarts in smarts_complicated:
@@ -43,9 +45,27 @@ def overwrite_xtb_flag(mol):
         found, _ = match_pattern(mol, pattern)
         if found:
             return True # overwrite to more advance tautomer search
+        
+    ct_n = 0
+    ct_N = 0
+    for atom in mol.GetAtoms():
+        if atom.GetSymbol() == 'N':
+            if atom.GetIsAromatic():
+                ct_n += 1
+            else:
+                ct_N += 1
+    if ct_n >= 3 or (ct_n >= 2 and ct_N >= 2):
+        return True
+    
     return False
 
-def preprocess(smiles_raw: str, tautomer_search: bool = False, max_tautomers: int = 100, xtb_optimize: bool = False) -> tuple[Mol,  str]:
+def preprocess(
+        smiles_raw: str, 
+        tautomer_search: bool = False,
+        max_tautomers: int = 100,
+        xtb_optimize: bool = False,
+        num_confs: int = 10
+    ) -> tuple[Mol,  str]:
     """ 
     Construct and standardize an RDKit molecule from a SMILES string.
     Charges that cannot be neutralized (e.g., quaternary ammonium) are preserved.
@@ -74,9 +94,20 @@ def preprocess(smiles_raw: str, tautomer_search: bool = False, max_tautomers: in
     logger.debug(smiles_raw)
     mol = Chem.MolFromSmiles(smiles_raw, sanitize=True)
     smiles = Chem.MolToSmiles(mol,canonical=True)
-    
+
     logger.debug('Canonical')
     logger.debug(smiles)
+
+    if tautomer_search:
+        if overwrite_xtb_flag(mol):
+            print('Complicated tautomers found, forcing xtb_optimize to True.')
+            logger.info('Complicated tautomers found, forcing xtb_optimize to True.')
+            xtb_optimize = True
+            num_confs = 50
+   
+        smiles = best_tautomer_smiles(smiles, max_tautomers=max_tautomers, xtb_optimize=xtb_optimize,
+                                      num_confs=num_confs)
+        # print(smiles)
     mol = Chem.MolFromSmiles(smiles, sanitize=True)
 
     logger.debug('Formal charges before cleanup')
@@ -91,14 +122,6 @@ def preprocess(smiles_raw: str, tautomer_search: bool = False, max_tautomers: in
     smiles = Chem.MolToSmiles(mol,canonical=True)
     mol = Chem.MolFromSmiles(smiles, sanitize=True)
     smiles = Chem.MolToSmiles(mol,canonical=True)
-
-    if overwrite_xtb_flag(mol):
-        print('Complicated tautomers found, forcing xtb_optimize to True.')
-        logger.info('Complicated tautomers found, forcing xtb_optimize to True.')
-        xtb_optimize = True
-
-    if tautomer_search:
-        smiles = best_tautomer_smiles(smiles, max_tautomers=max_tautomers, xtb_optimize=xtb_optimize)
 
     mol = Chem.MolFromSmiles(smiles, sanitize=True)
     smiles = Chem.MolToSmiles(mol,canonical=True)
@@ -526,7 +549,11 @@ def calc_macro_props(
 
 ###########
 
-def combine_pkas_macro(pHs: NDArray[np.float64], freqs_macro_all: list[dict[int, float]]) -> dict[int, float]:
+def combine_pkas_macro(
+    pHs: NDArray[np.float64],
+    freqs_macro_all: list[dict[int, float]],
+    cumulative=False,
+) -> dict[int, float]:
     """
     Estimate macrostate pKa values from charge-resolved frequency data.
 
@@ -561,8 +588,20 @@ def combine_pkas_macro(pHs: NDArray[np.float64], freqs_macro_all: list[dict[int,
         qs_sorted = sorted(freqs_macro.keys())
         for q in qs_sorted:
             if q+1 in qs_sorted:
-                freq1 = freqs_macro[q]
-                freq2 = freqs_macro[q+1]
+                if cumulative:
+                    freq1 = 0.
+                    freq2 = 0.
+                    for key, freq in freqs_macro.items():
+                        if key <= q:
+                            freq1 += freq
+                        else:
+                            freq2 += freq
+                    print(pH, freq1, freq2)
+                    # freq1 = freqs_macro[:q+1]
+                    # freq2 = freqs_macro[q+1:]
+                else:
+                    freq1 = freqs_macro[q]
+                    freq2 = freqs_macro[q+1]
                 pka_macro = np.log10(freq2/freq1) + pH
                 pka_weight = 1./(freq1**2 + freq2**2)
                 if q in pkas_macro:
@@ -615,6 +654,8 @@ class Autoprot:
     tautomer_search: bool = False
     max_tautomers: int = 100
     xtb_optimize: bool = False
+    num_confs: int = 10
+    macro_cumulative: bool = False
 
     def run_single(self, pH: float = 7.0) -> None:
         """
@@ -741,6 +782,8 @@ class Autoprot:
             sfreq_cutoff_combined=self.sfreq_cutoff_combined,
         )
 
+        # print(state_strs, state_freqs_lib)
+
         indices_str = pack_indices(indices)
         # Check if indices from clusters have been combined correctly to the full list of indices
         if indices_str != self.indices0_str:
@@ -788,7 +831,7 @@ class Autoprot:
         self.freqs_macro_all: list[dict[int, float]] = []
 
         for pH_idx, pH in enumerate(self.pHs.flat):
-
+            # print(pH)
             net_charge, freqs_macro, state_strs_sym, state_freqs_sym, state_qs, indices = self._calc_microstates(pH)
 
             self.net_charges.append(net_charge)
@@ -813,7 +856,7 @@ class Autoprot:
 
         self.net_charges_arr = np.round(np.array(self.net_charges),decimals=4)
 
-        self.pkas_macro = combine_pkas_macro(self.pHs, self.freqs_macro_all)
+        self.pkas_macro = combine_pkas_macro(self.pHs, self.freqs_macro_all, cumulative=self.macro_cumulative)
 
         if self.state_freqs_all:
             self.calc_relevant_states()
@@ -897,7 +940,8 @@ class Autoprot:
             self.smiles,
             tautomer_search=self.tautomer_search,
             max_tautomers=self.max_tautomers,
-            xtb_optimize=self.xtb_optimize)
+            xtb_optimize=self.xtb_optimize,
+            num_confs=self.num_confs)
 
         self.charged_indices = special_cases.find_charged(self.mol0)
         self.exclude_base_indices, self.exclude_acid_indices = special_cases.add_exclusions(self.mol0)
