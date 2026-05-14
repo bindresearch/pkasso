@@ -104,6 +104,59 @@ from rdkit.Chem.MolStandardize import rdMolStandardize
 HARTREE_PER_KCAL_MOL = 1.0 / 627.5094740631
 GAS_CONSTANT_KCAL_MOL_K = 0.00198720425864083
 DEFAULT_TEMPERATURE_K = 298.15
+IMIDIC_ACID_PATTERN = Chem.MolFromSmarts(
+    "[NX2;!$([N+])]=[CX3]([OX2H1])"
+)
+THIOIMIDIC_ACID_PATTERN = Chem.MolFromSmarts(
+    "[NX2;!$([N+])]=[CX3]([SX2H1])"
+)
+HYDROXAMATE_PATTERN = Chem.MolFromSmarts(
+    "[CX3](=[OX1])-[NX3]-[OX2H1]"
+)
+HYDROXIMIC_ACID_PATTERN = Chem.MolFromSmarts(
+    "[CX3]([OX2H1])=[NX2]-[OX2H1]"
+)
+
+
+def has_imidic_acid_amide_tautomer(mol):
+    return (
+        mol.HasSubstructMatch(IMIDIC_ACID_PATTERN)
+        or mol.HasSubstructMatch(THIOIMIDIC_ACID_PATTERN)
+    )
+
+
+def has_hydroxamate_tautomer(mol):
+    return mol.HasSubstructMatch(HYDROXAMATE_PATTERN)
+
+
+def has_hydroximic_acid_tautomer(mol):
+    return mol.HasSubstructMatch(HYDROXIMIC_ACID_PATTERN)
+
+
+def describe_tautomer_entry(entry):
+    flags = []
+
+    if has_imidic_acid_amide_tautomer(entry["taut"]):
+        flags.append("imidic")
+    if has_hydroxamate_tautomer(entry["taut"]):
+        flags.append("hydroxamate")
+    if has_hydroximic_acid_tautomer(entry["taut"]):
+        flags.append("hydroximic")
+
+    label = ",".join(flags) if flags else "-"
+    smiles = Chem.MolToSmiles(entry["taut"])
+
+    return (
+        f"idx={entry['idx']} score={entry['rdkit_score']} "
+        f"mmff={entry['mmff_energy']:.6f} flags={label} smiles={smiles}"
+    )
+
+
+def print_tautomer_debug(stage, ranked):
+    print(f"Tautomer candidates after {stage}:")
+
+    for entry in ranked:
+        print(f"  {describe_tautomer_entry(entry)}")
 
 
 def conformer_ensemble_free_energy(
@@ -236,11 +289,13 @@ def best_tautomer_smiles(
     smiles,
     max_tautomers=100,
     num_confs=10,
+    use_xtb=False,
     top_n_xtb=10,
     num_xtb_confs: int = 3,
     xtb_optimize=False,
-    rdkit_score_window=5,
+    rdkit_score_window=2,
     temperature=DEFAULT_TEMPERATURE_K,
+    debug=False,
 ):
     """Return a chemically plausible low-energy tautomer.
 
@@ -250,6 +305,7 @@ def best_tautomer_smiles(
     conformer ensemble free energy. Set ``rdkit_score_window=None`` to recover
     pure MMFF/xTB tautomer filtering.
     """
+
 
     mol = Chem.MolFromSmiles(smiles)
 
@@ -311,10 +367,23 @@ def best_tautomer_smiles(
     if len(ranked) == 0:
         return smiles
 
+    if debug:
+        print_tautomer_debug("MMFF preparation", ranked)
+
     # ---------------------------------------------------------
     # Stage 2:
     # RDKit tautomer-score prior + MMFF pre-filter
     # ---------------------------------------------------------
+
+    if any(has_hydroxamate_tautomer(entry["taut"]) for entry in ranked):
+        ranked = [
+            entry
+            for entry in ranked
+            if not has_hydroximic_acid_tautomer(entry["taut"])
+        ]
+
+    if len(ranked) == 0:
+        return smiles
 
     if rdkit_score_window is not None:
         best_rdkit_score = max(entry["rdkit_score"] for entry in ranked)
@@ -323,6 +392,17 @@ def best_tautomer_smiles(
             for entry in ranked
             if best_rdkit_score - entry["rdkit_score"] <= rdkit_score_window
         ]
+        ranked = [
+            entry
+            for entry in ranked
+            if (
+                entry["rdkit_score"] == best_rdkit_score
+                or not has_imidic_acid_amide_tautomer(entry["taut"])
+            )
+        ]
+
+    if debug:
+        print_tautomer_debug("tautomer filters", ranked)
 
     ranked.sort(key=lambda x: (-x["rdkit_score"], x["mmff_energy"]))
 
@@ -339,60 +419,63 @@ def best_tautomer_smiles(
     # xTB ranking
     # ---------------------------------------------------------
 
-    best_free_energy = None
-    best_taut = None
+    if use_xtb:
 
-    num_xtb_confs = max(1, num_xtb_confs)
+        best_free_energy = None
+        best_taut = None
 
-    for entry in ranked:
+        num_xtb_confs = max(1, num_xtb_confs)
 
-        try:
+        for entry in ranked:
 
-            xtb_energies = []
+            try:
 
-            with tempfile.TemporaryDirectory() as tmpdir:
+                xtb_energies = []
 
-                for conf_id, _ in entry["conf_energies"][:num_xtb_confs]:
+                with tempfile.TemporaryDirectory() as tmpdir:
 
-                    xyz_path = os.path.join(
-                        tmpdir,
-                        f"taut_{entry['idx']}_conf_{conf_id}.xyz"
-                    )
+                    for conf_id, _ in entry["conf_energies"][:num_xtb_confs]:
 
-                    mol_to_xyz(
-                        entry["mol3d"],
-                        xyz_path,
-                        conf_id=conf_id,
-                    )
+                        xyz_path = os.path.join(
+                            tmpdir,
+                            f"taut_{entry['idx']}_conf_{conf_id}.xyz"
+                        )
 
-                    xtb_energy = run_xtb(
-                        xyz_path,
-                        tmpdir,
-                        optimize=xtb_optimize,
-                    )
+                        mol_to_xyz(
+                            entry["mol3d"],
+                            xyz_path,
+                            conf_id=conf_id,
+                        )
+                        # print(f'running xtb on entry {entry["idx"]}')
+                        xtb_energy = run_xtb(
+                            xyz_path,
+                            tmpdir,
+                            optimize=xtb_optimize,
+                        )
 
-                    if xtb_energy is None:
-                        continue
+                        if xtb_energy is None:
+                            continue
 
-                    xtb_energies.append(xtb_energy)
+                        xtb_energies.append(xtb_energy)
 
-            taut_free_energy = conformer_ensemble_free_energy(
-                xtb_energies,
-                temperature=temperature,
-            )
+                taut_free_energy = conformer_ensemble_free_energy(
+                    xtb_energies,
+                    temperature=temperature,
+                )
 
-            if taut_free_energy is None:
-                continue
+                if taut_free_energy is None:
+                    continue
 
-            if best_free_energy is None or taut_free_energy < best_free_energy:
+                if best_free_energy is None or taut_free_energy < best_free_energy:
 
-                best_free_energy = taut_free_energy
-                best_taut = entry["taut"]
+                    best_free_energy = taut_free_energy
+                    best_taut = entry["taut"]
 
-        except Exception as e:
-            print(f"xTB failed for tautomer {entry['idx']}: {e}")
+            except Exception as e:
+                print(f"xTB failed for tautomer {entry['idx']}: {e}")
 
-    if best_taut is None:
+        if best_taut is None:
+            return Chem.MolToSmiles(ranked[0]["taut"])
+        return Chem.MolToSmiles(best_taut)
+    else:
         return Chem.MolToSmiles(ranked[0]["taut"])
-
-    return Chem.MolToSmiles(best_taut)

@@ -37,9 +37,10 @@ def overwrite_xtb_flag(mol):
         r'[N]~[C](~[N])~[N]',
         r'[n,N+]~[n,N+]',
         r'[SX4](=[OX1])(=[OX1])',
-        r'[#7]~[#6X3](=[#8])',
+        
         # r'c(~[#7])(~[#7])',
     ]
+
     for smarts in smarts_complicated:
         pattern = Chem.MolFromSmarts(smarts)
         found, _ = match_pattern(mol, pattern)
@@ -63,8 +64,10 @@ def preprocess(
         smiles_raw: str, 
         tautomer_search: bool = False,
         max_tautomers: int = 100,
+        use_xtb: bool = False,
         xtb_optimize: bool = False,
-        num_confs: int = 10
+        num_confs: int = 10,
+        tautomer_debug: bool = False,
     ) -> tuple[Mol,  str]:
     """ 
     Construct and standardize an RDKit molecule from a SMILES string.
@@ -99,15 +102,32 @@ def preprocess(
     logger.debug(smiles)
 
     if tautomer_search:
-        if overwrite_xtb_flag(mol):
-            print('Complicated tautomers found, forcing xtb_optimize to True.')
-            logger.info('Complicated tautomers found, forcing xtb_optimize to True.')
-            xtb_optimize = True
-            num_confs = 50
-   
-        smiles = best_tautomer_smiles(smiles, max_tautomers=max_tautomers, xtb_optimize=xtb_optimize,
-                                      num_confs=num_confs)
-        # print(smiles)
+        # veto = False
+        # smarts_veto = [
+        #     r'[#7]~[#6X3](=[#8])',
+        # ]
+
+        # for smarts in smarts_veto:
+        #     pattern = Chem.MolFromSmarts(smarts)
+        #     found, _ = match_pattern(mol, pattern)
+        #     if found:
+        #         veto = True # overwrite to more advance tautomer search
+
+        # if veto:
+        #     print('Found veto smarts, not optimizing.')
+        # else:
+        # if overwrite_xtb_flag(mol) and use_xtb:
+            # print('Complicated tautomers found, forcing xtb_optimize to True.')
+            # logger.info('Complicated tautomers found, forcing xtb_optimize to True.')
+            # xtb_optimize = True
+
+        smiles = best_tautomer_smiles(
+            smiles,
+            max_tautomers=max_tautomers,
+            use_xtb=use_xtb,
+            xtb_optimize=xtb_optimize,
+            num_confs=num_confs,
+            debug=tautomer_debug)
     mol = Chem.MolFromSmiles(smiles, sanitize=True)
 
     logger.debug('Formal charges before cleanup')
@@ -596,7 +616,7 @@ def combine_pkas_macro(
                             freq1 += freq
                         else:
                             freq2 += freq
-                    print(pH, freq1, freq2)
+                    # print(pH, freq1, freq2)
                     # freq1 = freqs_macro[:q+1]
                     # freq2 = freqs_macro[q+1:]
                 else:
@@ -653,8 +673,10 @@ class Autoprot:
     device: str = 'cpu' # fixed!
     tautomer_search: bool = False
     max_tautomers: int = 100
-    xtb_optimize: bool = False
+    use_xtb: int = False
+    xtb_optimize: bool = True
     num_confs: int = 10
+    tautomer_debug: bool = False
     macro_cumulative: bool = False
 
     def run_single(self, pH: float = 7.0) -> None:
@@ -940,8 +962,10 @@ class Autoprot:
             self.smiles,
             tautomer_search=self.tautomer_search,
             max_tautomers=self.max_tautomers,
+            use_xtb=self.use_xtb,
             xtb_optimize=self.xtb_optimize,
-            num_confs=self.num_confs)
+            num_confs=self.num_confs,
+            tautomer_debug=self.tautomer_debug)
 
         self.charged_indices = special_cases.find_charged(self.mol0)
         self.exclude_base_indices, self.exclude_acid_indices = special_cases.add_exclusions(self.mol0)
