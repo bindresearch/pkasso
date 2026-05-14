@@ -284,18 +284,17 @@ def prepare_tautomer_conformers(
 
     return mol, conf_energies
 
-
 def best_tautomer_smiles(
     smiles,
-    max_tautomers=100,
-    num_confs=10,
-    use_xtb=False,
-    top_n_xtb=10,
-    num_xtb_confs: int = 3,
-    xtb_optimize=False,
-    rdkit_score_window=2,
-    temperature=DEFAULT_TEMPERATURE_K,
-    debug=False,
+    max_tautomers: int = 20, # max number of tautomers for rdkit
+    max_tautomers_xtb: int = 10, # max number of tautomers for xtb
+    num_confs: int = 10, # conformations per tautomer (rdkit)
+    use_xtb: bool = False,
+    num_xtb_confs: int = 3, # top conformations per tautomer (xtb)
+    xtb_optimize: bool = True,
+    rdkit_score_window: int = 2,
+    temperature: float = DEFAULT_TEMPERATURE_K,
+    debug: bool = False,
 ):
     """Return a chemically plausible low-energy tautomer.
 
@@ -305,7 +304,6 @@ def best_tautomer_smiles(
     conformer ensemble free energy. Set ``rdkit_score_window=None`` to recover
     pure MMFF/xTB tautomer filtering.
     """
-
 
     mol = Chem.MolFromSmiles(smiles)
 
@@ -406,7 +404,7 @@ def best_tautomer_smiles(
 
     ranked.sort(key=lambda x: (-x["rdkit_score"], x["mmff_energy"]))
 
-    ranked = ranked[:top_n_xtb]
+    ranked = ranked[:max_tautomers_xtb]
 
     if len(ranked) == 0:
         return smiles

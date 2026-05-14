@@ -572,7 +572,6 @@ def calc_macro_props(
 def combine_pkas_macro(
     pHs: NDArray[np.float64],
     freqs_macro_all: list[dict[int, float]],
-    cumulative=False,
 ) -> dict[int, float]:
     """
     Estimate macrostate pKa values from charge-resolved frequency data.
@@ -608,20 +607,8 @@ def combine_pkas_macro(
         qs_sorted = sorted(freqs_macro.keys())
         for q in qs_sorted:
             if q+1 in qs_sorted:
-                if cumulative:
-                    freq1 = 0.
-                    freq2 = 0.
-                    for key, freq in freqs_macro.items():
-                        if key <= q:
-                            freq1 += freq
-                        else:
-                            freq2 += freq
-                    # print(pH, freq1, freq2)
-                    # freq1 = freqs_macro[:q+1]
-                    # freq2 = freqs_macro[q+1:]
-                else:
-                    freq1 = freqs_macro[q]
-                    freq2 = freqs_macro[q+1]
+                freq1 = freqs_macro[q]
+                freq2 = freqs_macro[q+1]
                 pka_macro = np.log10(freq2/freq1) + pH
                 pka_weight = 1./(freq1**2 + freq2**2)
                 if q in pkas_macro:
@@ -664,7 +651,7 @@ class Autoprot:
     name: str = 'molecule'
     
     # Internal options
-    cutoff_states: int = 4000
+    cutoff_states: int = 1000
     sfreq_cutoff_individual: float = 0.01
     sfreq_cutoff_combined: float = 0.001
     cutoff_export: float = 0.2
@@ -677,7 +664,6 @@ class Autoprot:
     xtb_optimize: bool = True
     num_confs: int = 10
     tautomer_debug: bool = False
-    macro_cumulative: bool = False
 
     def run_single(self, pH: float = 7.0) -> None:
         """
@@ -878,7 +864,7 @@ class Autoprot:
 
         self.net_charges_arr = np.round(np.array(self.net_charges),decimals=4)
 
-        self.pkas_macro = combine_pkas_macro(self.pHs, self.freqs_macro_all, cumulative=self.macro_cumulative)
+        self.pkas_macro = combine_pkas_macro(self.pHs, self.freqs_macro_all)
 
         if self.state_freqs_all:
             self.calc_relevant_states()
