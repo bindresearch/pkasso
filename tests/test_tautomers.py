@@ -53,6 +53,7 @@ def test_rdkit_score_prior_can_be_disabled(monkeypatch):
         tautomers.best_tautomer_smiles(
             smiles,
             num_confs=1,
+            use_xtb=True,
             rdkit_score_window=None,
         )
         == "O=C(N=C(O)c1ccccc1)c1ccccc1"
@@ -78,6 +79,133 @@ def test_single_surviving_rdkit_tautomer_skips_xtb(monkeypatch):
     )
 
 
+def test_imidic_acid_filter_overrides_wide_rdkit_window(monkeypatch):
+    tautomers = load_tautomers_module()
+
+    def mock_run_xtb(xyz_file, workdir, optimize=False):
+        raise AssertionError("xTB should not run after imidic acid filtering")
+
+    monkeypatch.setattr(tautomers, "run_xtb", mock_run_xtb)
+
+    assert (
+        tautomers.best_tautomer_smiles(
+            "NC(=O)c1ccccc1",
+            num_confs=1,
+            rdkit_score_window=5,
+        )
+        == "NC(=O)c1ccccc1"
+    )
+
+
+def test_imidic_acid_filter_handles_two_amides(monkeypatch):
+    tautomers = load_tautomers_module()
+
+    def mock_run_xtb(xyz_file, workdir, optimize=False):
+        raise AssertionError("xTB should not run after imidic acid filtering")
+
+    monkeypatch.setattr(tautomers, "run_xtb", mock_run_xtb)
+
+    assert (
+        tautomers.best_tautomer_smiles(
+            "NC(=O)C(N)=O",
+            num_confs=1,
+            rdkit_score_window=5,
+        )
+        == "NC(=O)C(N)=O"
+    )
+
+
+def test_thioimidic_acid_filter_overrides_wide_rdkit_window(monkeypatch):
+    tautomers = load_tautomers_module()
+
+    def mock_run_xtb(xyz_file, workdir, optimize=False):
+        raise AssertionError("xTB should not run after thioimidic acid filtering")
+
+    monkeypatch.setattr(tautomers, "run_xtb", mock_run_xtb)
+
+    assert (
+        tautomers.best_tautomer_smiles(
+            "NC(=S)c1ccccc1",
+            num_confs=1,
+            rdkit_score_window=5,
+        )
+        == "NC(=S)c1ccccc1"
+    )
+
+
+def test_thioimidic_acid_filter_handles_two_thioamides(monkeypatch):
+    tautomers = load_tautomers_module()
+
+    def mock_run_xtb(xyz_file, workdir, optimize=False):
+        raise AssertionError("xTB should not run after thioimidic acid filtering")
+
+    monkeypatch.setattr(tautomers, "run_xtb", mock_run_xtb)
+
+    assert (
+        tautomers.best_tautomer_smiles(
+            "NC(=S)C(N)=S",
+            num_confs=1,
+            rdkit_score_window=5,
+        )
+        == "NC(=S)C(N)=S"
+    )
+
+
+def test_hydroxamate_filter_prefers_carbonyl_over_hydroximic_acid(monkeypatch):
+    tautomers = load_tautomers_module()
+
+    def mock_run_xtb(xyz_file, workdir, optimize=False):
+        raise AssertionError("xTB should not run after hydroxamate filtering")
+
+    monkeypatch.setattr(tautomers, "run_xtb", mock_run_xtb)
+
+    assert (
+        tautomers.best_tautomer_smiles(
+            "O=C(NO)C1c2ccccc2Oc2ccccc21",
+            num_confs=1,
+            rdkit_score_window=1,
+        )
+        == "O=C(NO)C1c2ccccc2Oc2ccccc21"
+    )
+
+
+def test_hydroxamate_filter_runs_before_rdkit_score_window(monkeypatch):
+    tautomers = load_tautomers_module()
+
+    def mock_run_xtb(xyz_file, workdir, optimize=False):
+        raise AssertionError("xTB should not run after hydroxamate filtering")
+
+    monkeypatch.setattr(tautomers, "run_xtb", mock_run_xtb)
+
+    smiles = (
+        "CN1C(=O)N(C[C@H](C(=O)NO)[C@@H](CC2CCCC2)"
+        "C(=O)N2CCCCC2)C(=O)C1(C)C"
+    )
+
+    assert "C(=O)NO" in tautomers.best_tautomer_smiles(
+        smiles,
+        num_confs=1,
+        rdkit_score_window=1,
+    )
+
+
+def test_tautomer_debug_prints_candidates(capsys):
+    tautomers = load_tautomers_module()
+
+    tautomers.best_tautomer_smiles(
+        "O=C(NO)C1c2ccccc2Oc2ccccc21",
+        num_confs=1,
+        rdkit_score_window=1,
+        debug=True,
+    )
+
+    output = capsys.readouterr().out
+
+    assert "Tautomer candidates after MMFF preparation" in output
+    assert "Tautomer candidates after tautomer filters" in output
+    assert "hydroxamate" in output
+
+
 def test_xtb_evaluates_lowest_mmff_conformers(monkeypatch):
     tautomers = load_tautomers_module()
     xtb_inputs = []
@@ -91,6 +219,7 @@ def test_xtb_evaluates_lowest_mmff_conformers(monkeypatch):
     tautomers.best_tautomer_smiles(
         "NC(=O)c1ccccc1",
         num_confs=4,
+        use_xtb=True,
         num_xtb_confs=3,
         rdkit_score_window=None,
     )
@@ -142,6 +271,7 @@ def test_tautomer_ranking_uses_conformer_ensemble_free_energy(monkeypatch):
     assert (
         tautomers.best_tautomer_smiles(
             "NC(=O)c1ccccc1",
+            use_xtb=True,
             num_xtb_confs=4,
             rdkit_score_window=None,
         )
