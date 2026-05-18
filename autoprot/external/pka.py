@@ -8,7 +8,7 @@ from .descriptor import mol2vec
 from .ionization_group import get_ionization_aid
 from .net import GCNNet
 
-from autoprot.special_cases import match_pattern, oh_ring_sulfonate, has_nplus_base_proximity
+from autoprot.special_cases import match_smarts, oh_ring_sulfonate, has_nplus_base_proximity
 
 def load_model(model_file: Path, device: str = "cpu") -> GCNNet:
     """ Load molgpka ML torch model. """
@@ -69,8 +69,7 @@ def predict_acid_base(
 
         # smarts_NN = '[#7]~[#7]'
 
-        pattern_ncncO = Chem.MolFromSmarts('[n;r6][c;r6][nH;r6][c;r6](=O)')
-        _, matches_ncncO = match_pattern(mol_h, pattern_ncncO)
+        matches_ncncO = match_smarts(mol_h, '[n;r6][c;r6][nH;r6][c;r6](=O)')
 
         for at_idx, pka in base.items():
             atom = mol_h.GetAtomWithIdx(at_idx)
@@ -114,9 +113,7 @@ def predict_acid_base(
             print('acid heavy')
             print(acid)
 
-        pattern_ncS = Chem.MolFromSmarts('[n,nH,n+]~[c,C]~[S,s]')
-        _, matches_ncS = match_pattern(mol_h, pattern_ncS)
-
+        matches_ncS = match_smarts(mol_h, '[n,nH,n+]~[c,C]~[S,s]')
 
         smarts_OHcRO = [
             '[O;H1]-[C;R]~[C;R]~[C;R]([O-])',
@@ -132,8 +129,7 @@ def predict_acid_base(
             '[C](=O)([OH])~[#6]=[#6]~[C](=O)([O-])',
         ]
 
-        pattern_ncncO = Chem.MolFromSmarts('[n;r6][c;r6][nH;r6][c;r6](=O)')
-        _, matches_ncncO = match_pattern(mol_h, pattern_ncncO)
+        matches_ncncO = match_smarts(mol_h, '[n;r6][c;r6][nH;r6][c;r6](=O)')
 
         acid_curated = {} # atom mapping
         for at_idx, pka in acid.items():
@@ -148,8 +144,7 @@ def predict_acid_base(
 
             if atom.GetSymbol() == 'O':
                 for smarts in smarts_OHcRO:
-                    pattern = Chem.MolFromSmarts(smarts)
-                    _, matches = match_pattern(mol_h, pattern)
+                    matches = match_smarts(mol_h, smarts)
                     for match in matches:
                         if (at_idx in match):
                             pka += 3.#3.
@@ -159,15 +154,13 @@ def predict_acid_base(
                     pka += 4
 
                 for smarts in smarts_carbox_close:
-                    pattern = Chem.MolFromSmarts(smarts)
-                    _, matches = match_pattern(mol_h, pattern)
+                    matches = match_smarts(mol_h, smarts)
                     for match in matches:
                         if (at_idx in match):
                             pka += 2.
                             continue
 
-                pattern = Chem.MolFromSmarts(smarts_ON)
-                _, matches = match_pattern(mol_h, pattern)
+                matches = match_smarts(mol_h, smarts_ON)
                 for match in matches:
                     if (at_idx in match):
                         pka += 0. # 2. # 3.

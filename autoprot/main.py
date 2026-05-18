@@ -20,7 +20,7 @@ from .postprocess import combine_results
 from .transitions import calc_freqs_from_states, calc_state_diffs
 from .utils import pack_indices, pack_vec, unpack_vec
 from .tautomers import best_tautomer_smiles
-from .special_cases import match_pattern
+from .special_cases import match_smarts
 
 logger = logging.getLogger(__name__)
 RDLogger.DisableLog("rdApp.*") # type: ignore
@@ -42,9 +42,8 @@ def overwrite_xtb_flag(mol):
     ]
 
     for smarts in smarts_complicated:
-        pattern = Chem.MolFromSmarts(smarts)
-        found, _ = match_pattern(mol, pattern)
-        if found:
+        matches = match_smarts(mol, smarts)
+        if len(matches) > 0:
             return True # overwrite to more advance tautomer search
         
     ct_n = 0
@@ -659,7 +658,7 @@ class Autoprot:
     pH_band: float = 10.0
     device: str = 'cpu' # fixed!
     tautomer_search: bool = False
-    max_tautomers: int = 100
+    max_tautomers: int = 20
     use_xtb: int = False
     xtb_optimize: bool = True
     num_confs: int = 10

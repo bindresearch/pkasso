@@ -6,7 +6,7 @@ from typing import Any
 import numpy as np
 from numpy.typing import NDArray
 from rdkit import Chem
-from rdkit.Chem.rdchem import Mol
+from rdkit.Chem.rdchem import Mol, Atom
 from rdkit.Chem import rdmolops
 from collections import deque
 
@@ -15,15 +15,15 @@ from .utils import unpack_vec
 
 logger = logging.getLogger(__name__)
 
-def match_pattern(mol: Mol, pattern: Mol) -> tuple[bool, list[list[int]]]:
-    """ Match pattern in rdkit molecule.
+def match_smarts(mol: Mol, smarts: str) -> tuple[bool, tuple[tuple[int]]]:
+    """ Match smarts pattern in rdkit molecule.
     
     Parameters:
     -----------
     mol
         Rdkit molecule
-    pattern
-        Pattern mol to match.
+    smarts
+        smiles string to match.
 
     Returns
     -------
@@ -33,9 +33,11 @@ def match_pattern(mol: Mol, pattern: Mol) -> tuple[bool, list[list[int]]]:
         Atom indices for each match.
     """
 
-    found = mol.HasSubstructMatch(pattern)
+    pattern = Chem.MolFromSmarts(smarts)
+
+    # found = mol.HasSubstructMatch(pattern)
     matches = mol.GetSubstructMatches(pattern)
-    return found, matches
+    return matches
 
 def find_charged(mol: Mol) -> list[int]:
     """
@@ -57,6 +59,26 @@ def find_charged(mol: Mol) -> list[int]:
 
     return charged_indices
 
+def add_exclusion(mol: Mol, atom: Atom, smarts: str, atom_type: str | None = None) -> set[int]:
+    """
+    Add simple q_options exclusion based on smarts pattern
+    """
+
+    exclusion_map_ids: set[int] = set()
+
+    if atom_type:
+        if atom.GetSymbol() != atom_type:
+            return exclusion_map_ids # empty
+
+    map_idx = atom.GetAtomMapNum()
+    matches = match_smarts(mol, smarts)
+
+    for match in matches:
+        if atom.GetIdx() in match:
+            exclusion_map_ids.add(map_idx)
+    
+    return exclusion_map_ids
+
 def add_exclusions(mol: Mol) -> tuple[list[int], list[int]]:
     """ 
     Exclusions act on the q_options level. Exclusions are removed from consideration
@@ -72,131 +94,125 @@ def add_exclusions(mol: Mol) -> tuple[list[int], list[int]]:
 
     Returns
     -------
-    exclude_base_indices
+    exclude_base_map_ids
         Atom map indices for which protonation (base behavior) should
         be excluded.
-    exclude_acid_indices
+    exclude_acid_map_ids
         Atom map indices for which deprotonation (acid behavior) should
         be excluded.
     """
 
     q0s = np.array([at.GetFormalCharge() for at in mol.GetAtoms()]) # type: ignore
 
-    exclude_acid_indices: list[int] = []
-    exclude_base_indices: list[int] = []
-    mol_h = Chem.rdmolops.AddHs(mol)
+    exclude_acid_map_ids: set[int] = set()
+    exclude_base_map_ids: set[int] = set()
+    # mol_h = Chem.rdmolops.AddHs(mol)
 
-    # pattern_carbonyl = Chem.MolFromSmarts("NC(=O)")
-    # found_carbonyl, matches_carbonyl = match_pattern(mol,pattern_carbonyl)
-    pattern_imine = Chem.MolFromSmarts("NC(=N)")
-    found_imine, matches_imine = match_pattern(mol,pattern_imine)
-    pattern_sulfonamide = Chem.MolFromSmarts("NS(=O)(=O)")
-    found_sulfonamide, matches_sulfonamide = match_pattern(mol, pattern_sulfonamide)
-    pattern_diphenylamine = Chem.MolFromSmarts('N(c)c')
-    found_diphenylamine, matches_diphenylamine = match_pattern(mol, pattern_diphenylamine)
-    pattern_Ncnn = Chem.MolFromSmarts('Nc(n)n')
-    found_Ncnn, matches_Ncnn = match_pattern(mol, pattern_Ncnn)
-    pattern_Nccn = Chem.MolFromSmarts('Nc(c)n')
-    found_Nccn, matches_Nccn = match_pattern(mol, pattern_Nccn)
-    pattern_Ncc2 = Chem.MolFromSmarts('Nccn')
-    found_Nccn2, matches_Nccn2 = match_pattern(mol, pattern_Ncc2)
-    pattern_nnn = Chem.MolFromSmarts('nnn')
-    found_nnn, matches_nnn = match_pattern(mol, pattern_nnn)
-    pattern_ncnn = Chem.MolFromSmarts('ncnn')
-    found_ncnn, matches_ncnn = match_pattern(mol, pattern_ncnn)
-    # pattern_nco = Chem.MolFromSmarts('nco')
-    # found_nco, matches_nco = match_pattern(mol, pattern_nco)
-    pattern_cNO = Chem.MolFromSmarts('C=NO')
-    _, matches_cNO = match_pattern(mol, pattern_cNO)
-    pattern_NNC = Chem.MolFromSmarts('N-N=C')
-    _, matches_NNC = match_pattern(mol, pattern_NNC)
-    pattern_carbonyl = Chem.MolFromSmarts('[#7]~[#6X3](=[#8])')
-    found_carbonyl, matches_carbonyl = match_pattern(mol,pattern_carbonyl)
+    smarts_imine = "NC(=N)"
+    matches_imine = match_smarts(mol,smarts_imine)
+
+    smarts_sulfonamide = "NS(=O)(=O)"
+    matches_sulfonamide = match_smarts(mol, smarts_sulfonamide)
+
+    smarts_diphenylamine = 'N(c)c'
+    matches_diphenylamine = match_smarts(mol, smarts_diphenylamine)
+    smarts_Ncnn = 'Nc(n)n'
+    matches_Ncnn = match_smarts(mol, smarts_Ncnn)
+    smarts_Nccn = 'Nc(c)n'
+    matches_Nccn = match_smarts(mol, smarts_Nccn)
+    smarts_Ncc2 = 'Nccn'
+    matches_Nccn2 = match_smarts(mol, smarts_Ncc2)
+    smarts_nnn = 'nnn'
+    matches_nnn = match_smarts(mol, smarts_nnn)
+    smarts_ncnn = 'ncnn'
+    matches_ncnn = match_smarts(mol, smarts_ncnn)
+    smarts_cNO = 'C=NO'
+    matches_cNO = match_smarts(mol, smarts_cNO)
+    smarts_NNC = 'N-N=C'
+    matches_NNC = match_smarts(mol, smarts_NNC)
+    smarts_carbonyl = '[#7]~[#6X3](=[#8])'
+    matches_carbonyl = match_smarts(mol,smarts_carbonyl)
     #
-    pattern_ONphos = Chem.MolFromSmarts('OC=NP(=O)(O)O')
-    _, matches_ONphos = match_pattern(mol, pattern_ONphos)
-    pattern_ONO = Chem.MolFromSmarts('[O]-[N+]([O-])')
-    _, matches_ONO = match_pattern(mol, pattern_ONO)
-    pattern_ONCO1 = Chem.MolFromSmarts('O=N-C=O')
-    _, matches_ONCO1 = match_pattern(mol, pattern_ONCO1)
-    pattern_ONCO2 = Chem.MolFromSmarts('C=C(N=O)O')
-    _, matches_ONCO2 = match_pattern(mol, pattern_ONCO2)
+    smarts_ONphos = 'OC=NP(=O)(O)O'
+    matches_ONphos = match_smarts(mol, smarts_ONphos)
+    smarts_ONO = '[O]-[N+]([O-])'
+    matches_ONO = match_smarts(mol, smarts_ONO)
+    smarts_ONCO1 = 'O=N-C=O'
+    matches_ONCO1 = match_smarts(mol, smarts_ONCO1)
+    smarts_ONCO2 = 'C=C(N=O)O'
+    matches_ONCO2 = match_smarts(mol, smarts_ONCO2)
 
     for at_idx, q in enumerate(q0s):
-        atom = mol_h.GetAtomWithIdx(at_idx)
+        atom = mol.GetAtomWithIdx(at_idx)
         map_idx = atom.GetAtomMapNum()
 
-        if q == 0:
-            # atom = mol_h.GetAtomWithIdx(at_idx)
-            if atom.GetSymbol() == 'O':
-                for match in matches_ONphos:
+        if q != 0:
+            continue
+        if atom.GetSymbol() == 'O':
+            for match in matches_ONphos:
+                if (atom.GetIdx() in match):
+                    correct_O = False
+                    neighbors = atom.GetNeighbors()
+                    for nbr in neighbors:
+                        if nbr.GetSymbol() == 'C':
+                            correct_O = True # O=CN part of the match
+                    if correct_O:
+                        exclude_acid_map_ids.add(map_idx)
+            for matches in [matches_ONO, matches_ONCO1, matches_ONCO2]:
+                for match in matches:
                     if (atom.GetIdx() in match):
-                        correct_O = False
-                        neighbors = atom.GetNeighbors()
-                        for nbr in neighbors:
-                            if nbr.GetAtomicNum() == 6:
-                                correct_O = True # O=CN part of the match
-                        if correct_O:
-                            if map_idx not in exclude_acid_indices:
-                                exclude_acid_indices.append(map_idx)
-                for matches in [matches_ONO, matches_ONCO1, matches_ONCO2]:
+                        exclude_acid_map_ids.add(map_idx)
+
+        exclusion_map_ids = add_exclusion(mol, atom, smarts_carbonyl, atom_type = 'N')
+        exclude_base_map_ids = exclude_base_map_ids | exclusion_map_ids
+
+        if atom.GetSymbol() == 'N':
+            for match in matches_carbonyl: # ...N-C(=O)...
+                if atom.GetIdx() in match:
+                    exclude_base_map_ids.add(map_idx)
+            if atom.GetIsAromatic():
+                if atom.GetDegree() == 3: # arom. N with lone pair needed for ring
+                    exclude_base_map_ids.add(map_idx)
+                for matches in [matches_nnn, matches_ncnn]:
                     for match in matches:
-                        if (atom.GetIdx() in match):
-                            if map_idx not in exclude_acid_indices:
-                                exclude_acid_indices.append(map_idx)
-                
-            if atom.GetSymbol() == 'N':
-                for match in matches_carbonyl: # ...N-C(=O)...
+                        if atom.GetIdx() in match:
+                            exclude_base_map_ids.add(map_idx)
+            else:
+                for match in matches_imine: # ...N-C(=N)...
                     if atom.GetIdx() in match:
-                        if map_idx not in exclude_base_indices:
-                            exclude_base_indices.append(map_idx)
-                        logger.debug('Excluding N next to carbonyl as base')
-                        logger.debug(at_idx, map_idx)
-                if atom.GetIsAromatic():
-                    if atom.GetDegree() == 3: # arom. N with lone pair needed for ring
-                        exclude_base_indices.append(map_idx)
-                    for matches in [matches_nnn, matches_ncnn]:
-                        for match in matches:
-                            if atom.GetIdx() in match:
-                                if map_idx not in exclude_base_indices:
-                                    exclude_base_indices.append(map_idx)
-                else:
-                    for match in matches_imine: # ...N-C(=N)...
-                        if atom.GetIdx() in match:
-                            accept = True
-                            for bond in atom.GetBonds(): # Find the correct of the two Ns
-                                if bond.GetBondType() == Chem.BondType.DOUBLE:
-                                    accept = False
-                            if accept:
-                                if map_idx not in exclude_base_indices:
-                                    exclude_base_indices.append(map_idx)
-                                logger.debug('Excluding N next to imine as base')
-                                logger.debug(at_idx, map_idx)
-                    for match in matches_sulfonamide:
-                        if atom.GetIdx() in match:
-                            if map_idx not in exclude_base_indices:
-                                exclude_base_indices.append(map_idx)
-                            logger.debug('Excluding N next to sulfonamide as base')
-                            logger.debug(at_idx, map_idx)
-                    for matches in [matches_diphenylamine, matches_Ncnn, matches_Nccn, matches_Nccn2, matches_cNO, matches_NNC]:
-                        for match in matches:
-                            if atom.GetIdx() in match:
-                                if map_idx not in exclude_base_indices:
-                                    exclude_base_indices.append(map_idx)
-                    # for match in matches_Ncnn:
-                    #     if atom.GetIdx() in match:
-                    #         if map_idx not in exclude_base_indices:
-                    #             exclude_base_indices.append(map_idx)
-                    # for match in matches_Nccn:
-                    #     if atom.GetIdx() in match:
-                    #         if map_idx not in exclude_base_indices:
-                    #             exclude_base_indices.append(map_idx)
+                        accept = True
+                        for bond in atom.GetBonds(): # Find the correct of the two Ns
+                            if bond.GetBondType() == Chem.BondType.DOUBLE:
+                                accept = False
+                        if accept:
+                            exclude_base_map_ids.add(map_idx)
 
-    exclude_base_indices = sorted(exclude_base_indices)
-    exclude_acid_indices = sorted(exclude_acid_indices)
+                for matches in [matches_sulfonamide, matches_diphenylamine, matches_Ncnn, matches_Nccn, matches_Nccn2, matches_cNO, matches_NNC]:
+                    for match in matches:
+                        if atom.GetIdx() in match:
+                            exclude_base_map_ids.add(map_idx)
 
-    return exclude_base_indices, exclude_acid_indices
-    
+    exclude_base_map_ids = sorted(exclude_base_map_ids)
+    exclude_acid_map_ids = sorted(exclude_acid_map_ids)
+
+    return exclude_base_map_ids, exclude_acid_map_ids
+
+# @dataclass
+# class BasePatch:
+#     mol: Mol
+#     smarts: str
+#     atom_type: str | None = None
+#     acid_base: 'acid'
+
+#     def apply_qoptions(self, mol: Mol, q_options: NDArray[np.int64]):
+#         """ Apply patch to q_options array corresponding to molecule mol"""
+
+
+
+#     add_exclusion(mol: Mol, atom: Atom, smarts: str, atom_type: str | None = None):
+
+
+
 def add_exceptions(mol: Mol) -> tuple[list[int], dict[int, list[int]]]:
     """
     Identify indices that should be treated as separate protonation clusters.
@@ -219,15 +235,15 @@ def add_exceptions(mol: Mol) -> tuple[list[int], dict[int, list[int]]]:
     NphenNOO_indices = []
     # n_poor_arom_indices = []
 
-    pattern_NphenNOO = Chem.MolFromSmarts("Ncccc([N+](=O)[O-])")
-    found_NphenNOO, matches_NphenNOO = match_pattern(mol,pattern_NphenNOO)
+    smarts_NphenNOO = "Ncccc([N+](=O)[O-])"
+    matches_NphenNOO = match_smarts(mol,smarts_NphenNOO)
 
-    # patterns_n_poor_arom = [Chem.MolFromSmarts('nnn'), Chem.MolFromSmarts('nncn')]
+    # smartss_n_poor_arom = [Chem.MolFromSmarts('nnn'), Chem.MolFromSmarts('nncn')]
     #     #'[n;$(n1nnnn1),$(n1nnncn1),$(n1nncn1),$(n1cnnn1)]') # '[n]1[n,n][n,n][n,n][n,n]1'
     # matches_n_poor_arom = []
 
-    # for pattern_n_poor_arom in patterns_n_poor_arom:
-    #     found_n_poor_arom, m_tmp = match_pattern(mol,pattern_n_poor_arom)
+    # for smarts_n_poor_arom in smartss_n_poor_arom:
+    #     found_n_poor_arom, m_tmp = match_smarts(mol,smarts_n_poor_arom)
     #     if len(m_tmp) > 0:
     #         for m in m_tmp:
     #             matches_n_poor_arom.append(m)
@@ -289,9 +305,8 @@ def has_phosphate(mol: Mol) -> tuple[bool, dict[int, list[int]]]:
         atom map indices.
     """
 
-    pattern = Chem.MolFromSmarts("P(=O)(O)(O)")
-
-    found, matches = match_pattern(mol,pattern)
+    smarts = "P(=O)(O)(O)"
+    matches = match_smarts(mol,smarts)
 
     phosphate_groups: dict[int, list[int]] = {}
 
@@ -311,6 +326,7 @@ def has_phosphate(mol: Mol) -> tuple[bool, dict[int, list[int]]]:
                 if oh_map_idx not in phosphate_groups[p_map_idx]:
                     phosphate_groups[p_map_idx].append(oh_map_idx)
 
+    found = len(matches) > 0
     return found, phosphate_groups
 
 def split_exceptions(
