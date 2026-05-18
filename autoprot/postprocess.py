@@ -133,38 +133,6 @@ def combine_results(
     molecule = Molecule(name, microstates)
     return molecule
 
-# def df_from_mols(mols):
-    # pass
-    # def to_pandas(self) -> pd.DataFrame:
-    #     df = pd.DataFrame()
-    #     for name, molecule in self.molecules.items():
-    #         for m in molecule.microstates:
-    #             df.loc[m.name_state,'name'] = m.name
-    #             df.loc[m.name_state,'SMILES'] = m.smiles
-    #             df.loc[m.name_state,'frequency'] = m.freq
-    #             df.loc[m.name_state,'q'] = m.q
-    #     df.index.rename('name_state', inplace=True)
-    #     return df
-
-# @dataclass
-# class Batch:
-#     """
-#     Store the outputs of an autoprot batch processing run.
-#     """
-
-#     molecules: dict[str, Molecule]
-
-#     def to_pandas(self) -> pd.DataFrame:
-#         df = pd.DataFrame()
-#         for name, molecule in self.molecules.items():
-#             for m in molecule.microstates:
-#                 df.loc[m.name_state,'name'] = m.name
-#                 df.loc[m.name_state,'SMILES'] = m.smiles
-#                 df.loc[m.name_state,'frequency'] = m.freq
-#                 df.loc[m.name_state,'q'] = m.q
-#         df.index.rename('name_state', inplace=True)
-#         return df
-
 @dataclass
 class Scan:
     """ 

@@ -26,9 +26,6 @@ def calc_p_up_down(
     pka: float,
     pH: float,
     matrix_def: str,
-    # q_up: int,
-    # q_down: int,
-    # alpha_q: float = 0.0,
 ) -> tuple[float, float]:
     """Compute upward/downward transition values from a pKa at given pH.
 
