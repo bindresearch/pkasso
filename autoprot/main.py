@@ -143,8 +143,8 @@ def find_candidate_sites(
         exclude_base_indices: list[int],
         exclude_acid_indices: list[int],
         charged_indices: list[int],
-        except_indices: list[int],
-        except_q_options: NDArray[np.int64],
+        # except_indices: list[int],
+        # except_q_options: NDArray[np.int64],
         pH: float,
         pH_band: float = 8.,
 ) -> tuple[list[int], NDArray[np.int64]]:
@@ -211,13 +211,13 @@ def find_candidate_sites(
                     q_options[rel_idx,0] = 1 # allow deprotonation
 
     # Add indices that should be considered but not recognized by molgpka
-    for map_idx, q_option in zip(except_indices, except_q_options):
-        if map_idx not in indices:
-            indices.append(map_idx)
-            q_options = np.append(q_options, q_option)
-        else:
-            rel_idx = indices.index(map_idx)
-            q_options[rel_idx] = q_option # overwrite q_option if already present
+    # for map_idx, q_option in zip(except_indices, except_q_options):
+    #     if map_idx not in indices:
+    #         indices.append(map_idx)
+    #         q_options = np.append(q_options, q_option)
+    #     else:
+    #         rel_idx = indices.index(map_idx)
+    #         q_options[rel_idx] = q_option # overwrite q_option if already present
        
     ps = np.argsort(indices)
     indices = [indices[p] for p in ps]
@@ -725,34 +725,32 @@ class Autoprot:
 
         self.charged_indices = special_cases.find_charged(self.mol0)
         self.exclude_base_indices, self.exclude_acid_indices = special_cases.add_exclusions(self.mol0)
-        self.except_indices, self.except_q_options = special_cases.add_except_indices(self.mol0)
+        # self.except_indices, self.except_q_options = special_cases.add_except_indices(self.mol0)
 
         logger.debug('Processed:')
         logger.debug(self.smiles0)
         logger.debug(f'Exclude base indices: {self.exclude_base_indices}')
         logger.debug(f'Exclude acid indices: {self.exclude_acid_indices}')
-        logger.debug(f'Except indices: {self.except_indices}')
+        # logger.debug(f'Except indices: {self.except_indices}')
        
         self.base0, self.acid0 = predict_acid_base(self.mol0,
                                          self.model_base,self.model_acid,
                                          device=self.device) # returns pkas for map indices
 
-        # print(self.base0)
-        # print(self.acid0)
+        # print(self.exclude_base_indices)
 
         self.indices0, self.q_options0 = find_candidate_sites(
                 self.base0, self.acid0, self.exclude_base_indices, self.exclude_acid_indices,
-                self.charged_indices, self.except_indices, self.except_q_options,
+                self.charged_indices, # self.except_indices, self.except_q_options,
                 0., pH_band=100)
+        
+        # print(self.q_options0)
 
         # self.indices0 = list(sorted(self.indices0))
         self.indices0_str = pack_indices(self.indices0)
 
-        # print(self.indices0)
-
         # Screen coupling between residues, now pH independent
         self.clusters = self.screen_clusters(self.indices0, self.q_options0)
-        # print(self.clusters)
         logger.debug(f'Clusters: {self.clusters}')
 
     def _calc_microstates(self, pH: float
@@ -1116,6 +1114,11 @@ class Autoprot:
 
         state_vecs = coupling.construct_state_vectors_single(indices, q_options)
         state_strs = utils.calc_state_strs(state_vecs)
+
+        # print(indices)
+        # print(state_strs)
+        # print(q_options)
+
         self.construct_mols(state_strs, state_vecs, indices)
         self.run_acid_base_calcs(state_strs, state_vecs, indices)
 

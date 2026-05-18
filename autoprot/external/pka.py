@@ -56,7 +56,7 @@ def get_acid_neighbors(mol_h: Mol, acid: dict[int, float], verbose: bool = False
             acid_heavy[neighbor_map_idx] = pka
     return acid_heavy
 
-def predict_base(mol_h: Mol, model_base: GCNNet, device: str = "cpu"
+def predict_base(mol_h: Mol, model_base: GCNNet, device: str = "cpu", use_map_idx=True,
 ) -> dict[int, float]:
     """ Predict base pKas with molgpka model. """
   
@@ -64,10 +64,12 @@ def predict_base(mol_h: Mol, model_base: GCNNet, device: str = "cpu"
     base_res = {}
     for aid in base_idxs:
         atom = mol_h.GetAtomWithIdx(aid)
-        map_idx = atom.GetAtomMapNum()
-
         bpka = model_pred(mol_h, aid, model_base, device=device)
-        base_res.update({map_idx:bpka}) # changed!
+        if use_map_idx:
+            map_idx = atom.GetAtomMapNum()       
+            base_res.update({map_idx:bpka}) # changed!
+        else:
+            base_res.update({aid:bpka}) # changed!
     return base_res
 
 def predict_acid_base(
@@ -158,6 +160,7 @@ def predict_acid_base(
             if (atom.GetSymbol() == 'N') and not (atom.GetIsAromatic()):
                 for match in matches_NphenNOO:
                     if (at_idx in match):
+                        # print('found',smarts_NphenNOO)
                         pka = 2.0
 
             # none of the added hydrogens should be considered here
@@ -172,6 +175,9 @@ def predict_acid_base(
 
             # pka -= 2.
             if pka is not None:
+                # print(pka)
+                if map_idx == 0:
+                    raise
                 base_curated[map_idx] = pka
         if verbose:
             print('base')
@@ -214,10 +220,10 @@ def predict_acid_base(
 
         phosphate_found, phosphate_groups = has_phosphate(mol)
         
-        print('-'*20)
-        print(Chem.MolToSmiles(mol))
-        print(phosphate_found)
-        print(phosphate_groups)
+        # print('-'*20)
+        # print(Chem.MolToSmiles(mol))
+        # print(phosphate_found)
+        # print(phosphate_groups)
 
         for at_idx, q in zip(atom_indices, qs):
             if q != 0.:
@@ -278,8 +284,10 @@ def predict_acid_base(
                     #     if (at_idx in match):
                     #         pka += 0. # 2. # 3.
                     #         continue
-                    print(pka)
+                    # print(pka)
             if pka is not None:
+                if map_idx == 0:
+                    raise
                 acid_curated[map_idx] = pka
         # if verbose:
         # print('acid curated')
