@@ -1,7 +1,6 @@
 from pathlib import Path
 
 import torch
-from rdkit import Chem
 from rdkit.Chem.rdchem import Mol
 
 from .descriptor import mol2vec

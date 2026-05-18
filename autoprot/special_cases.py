@@ -187,7 +187,14 @@ def add_exclusions(mol: Mol) -> tuple[list[int], list[int]]:
                         if accept:
                             exclude_base_map_ids.add(map_idx)
 
-                for matches in [matches_sulfonamide, matches_diphenylamine, matches_Ncnn, matches_Nccn, matches_Nccn2, matches_cNO, matches_NNC]:
+                for matches in [
+                    matches_sulfonamide,
+                    matches_diphenylamine,
+                    matches_Ncnn, matches_Nccn,
+                    matches_Nccn2,
+                    matches_cNO,
+                    matches_NNC
+                    ]:
                     for match in matches:
                         if atom.GetIdx() in match:
                             exclude_base_map_ids.add(map_idx)
