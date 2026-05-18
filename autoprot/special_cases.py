@@ -167,11 +167,15 @@ def add_exclusions(mol: Mol) -> tuple[list[int], list[int]]:
         exclude_base_map_ids = exclude_base_map_ids | exclusion_map_ids
 
         if atom.GetSymbol() == 'N':
-            for match in matches_carbonyl: # ...N-C(=O)...
-                if atom.GetIdx() in match:
-                    exclude_base_map_ids.add(map_idx)
+            # print(atom.GetIsAromatic(), atom.GetDegree())
+            # for match in matches_carbonyl: # ...N-C(=O)...
+                # if atom.GetIdx() in match:
+                    # exclude_base_map_ids.add(map_idx)
             if atom.GetIsAromatic():
-                if atom.GetDegree() == 3: # arom. N with lone pair needed for ring
+                if (atom.GetTotalNumHs() > 0) or (atom.GetDegree() == 3):
+                # if atom.GetTotalValence() == 3:
+                # if atom.GetDegree() == 3: # arom. N with lone pair needed for ring
+                    # print(f'found n contributing to ring: {map_idx}')
                     exclude_base_map_ids.add(map_idx)
                 for matches in [matches_nnn, matches_ncnn]:
                     for match in matches:
@@ -215,51 +219,51 @@ def add_exclusions(mol: Mol) -> tuple[list[int], list[int]]:
 #         """ Apply patch to q_options array corresponding to molecule mol"""
 #     add_exclusion(mol: Mol, atom: Atom, smarts: str, atom_type: str | None = None):
 
-def add_except_indices(mol: Mol) -> tuple[list[int], dict[int, list[int]]]:
-    """
-    Identify indices that should be treated as separate protonation clusters.
+# def add_except_indices(mol: Mol) -> tuple[list[int], dict[int, list[int]]]:
+#     """
+#     Identify indices that should be treated as separate protonation clusters.
 
-    Exceptions decouple specific sites from the normal clustering procedure. 
-    This is used for cases such as special functional groups
-    (e.g., phosphates) that require dedicated treatment.
+#     Exceptions decouple specific sites from the normal clustering procedure. 
+#     This is used for cases such as special functional groups
+#     (e.g., phosphates) that require dedicated treatment.
 
-    Returns
-    -------
-    except_indices
-        Atom map indices that should be removed from normal clustering.
-    """
+#     Returns
+#     -------
+#     except_indices
+#         Atom map indices that should be removed from normal clustering.
+#     """
 
-    except_indices = []
-    except_q_options = []
+#     except_indices = []
+#     except_q_options = []
 
-    smarts_NphenNOO = "Ncccc([N+](=O)[O-])"
-    matches_NphenNOO = match_smarts(mol,smarts_NphenNOO)
+#     smarts_NphenNOO = "Ncccc([N+](=O)[O-])"
+#     matches_NphenNOO = match_smarts(mol,smarts_NphenNOO)
 
-    q0s = np.array([at.GetFormalCharge() for at in mol.GetAtoms()]) # type: ignore
-    for at_idx, q in enumerate(q0s):
-        atom = mol.GetAtomWithIdx(at_idx) 
-        map_idx = atom.GetAtomMapNum()
+#     q0s = np.array([at.GetFormalCharge() for at in mol.GetAtoms()]) # type: ignore
+#     for at_idx, q in enumerate(q0s):
+#         atom = mol.GetAtomWithIdx(at_idx) 
+#         map_idx = atom.GetAtomMapNum()
 
-        if (atom.GetSymbol() == 'N') and (q == 0.) and not (atom.GetIsAromatic()):
-            for match in matches_NphenNOO:
-                if atom.GetIdx() in match:
-                    if map_idx not in except_indices:
-                        except_indices.append(map_idx)
-                        except_q_options.append([0, 1, 1]) # allow protonation
+#         if (atom.GetSymbol() == 'N') and (q == 0.) and not (atom.GetIsAromatic()):
+#             for match in matches_NphenNOO:
+#                 if atom.GetIdx() in match:
+#                     if map_idx not in except_indices:
+#                         except_indices.append(map_idx)
+#                         except_q_options.append([0, 1, 1]) # allow protonation
 
-    phosphate_found, phosphate_groups = has_phosphate(mol) # returns map indices
+#     phosphate_found, phosphate_groups = has_phosphate(mol) # returns map indices
 
-    if phosphate_found:
-        for p_idx, oh_ids in phosphate_groups.items():
-            oh_ids = sorted(oh_ids)
-            for map_idx in oh_ids:
-                if map_idx not in except_indices:
-                    except_indices.append(map_idx)
-                    except_q_options.append([1, 1, 0]) # allow deprotonation
+#     if phosphate_found:
+#         for p_idx, oh_ids in phosphate_groups.items():
+#             oh_ids = sorted(oh_ids)
+#             for map_idx in oh_ids:
+#                 if map_idx not in except_indices:
+#                     except_indices.append(map_idx)
+#                     except_q_options.append([1, 1, 0]) # allow deprotonation
 
-    except_q_options = np.array(except_q_options)
+#     except_q_options = np.array(except_q_options)
 
-    return except_indices, except_q_options
+#     return except_indices, except_q_options
 
 # def add_exceptions(mol: Mol) -> tuple[list[int], dict[int, list[int]]]:
 #     """
@@ -357,34 +361,34 @@ def has_phosphate(mol: Mol) -> tuple[bool, dict[int, list[int]]]:
     found = len(matches) > 0
     return found, phosphate_groups
 
-def split_exceptions(
-        indices: list[int],
-        q_options: NDArray[np.int64],
-        except_indices: list[int],
-) -> tuple[list[int], NDArray[np.int64]]:
-    """
-    Remove exception indices from candidate protonation sites.
+# def split_exceptions(
+#         indices: list[int],
+#         q_options: NDArray[np.int64],
+#         except_indices: list[int],
+# ) -> tuple[list[int], NDArray[np.int64]]:
+#     """
+#     Remove exception indices from candidate protonation sites.
 
-    Filters the list of candidate indices and their corresponding
-    protonation options by removing sites that are handled separately
-    (e.g., special functional groups).
+#     Filters the list of candidate indices and their corresponding
+#     protonation options by removing sites that are handled separately
+#     (e.g., special functional groups).
 
-    Returns
-    -------
-    indices_curated
-        Filtered list of atom map indices.
-    q_options_curated
-        Protonation option matrix corresponding to the curated indices.
-    """
+#     Returns
+#     -------
+#     indices_curated
+#         Filtered list of atom map indices.
+#     q_options_curated
+#         Protonation option matrix corresponding to the curated indices.
+#     """
 
-    indices_curated = []
-    q_options_curated = []
-    for map_idx, q_option in zip(indices, q_options):
-        if map_idx not in except_indices:
-            indices_curated.append(map_idx)
-            q_options_curated.append(q_option)
-    q_options_curated_arr = np.array(q_options_curated)
-    return indices_curated, q_options_curated_arr
+#     indices_curated = []
+#     q_options_curated = []
+#     for map_idx, q_option in zip(indices, q_options):
+#         if map_idx not in except_indices:
+#             indices_curated.append(map_idx)
+#             q_options_curated.append(q_option)
+#     q_options_curated_arr = np.array(q_options_curated)
+#     return indices_curated, q_options_curated_arr
 
 def calc_phosphate_clusters(
     phosphate_groups: dict[int, list[int]],
