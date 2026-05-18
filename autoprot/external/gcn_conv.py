@@ -1,12 +1,15 @@
+from typing import Any, Optional, Tuple
+
 import torch
+from torch import Tensor
 from torch.nn import Parameter
-from torch_geometric.nn.conv import MessagePassing
-from torch_geometric.utils import add_remaining_self_loops
+from torch_geometric.nn.conv import MessagePassing  # type: ignore
+from torch_geometric.utils import add_remaining_self_loops  # type: ignore
 
 from .inits import glorot, zeros
 from .scatter import scatter_add
 
-class GCNConv(MessagePassing):
+class GCNConv(MessagePassing): # type: ignore
     r"""The graph convolutional operator from the `"Semi-supervised
     Classification with Graph Convolutional Networks"
     <https://arxiv.org/abs/1609.02907>`_ paper
@@ -37,12 +40,20 @@ class GCNConv(MessagePassing):
             :class:`torch_geometric.nn.conv.MessagePassing`.
     """
 
-    def __init__(self, in_channels, out_channels, improved=False, cached=False,
-                 bias=True, **kwargs):
+    def __init__(
+            self,
+            in_channels: int,
+            out_channels: int,
+            improved: bool = False,
+            cached: bool = False,
+            bias: bool = True,
+            **kwargs: Any
+    ) -> None:
         super(GCNConv, self).__init__(aggr='add', **kwargs)
 
         self.in_channels = in_channels
         self.out_channels = out_channels
+
         self.improved = improved
         self.cached = cached
 
@@ -55,15 +66,26 @@ class GCNConv(MessagePassing):
 
         self.reset_parameters()
 
-    def reset_parameters(self):
+    def reset_parameters(self) -> None:
         glorot(self.weight)
         zeros(self.bias)
-        self.cached_result = None
-        self.cached_num_edges = None
+        self.cached_result: Any = None
+        self.cached_num_edges: Any = None
 
     @staticmethod
-    def norm(edge_index, num_nodes, edge_weight=None, improved=False,
-             dtype=None):
+    def norm(
+        edge_index: Tensor,
+        num_nodes: int,
+        edge_weight: Optional[Tensor] = None,
+        improved: bool = False,
+        dtype: Optional[torch.dtype] = None,
+    ) -> Tuple[Tensor, Tensor]:
+        if edge_weight is None:
+            edge_weight = torch.ones(
+                (edge_index.size(1),),
+                dtype=dtype,
+                device=edge_index.device,
+            )
         if edge_weight is None:
             edge_weight = torch.ones((edge_index.size(1), ), dtype=dtype,
                                      device=edge_index.device)
@@ -73,13 +95,14 @@ class GCNConv(MessagePassing):
             edge_index, edge_weight, fill_value, num_nodes)
 
         row, col = edge_index
+        assert edge_weight is not None
         deg = scatter_add(edge_weight, row, dim=0, dim_size=num_nodes)
         deg_inv_sqrt = deg.pow(-0.5)
         deg_inv_sqrt[deg_inv_sqrt == float('inf')] = 0
 
         return edge_index, deg_inv_sqrt[row] * edge_weight * deg_inv_sqrt[col]
 
-    def forward(self, x, edge_index, edge_weight=None):
+    def forward(self, x: Tensor, edge_index: Tensor, edge_weight: Optional[Tensor] = None) -> Any:
         """"""
         x = torch.matmul(x, self.weight)
 
@@ -93,22 +116,26 @@ class GCNConv(MessagePassing):
 
         if not self.cached or self.cached_result is None:
             self.cached_num_edges = edge_index.size(1)
-            edge_index, norm = self.norm(edge_index, x.size(0), edge_weight,
-                                         self.improved, x.dtype)
+            edge_index, norm = self.norm(
+                edge_index, x.size(0),
+                edge_weight,
+                self.improved,
+                x.dtype
+            )
             self.cached_result = edge_index, norm
 
         edge_index, norm = self.cached_result
 
         return self.propagate(edge_index, x=x, norm=norm)
 
-    def message(self, x_j, norm):
+    def message(self, x_j: Tensor, norm: Tensor) -> Tensor:
         return norm.view(-1, 1) * x_j
 
-    def update(self, aggr_out):
+    def update(self, aggr_out: Tensor) -> Tensor:
         if self.bias is not None:
             aggr_out = aggr_out + self.bias
         return aggr_out
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return '{}({}, {})'.format(self.__class__.__name__, self.in_channels,
                                    self.out_channels)
