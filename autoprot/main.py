@@ -759,7 +759,12 @@ class Autoprot:
         if (self.invalid_amine_map_idx > 0) and (self.invalid_amine_map_idx in self.indices0):
             pka = 10.4
             ss_lower = 1 # state_str 1 -> 2
-            state_strs_invalid_amine, state_freqs_invalid_amine = special_cases.calc_single_fixed_pka(pH,pka,ss_lower,self.matrix_def)
+            state_strs_invalid_amine, state_freqs_invalid_amine = special_cases.calc_single_fixed_pka(
+                pH,
+                pka,
+                ss_lower,
+                self.matrix_def
+            )
             state_strs_clusters.append(state_strs_invalid_amine)
             state_freqs_clusters.append(state_freqs_invalid_amine)
             indices_clusters.append([self.invalid_amine_map_idx])
@@ -768,7 +773,8 @@ class Autoprot:
             pka = 2.0
             ss_lower = 1
             for map_idx in self.NphenNOO_indices:
-                state_strs_NphenNOO, state_freqs_NphenNOO = special_cases.calc_single_fixed_pka(pH,pka,ss_lower,self.matrix_def)
+                state_strs_NphenNOO, state_freqs_NphenNOO = special_cases.calc_single_fixed_pka(
+                    pH,pka,ss_lower,self.matrix_def)
                 state_strs_clusters.append(state_strs_NphenNOO)
                 state_freqs_clusters.append(state_freqs_NphenNOO)
                 indices_clusters.append([map_idx])
@@ -954,7 +960,12 @@ class Autoprot:
 
         self.charged_indices = special_cases.find_charged(self.mol0)
         self.exclude_base_indices, self.exclude_acid_indices = special_cases.add_exclusions(self.mol0)
-        self.except_indices, self.phosphate_groups, self.invalid_amine_map_idx, self.NphenNOO_indices = special_cases.add_exceptions(self.mol0)
+
+        exc = special_cases.add_exceptions(self.mol0)
+        self.except_indices = exc[0]
+        self.phosphate_groups = exc[1]
+        self.invalid_amine_map_idx = exc[2]
+        self.NphenNOO_indices = exc[3] 
 
         logger.debug('Processed:')
         logger.debug(self.smiles0)

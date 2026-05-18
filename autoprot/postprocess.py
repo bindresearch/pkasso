@@ -11,7 +11,6 @@ from typing import Any
 import cairosvg  # type: ignore
 import matplotlib.pyplot as plt
 import numpy as np
-import pandas as pd
 from matplotlib.figure import Figure as Figure_plt
 from rdkit import Chem
 from rdkit.Chem import AllChem, Mol

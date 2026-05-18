@@ -8,7 +8,7 @@ version = "0.3.0"
 description = "Prediction of protonation states for small molecules"
 readme = "README.md"
 license = { text = "MIT" }
-requires-python = ">=3.7,<3.14"
+requires-python = ">=3.10,<3.14"
 authors = [
     { name = "Soeren von Buelow", email = "soeren.buelow@bindresearch.org" },
 ]

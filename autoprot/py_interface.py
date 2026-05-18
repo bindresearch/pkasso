@@ -1,6 +1,5 @@
 """High-level Python interface for running AutoProt predictions."""
 
-from pathlib import Path
 from typing import Any
 
 import numpy as np

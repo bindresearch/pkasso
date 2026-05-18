@@ -10,7 +10,7 @@ import click
 import numpy as np
 from numpy.typing import NDArray
 
-from .py_interface import batch_protonate, protonate, scan_pH
+from .py_interface import protonate, scan_pH
 from .utils import read_smi
 from .postprocess import save_sdf
 

@@ -6,8 +6,6 @@ import networkx as nx  # type: ignore
 import numpy as np
 from numpy.typing import NDArray
 from scipy.sparse import csr_matrix  # type: ignore
-from rdkit.Chem import GetFormalCharge
-from rdkit.Chem.rdchem import Mol
 
 from .utils import pack_vec
 
