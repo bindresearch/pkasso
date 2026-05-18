@@ -1,34 +1,31 @@
-from rdkit import Chem
-from rdkit.Chem import AllChem
-from rdkit import RDLogger
-RDLogger.DisableLog('rdApp.*')
-from rdkit.Chem import rdmolops
+from typing import Any
 
 import numpy as np
-from .ionization_group import get_ionization_aid
-
 import torch
-from torch_geometric.data import Data
+from rdkit import Chem
+from rdkit.Chem import AllChem
+from rdkit.Chem.rdchem import Mol
+from torch_geometric.data import Data  # type: ignore
 
-def one_hot(x, allowable_set):
+def one_hot(x: Any, allowable_set: list[Any]) -> list[bool]:
     if x not in allowable_set:
         x = allowable_set[-1]
     return list(map(lambda s: x == s, allowable_set))
 
-def get_bond_pair(mol):
-    bonds = mol.GetBonds()
-    res = [[],[]]
+def get_bond_pair(mol: Mol) -> list[list[int]]:
+    bonds = mol.GetBonds() # type: ignore
+    res: list[list[int]] = [[],[]]
     for bond in bonds:
         res[0] += [bond.GetBeginAtomIdx(), bond.GetEndAtomIdx()]
         res[1] += [bond.GetEndAtomIdx(), bond.GetBeginAtomIdx()]
     return res
 
-def get_atom_features(mol, aid):
-    AllChem.ComputeGasteigerCharges(mol)
+def get_atom_features(mol: Mol, aid: int) -> list[Any]:
+    AllChem.ComputeGasteigerCharges(mol) # type: ignore
     Chem.AssignStereochemistry(mol)
 
     acceptor_smarts_one = '[!$([#1,#6,F,Cl,Br,I,o,s,nX3,#7v5,#15v5,#16v4,#16v6,*+1,*+2,*+3])]'
-    acceptor_smarts_two = "[$([O,S;H1;v2;!$(*-*=[O,N,P,S])]),$([O,S;H0;v2]),$([O,S;-]),$([N;v3;!$(N-*=[O,N,P,S])]),n&H0&+0,$([o,s;+0;!$([o,s]:n);!$([o,s]:c:n)])]"
+    acceptor_smarts_two = "[$([O,S;H1;v2;!$(*-*=[O,N,P,S])]),$([O,S;H0;v2]),$([O,S;-]),$([N;v3;!$(N-*=[O,N,P,S])]),n&H0&+0,$([o,s;+0;!$([o,s]:n);!$([o,s]:c:n)])]"  # noqa: E501
     donor_smarts_one = "[$([N;!H0;v3,v4&+1]),$([O,S;H1;+0]),n&H1&+0]"
     donor_smarts_two = "[!$([#6,H0,-,-2,-3]),$([!H0;#7,#8,#9])]"
 
@@ -57,7 +54,7 @@ def get_atom_features(mol, aid):
     for atom_idx in range(mol.GetNumAtoms()):
         atom = mol.GetAtomWithIdx(atom_idx)
 
-        o = []
+        o: list[Any] = []
         o += one_hot(atom.GetSymbol(), ['C', 'H', 'O', 'N', 'S', 'Cl', 'F', 'Br', 'P',
                                         'I'])
         o += [atom.GetDegree()]
@@ -66,7 +63,8 @@ def get_atom_features(mol, aid):
                                                Chem.rdchem.HybridizationType.SP3,
                                                Chem.rdchem.HybridizationType.SP3D,
                                                Chem.rdchem.HybridizationType.SP3D2])
-        o += [atom.GetImplicitValence()]
+        # o += [atom.GetImplicitValence()]
+        o += [atom.GetValence(Chem.ValenceType.IMPLICIT)]
         o += [atom.GetIsAromatic()]
         o += [ring.IsAtomInRingOfSize(atom_idx, 3),
               ring.IsAtomInRingOfSize(atom_idx, 4),
@@ -90,7 +88,12 @@ def get_atom_features(mol, aid):
         m.append(o)
     return m
 
-def mol2vec(mol, atom_idx, evaluation=True, pka=None):
+def mol2vec(
+    mol: Mol,
+    atom_idx: int,
+    evaluation: bool = True,
+    pka: float | None = None,
+) -> Data:
     node_f = get_atom_features(mol, atom_idx)
     edge_index = get_bond_pair(mol)
     if evaluation:

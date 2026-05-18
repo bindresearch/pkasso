@@ -66,8 +66,9 @@ def test_find_candidate_sites(pH,pH_band,expected_indices,expected_q_options):
     }
     exclude_base_indices = []
     exclude_acid_indices = []
+    charged_indices = []
     indices, q_options = main.find_candidate_sites(
-        base, acid, exclude_base_indices, exclude_acid_indices, pH, pH_band=pH_band)
+        base, acid, exclude_base_indices, exclude_acid_indices, charged_indices, pH, pH_band=pH_band)
     assert (np.allclose(indices,expected_indices)) and (np.allclose(q_options,expected_q_options))
 
 def test_construct_state_vectors():
