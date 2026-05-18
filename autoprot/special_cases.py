@@ -11,7 +11,7 @@ from rdkit.Chem import rdmolops
 from collections import deque
 
 from .transitions import calc_freqs_from_states, calc_state_diffs
-from .utils import unpack_vec
+from .utils import unpack_vec, get_atom_with_map_idx
 
 logger = logging.getLogger(__name__)
 
@@ -213,14 +213,9 @@ def add_exclusions(mol: Mol) -> tuple[list[int], list[int]]:
 
 #     def apply_qoptions(self, mol: Mol, q_options: NDArray[np.int64]):
 #         """ Apply patch to q_options array corresponding to molecule mol"""
-
-
-
 #     add_exclusion(mol: Mol, atom: Atom, smarts: str, atom_type: str | None = None):
 
-
-
-def add_exceptions(mol: Mol) -> tuple[list[int], dict[int, list[int]]]:
+def add_except_indices(mol: Mol) -> tuple[list[int], dict[int, list[int]]]:
     """
     Identify indices that should be treated as separate protonation clusters.
 
@@ -232,68 +227,94 @@ def add_exceptions(mol: Mol) -> tuple[list[int], dict[int, list[int]]]:
     -------
     except_indices
         Atom map indices that should be removed from normal clustering.
-    phosphate_groups
-        Mapping from phosphate P atom map indices to their protonable OH
-        atom map indices.
     """
 
     except_indices = []
-
-    NphenNOO_indices = []
-    # n_poor_arom_indices = []
+    except_q_options = []
 
     smarts_NphenNOO = "Ncccc([N+](=O)[O-])"
     matches_NphenNOO = match_smarts(mol,smarts_NphenNOO)
 
-    # smartss_n_poor_arom = [Chem.MolFromSmarts('nnn'), Chem.MolFromSmarts('nncn')]
-    #     #'[n;$(n1nnnn1),$(n1nnncn1),$(n1nncn1),$(n1cnnn1)]') # '[n]1[n,n][n,n][n,n][n,n]1'
-    # matches_n_poor_arom = []
-
-    # for smarts_n_poor_arom in smartss_n_poor_arom:
-    #     found_n_poor_arom, m_tmp = match_smarts(mol,smarts_n_poor_arom)
-    #     if len(m_tmp) > 0:
-    #         for m in m_tmp:
-    #             matches_n_poor_arom.append(m)
-    # Except everything that couldn't be neutralized
     q0s = np.array([at.GetFormalCharge() for at in mol.GetAtoms()]) # type: ignore
     for at_idx, q in enumerate(q0s):
         atom = mol.GetAtomWithIdx(at_idx) 
         map_idx = atom.GetAtomMapNum()
-        # if q != 0.:
-            # logger.info(f'Input molecule is charged at idx {at_idx}, map_idx {map_idx}!')
-            # if map_idx not in except_indices:
-                # except_indices.append(map_idx)
 
         if (atom.GetSymbol() == 'N') and (q == 0.) and not (atom.GetIsAromatic()):
             for match in matches_NphenNOO:
                 if atom.GetIdx() in match:
                     if map_idx not in except_indices:
                         except_indices.append(map_idx)
-                        NphenNOO_indices.append(map_idx)
-        # if (atom.GetSymbol() == 'N') and (q == 0.) and (atom.GetIsAromatic()):
-        #     for match in matches_n_poor_arom:
-        #         if atom.GetIdx() in match:
-        #             if map_idx not in except_indices:
-        #                 except_indices.append(map_idx)
-        #                 n_poor_arom_indices.append(map_idx)
+                        except_q_options.append([0, 1, 1]) # allow protonation
 
     phosphate_found, phosphate_groups = has_phosphate(mol) # returns map indices
 
     if phosphate_found:
-        logger.debug(f'phosphate ids: {phosphate_groups}')
         for p_idx, oh_ids in phosphate_groups.items():
             oh_ids = sorted(oh_ids)
             for map_idx in oh_ids:
                 if map_idx not in except_indices:
                     except_indices.append(map_idx)
+                    except_q_options.append([1, 1, 0]) # allow deprotonation
 
-    invalid_amine_map_idx = has_invalid_amine(mol) # too short amine, breaks in molgpka
+    except_q_options = np.array(except_q_options)
 
-    if invalid_amine_map_idx > 0:
-        if invalid_amine_map_idx not in except_indices:
-            except_indices.append(invalid_amine_map_idx)
+    return except_indices, except_q_options
 
-    return except_indices, phosphate_groups, invalid_amine_map_idx, NphenNOO_indices#, n_poor_arom_indices
+# def add_exceptions(mol: Mol) -> tuple[list[int], dict[int, list[int]]]:
+#     """
+#     Identify indices that should be treated as separate protonation clusters.
+
+#     Exceptions decouple specific sites from the normal clustering procedure. 
+#     This is used for cases such as special functional groups
+#     (e.g., phosphates) that require dedicated treatment.
+
+#     Returns
+#     -------
+#     except_indices
+#         Atom map indices that should be removed from normal clustering.
+#     phosphate_groups
+#         Mapping from phosphate P atom map indices to their protonable OH
+#         atom map indices.
+#     """
+
+#     except_indices = []
+
+#     NphenNOO_indices = []
+#     # n_poor_arom_indices = []
+
+#     smarts_NphenNOO = "Ncccc([N+](=O)[O-])"
+#     matches_NphenNOO = match_smarts(mol,smarts_NphenNOO)
+
+#     q0s = np.array([at.GetFormalCharge() for at in mol.GetAtoms()]) # type: ignore
+#     for at_idx, q in enumerate(q0s):
+#         atom = mol.GetAtomWithIdx(at_idx) 
+#         map_idx = atom.GetAtomMapNum()
+
+#         if (atom.GetSymbol() == 'N') and (q == 0.) and not (atom.GetIsAromatic()):
+#             for match in matches_NphenNOO:
+#                 if atom.GetIdx() in match:
+#                     if map_idx not in except_indices:
+#                         except_indices.append(map_idx)
+#                         NphenNOO_indices.append(map_idx)
+
+#     phosphate_found, phosphate_groups = has_phosphate(mol) # returns map indices
+
+#     if phosphate_found:
+#         logger.debug(f'phosphate ids: {phosphate_groups}')
+#         for p_idx, oh_ids in phosphate_groups.items():
+#             oh_ids = sorted(oh_ids)
+#             for map_idx in oh_ids:
+#                 if map_idx not in except_indices:
+#                     except_indices.append(map_idx)
+
+#     invalid_amine_map_idx = has_invalid_amine(mol) # too short amine, breaks in molgpka
+
+#     if invalid_amine_map_idx > 0:
+#         if invalid_amine_map_idx not in except_indices:
+#             except_indices.append(invalid_amine_map_idx)
+
+#     return except_indices, phosphate_groups, invalid_amine_map_idx, NphenNOO_indices#, n_poor_arom_indices
 
 def has_phosphate(mol: Mol) -> tuple[bool, dict[int, list[int]]]:
     """
@@ -328,7 +349,7 @@ def has_phosphate(mol: Mol) -> tuple[bool, dict[int, list[int]]]:
         # Find protonable O of phosphate
         for idx in match:
             atom = mol.GetAtomWithIdx(idx)
-            if atom.GetSymbol() == "O" and atom.GetTotalNumHs() > 0:
+            if atom.GetSymbol() == "O" and (atom.GetTotalNumHs() > 0 or atom.GetFormalCharge() == -1.):
                 oh_map_idx = atom.GetAtomMapNum()
                 if oh_map_idx not in phosphate_groups[p_map_idx]:
                     phosphate_groups[p_map_idx].append(oh_map_idx)
@@ -681,7 +702,7 @@ def oh_ring_sulfonate(mol) -> list[int]:
 
     return sorted(matching_oxygen_indices)
 
-def has_nplus_base_proximity(at_idx, mol, max_distance=3):
+def has_nplus_base_proximity(map_idx, mol, max_distance=3):
     """
     Detect whether any neutral/basic nitrogen is within
     <= max_distance bonds of a positively charged nitrogen.
@@ -690,7 +711,10 @@ def has_nplus_base_proximity(at_idx, mol, max_distance=3):
     # Collect atom indices
     cation_nitrogens = []
 
-    atom0 = mol.GetAtomWithIdx(at_idx)
+    atom0 = get_atom_with_map_idx(mol, map_idx)
+    at_idx = atom0.GetIdx()
+
+    # atom0 = mol.GetAtomWithIdx(at_idx)
     if atom0.GetAtomicNum() != 7:
         return False
     aromatic0 = atom0.GetIsAromatic()

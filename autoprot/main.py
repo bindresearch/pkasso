@@ -101,25 +101,6 @@ def preprocess(
     logger.debug(smiles)
 
     if tautomer_search:
-        # veto = False
-        # smarts_veto = [
-        #     r'[#7]~[#6X3](=[#8])',
-        # ]
-
-        # for smarts in smarts_veto:
-        #     pattern = Chem.MolFromSmarts(smarts)
-        #     found, _ = match_pattern(mol, pattern)
-        #     if found:
-        #         veto = True # overwrite to more advance tautomer search
-
-        # if veto:
-        #     print('Found veto smarts, not optimizing.')
-        # else:
-        # if overwrite_xtb_flag(mol) and use_xtb:
-            # print('Complicated tautomers found, forcing xtb_optimize to True.')
-            # logger.info('Complicated tautomers found, forcing xtb_optimize to True.')
-            # xtb_optimize = True
-
         smiles = best_tautomer_smiles(
             smiles,
             max_tautomers=max_tautomers,
@@ -162,6 +143,8 @@ def find_candidate_sites(
         exclude_base_indices: list[int],
         exclude_acid_indices: list[int],
         charged_indices: list[int],
+        except_indices: list[int],
+        except_q_options: NDArray[np.int64],
         pH: float,
         pH_band: float = 8.,
 ) -> tuple[list[int], NDArray[np.int64]]:
@@ -181,6 +164,10 @@ def find_candidate_sites(
         Atom map indices that must not be considered for deprotonation.
     charged_indices
         Atom map indices that could not be neutralized
+    except_indices
+        Atom map indices that require special treatment
+    except_q_options
+        q_options for except_indices
     pH
         Target pH value used to evaluate protonation states.
     pH_band
@@ -199,19 +186,20 @@ def find_candidate_sites(
     prot_candidates = list(base.keys()) # should be map idx
     deprot_candidates = list(acid.keys())
 
-    indices = list(sorted(set(prot_candidates + deprot_candidates)))
-    indices_curated: list[int] = []
+    indices_raw = list(sorted(set(prot_candidates + deprot_candidates)))
+    indices: list[int] = []
 
-    logger.debug(f'relevant indices: {indices}')
-
-    for map_idx in indices:
+    logger.debug(f'relevant indices: {indices_raw}')
+    
+    # Remove indices for atoms that could not be neutralized
+    for map_idx in indices_raw:
         if map_idx not in charged_indices:
-            indices_curated.append(map_idx)
+            indices.append(map_idx)
 
-    logger.debug(f'relevant indices (after charged removal): {indices_curated}')
+    logger.debug(f'relevant indices (after charged removal): {indices}')
 
-    q_options = np.zeros((len(indices_curated),3),dtype=np.int64) # deprot=0, stay=1, prot=2
-    for rel_idx, map_idx in enumerate(indices_curated):
+    q_options = np.zeros((len(indices),3),dtype=np.int64) # deprot=0, stay=1, prot=2
+    for rel_idx, map_idx in enumerate(indices):
         q_options[rel_idx,1] = 1 # always allow stay
         if map_idx in prot_candidates:
             if map_idx not in exclude_base_indices:
@@ -221,7 +209,21 @@ def find_candidate_sites(
             if map_idx not in exclude_acid_indices:
                 if acid[map_idx] <= pH + pH_band:
                     q_options[rel_idx,0] = 1 # allow deprotonation
-    return indices_curated, q_options
+
+    # Add indices that should be considered but not recognized by molgpka
+    for map_idx, q_option in zip(except_indices, except_q_options):
+        if map_idx not in indices:
+            indices.append(map_idx)
+            q_options = np.append(q_options, q_option)
+        else:
+            rel_idx = indices.index(map_idx)
+            q_options[rel_idx] = q_option # overwrite q_option if already present
+       
+    ps = np.argsort(indices)
+    indices = [indices[p] for p in ps]
+    q_options = q_options[ps]
+
+    return indices, q_options
 
 def construct_state_vectors(
     q_options: NDArray[np.int64],
@@ -710,74 +712,65 @@ class Autoprot:
         logger.debug(self.smiles, flush=True)
 
         self.initialize_paths_models_libs()
-        self.prepare_neutral_state()
+        # self.prepare_neutral_state()
 
-        self.indices0, _ = find_candidate_sites(
+        self.mol0, self.smiles0 = preprocess(
+            self.smiles,
+            tautomer_search=self.tautomer_search,
+            max_tautomers=self.max_tautomers,
+            use_xtb=self.use_xtb,
+            xtb_optimize=self.xtb_optimize,
+            num_confs=self.num_confs,
+            tautomer_debug=self.tautomer_debug)
+
+        self.charged_indices = special_cases.find_charged(self.mol0)
+        self.exclude_base_indices, self.exclude_acid_indices = special_cases.add_exclusions(self.mol0)
+        self.except_indices, self.except_q_options = special_cases.add_except_indices(self.mol0)
+
+        logger.debug('Processed:')
+        logger.debug(self.smiles0)
+        logger.debug(f'Exclude base indices: {self.exclude_base_indices}')
+        logger.debug(f'Exclude acid indices: {self.exclude_acid_indices}')
+        logger.debug(f'Except indices: {self.except_indices}')
+       
+        self.base0, self.acid0 = predict_acid_base(self.mol0,
+                                         self.model_base,self.model_acid,
+                                         device=self.device) # returns pkas for map indices
+
+        # print(self.base0)
+        # print(self.acid0)
+
+        self.indices0, self.q_options0 = find_candidate_sites(
                 self.base0, self.acid0, self.exclude_base_indices, self.exclude_acid_indices,
-                self.charged_indices,
+                self.charged_indices, self.except_indices, self.except_q_options,
                 0., pH_band=100)
-        
-        # Add indices that should be considered specially but not recognized by molgpka
-        for map_idx in self.except_indices:
-            if map_idx not in self.indices0:
-                self.indices0.append(map_idx)
-        
-        self.indices0 = list(sorted(self.indices0))
+
+        # self.indices0 = list(sorted(self.indices0))
         self.indices0_str = pack_indices(self.indices0)
+
+        # print(self.indices0)
+
+        # Screen coupling between residues, now pH independent
+        self.clusters = self.screen_clusters(self.indices0, self.q_options0)
+        # print(self.clusters)
+        logger.debug(f'Clusters: {self.clusters}')
 
     def _calc_microstates(self, pH: float
 ) -> tuple[float, dict[int, float], list[str], list[float], dict[str, int], list[int]]:
         """ Calc microstate frequencies given a pH value """
 
-        indices0_curated, q_options0 = self.calc_curated_indices(pH)
-
-        # Screen coupling between residues
-        clusters = self.screen_clusters(indices0_curated, q_options0)
-        logger.debug(f'Clusters: {clusters}')
-
+        # indices0_curated, q_options0 = self.calc_curated_indices(pH)
+    
         state_freqs_clusters = []
         state_strs_clusters = []
         indices_clusters = []
         
-        for c_idx, cluster in enumerate(clusters):
-            state_strs_cl, state_freqs_cl, indices_cl = self.process_cluster(cluster, indices0_curated, q_options0, pH)
+        for c_idx, cluster in enumerate(self.clusters):
+            state_strs_cl, state_freqs_cl, indices_cl = self.process_cluster(cluster, self.indices0, self.q_options0, pH)
 
             state_strs_clusters.append(state_strs_cl)
             state_freqs_clusters.append(state_freqs_cl)
             indices_clusters.append(indices_cl)
-
-        # Inject phosphate clusters:
-        if self.phosphate_groups:
-            state_strs_poh, state_freqs_poh, oh_ids_poh = special_cases.calc_phosphate_clusters(
-                    self.phosphate_groups,pH,self.matrix_def,
-            )
-            for state_strs, state_freqs, oh_ids in zip(state_strs_poh,state_freqs_poh,oh_ids_poh):
-                state_strs_clusters.append(state_strs)
-                state_freqs_clusters.append(state_freqs)
-                indices_clusters.append(oh_ids)
-
-        if (self.invalid_amine_map_idx > 0) and (self.invalid_amine_map_idx in self.indices0):
-            pka = 10.4
-            ss_lower = 1 # state_str 1 -> 2
-            state_strs_invalid_amine, state_freqs_invalid_amine = special_cases.calc_single_fixed_pka(
-                pH,
-                pka,
-                ss_lower,
-                self.matrix_def
-            )
-            state_strs_clusters.append(state_strs_invalid_amine)
-            state_freqs_clusters.append(state_freqs_invalid_amine)
-            indices_clusters.append([self.invalid_amine_map_idx])
-
-        if len(self.NphenNOO_indices) > 0:
-            pka = 2.0
-            ss_lower = 1
-            for map_idx in self.NphenNOO_indices:
-                state_strs_NphenNOO, state_freqs_NphenNOO = special_cases.calc_single_fixed_pka(
-                    pH,pka,ss_lower,self.matrix_def)
-                state_strs_clusters.append(state_strs_NphenNOO)
-                state_freqs_clusters.append(state_freqs_NphenNOO)
-                indices_clusters.append([map_idx])
 
         # if len(self.n_poor_arom_indices) > 0:
         #     pka = 1.
@@ -932,100 +925,96 @@ class Autoprot:
         self.smiles_libs: dict[str, dict[str, str]] = {} # index_str, state_str, smiles_str
         self.mols_libs: dict[str, dict[str, Mol]] = {} # index_str, state_str, rdkit Mol
 
-    def prepare_neutral_state(self) -> None:
-        """
-        Prepare the neutral reference state of the molecule and compute
-        initial pKa predictions.
+    # def prepare_neutral_state(self) -> None:
+    #     """
+    #     Prepare the neutral reference state of the molecule and compute
+    #     initial pKa predictions.
 
-        This method performs the following steps:
+    #     This method performs the following steps:
 
-        1. Preprocess the input SMILES into a standardized RDKit molecule.
-        2. Identify atom indices to exclude from protonation/deprotonation.
-        3. Identify special exception sites (e.g., phosphate groups).
-        4. Add explicit hydrogens to the molecule.
-        5. Predict base and acid pKa values using the loaded ML models.
+    #     1. Preprocess the input SMILES into a standardized RDKit molecule.
+    #     2. Identify atom indices to exclude from protonation/deprotonation.
+    #     3. Identify special exception sites (e.g., phosphate groups).
+    #     4. Add explicit hydrogens to the molecule.
+    #     5. Predict base and acid pKa values using the loaded ML models.
 
-        The resulting molecule and prediction dictionaries are stored as
-        instance attributes for downstream pipeline steps.
-        """
+    #     The resulting molecule and prediction dictionaries are stored as
+    #     instance attributes for downstream pipeline steps.
+    #     """
 
-        self.mol0, self.smiles0 = preprocess(
-            self.smiles,
-            tautomer_search=self.tautomer_search,
-            max_tautomers=self.max_tautomers,
-            use_xtb=self.use_xtb,
-            xtb_optimize=self.xtb_optimize,
-            num_confs=self.num_confs,
-            tautomer_debug=self.tautomer_debug)
+    #     self.mol0, self.smiles0 = preprocess(
+    #         self.smiles,
+    #         tautomer_search=self.tautomer_search,
+    #         max_tautomers=self.max_tautomers,
+    #         use_xtb=self.use_xtb,
+    #         xtb_optimize=self.xtb_optimize,
+    #         num_confs=self.num_confs,
+    #         tautomer_debug=self.tautomer_debug)
 
-        self.charged_indices = special_cases.find_charged(self.mol0)
-        self.exclude_base_indices, self.exclude_acid_indices = special_cases.add_exclusions(self.mol0)
+    #     self.charged_indices = special_cases.find_charged(self.mol0)
+    #     self.exclude_base_indices, self.exclude_acid_indices = special_cases.add_exclusions(self.mol0)
 
-        exc = special_cases.add_exceptions(self.mol0)
-        self.except_indices = exc[0]
-        self.phosphate_groups = exc[1]
-        self.invalid_amine_map_idx = exc[2]
-        self.NphenNOO_indices = exc[3] 
+    #     self.except_indices, self.except_q_options = special_cases.add_except_indices(self.mol0)
 
-        logger.debug('Processed:')
-        logger.debug(self.smiles0)
-        logger.debug(f'Exclude base indices: {self.exclude_base_indices}')
-        logger.debug(f'Exclude acid indices: {self.exclude_acid_indices}')
-        logger.debug(f'Except indices: {self.except_indices}')
+    #     logger.debug('Processed:')
+    #     logger.debug(self.smiles0)
+    #     logger.debug(f'Exclude base indices: {self.exclude_base_indices}')
+    #     logger.debug(f'Exclude acid indices: {self.exclude_acid_indices}')
+    #     logger.debug(f'Except indices: {self.except_indices}')
 
-        if self.phosphate_groups:
-            logger.debug(self.phosphate_groups)
+    #     if self.phosphate_groups:
+    #         logger.debug(self.phosphate_groups)
 
-        mol0_h = Chem.rdmolops.AddHs(self.mol0)
+    #     mol0_h = Chem.rdmolops.AddHs(self.mol0)
 
-        self.base0, self.acid0 = predict_acid_base(mol0_h,
-                                         self.model_base,self.model_acid,
-                                         device=self.device) # returns pkas for map indices
+    #     self.base0, self.acid0 = predict_acid_base(mol0_h,
+    #                                      self.model_base,self.model_acid,
+    #                                      device=self.device) # returns pkas for map indices
 
-    def calc_curated_indices(self, pH: float) -> tuple[list[int], NDArray[np.int64]]:
-        """
-        Determine protonation candidate sites and apply exception filtering
-        for a given pH value.
+    # def calc_curated_indices(self, pH: float) -> tuple[list[int], NDArray[np.int64]]:
+    #     """
+    #     Determine protonation candidate sites and apply exception filtering
+    #     for a given pH value.
 
-        1. Identify possible protonation/deprotonation sites based on
-        predicted pKa values and the current pH.
-        2. Apply exclusion rules.
-        3. Split and remove exception sites (e.g., special functional groups).
-        4. Return the curated site indices along with the
-        corresponding state options.
+    #     1. Identify possible protonation/deprotonation sites based on
+    #     predicted pKa values and the current pH.
+    #     2. Apply exclusion rules.
+    #     3. Split and remove exception sites (e.g., special functional groups).
+    #     4. Return the curated site indices along with the
+    #     corresponding state options.
 
-        Parameters
-        ----------
-        pH
-            Target pH value for state evaluation.
+    #     Parameters
+    #     ----------
+    #     pH
+    #         Target pH value for state evaluation.
 
-        Returns
-        -------
-        indices0_curated
-            Curated indices after applying exception rules.
-        q_options0
-            Corresponding state option matrix.
-        """
+    #     Returns
+    #     -------
+    #     indices0_curated
+    #         Curated indices after applying exception rules.
+    #     q_options0
+    #         Corresponding state option matrix.
+    #     """
 
-        logger.debug('='*50)
-        logger.debug(f'pH: {pH}',flush=True)
-        indices0, q_options0 = find_candidate_sites(
-            self.base0,
-            self.acid0,
-            self.exclude_base_indices,
-            self.exclude_acid_indices,
-            self.charged_indices,
-            pH,
-            pH_band=self.pH_band,
-        )
-        logger.debug(f'indices0: {indices0}')
-        logger.debug(f'q_options0: {q_options0}')
-        indices0_curated, q_options0 = special_cases.split_exceptions(indices0, q_options0, self.except_indices)
+    #     logger.debug('='*50)
+    #     logger.debug(f'pH: {pH}',flush=True)
+    #     indices0, q_options0 = find_candidate_sites(
+    #         self.base0,
+    #         self.acid0,
+    #         self.exclude_base_indices,
+    #         self.exclude_acid_indices,
+    #         self.charged_indices,
+    #         pH,
+    #         pH_band=self.pH_band,
+    #     )
+    #     logger.debug(f'indices0: {indices0}')
+    #     logger.debug(f'q_options0: {q_options0}')
+    #     indices0_curated, q_options0 = special_cases.split_exceptions(indices0, q_options0, self.except_indices)
 
-        logger.debug(f'curated indices0: {indices0_curated}')
-        logger.debug(f'curated q_options0: {q_options0}')
+    #     logger.debug(f'curated indices0: {indices0_curated}')
+    #     logger.debug(f'curated q_options0: {q_options0}')
 
-        return indices0_curated, q_options0
+    #     return indices0_curated, q_options0
 
     def process_cluster(
         self,
@@ -1273,10 +1262,10 @@ class Autoprot:
             state_str_base = pack_vec(state_vec_base)
 
             mol_base = self.mols_libs[indices_str][state_str_base]
-            mol_base_h = Chem.rdmolops.AddHs(mol_base)
+            # mol_base_h = Chem.rdmolops.AddHs(mol_base)
 
             base_tmp, _ = predict_acid_base(
-                    mol_base_h,self.model_base,self.model_acid,device=self.device,
+                    mol_base,self.model_base,self.model_acid,device=self.device,
                     pred_acid=False)
             base = {}
             for map_idx, b in base_tmp.items():
@@ -1291,10 +1280,10 @@ class Autoprot:
             state_str_acid = pack_vec(state_vec_acid)
 
             mol_acid = self.mols_libs[indices_str][state_str_acid]
-            mol_acid_h = Chem.rdmolops.AddHs(mol_acid)
+            # mol_acid_h = Chem.rdmolops.AddHs(mol_acid)
 
             _, acid_tmp = predict_acid_base(
-                    mol_acid_h,self.model_base,self.model_acid,device=self.device,
+                    mol_acid,self.model_base,self.model_acid,device=self.device,
                     pred_base=False)
             
             acid = {}
