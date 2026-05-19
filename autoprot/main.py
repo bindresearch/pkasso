@@ -1008,7 +1008,7 @@ class Autoprot:
                     coupling_cutoff += 0.2
         if coupling_cutoff > 1.5:
             logger.info(f'Coupling cutoff high: {coupling_cutoff}')
-        return clusters # type: ignore
+        return clusters
 
     def construct_mols(self, state_strs: list[str], state_vecs: list[NDArray[np.int64]], indices: list[int]) -> None:
         """

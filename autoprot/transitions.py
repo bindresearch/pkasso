@@ -48,9 +48,10 @@ def calc_p_up_down(
 
 def calc_state_freqs_sparse(tmatrix: NDArray[np.float64]) -> NDArray[np.float64]:
     """ Compute stationary distribution using power iteration. """
+    n_states = tmatrix.shape[0]
     P = csr_matrix(tmatrix)
 
-    pi: NDArray[np.float64] = np.ones(P.shape[0]) / P.shape[0]
+    pi: NDArray[np.float64] = np.ones(n_states) / n_states
     for idx in range(1000):
         pi = pi @ P
     return pi
@@ -247,9 +248,6 @@ def calc_freqs_from_states(
     else:
         raise ValueError
     return state_strs, state_freqs
-
-def Gs_from_prob(freqs):
-    return np.log(freqs)
 
 def calc_state_diffs(
     state_strs: list[str],

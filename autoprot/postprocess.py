@@ -11,6 +11,7 @@ from typing import Any
 import cairosvg  # type: ignore
 import matplotlib.pyplot as plt
 import numpy as np
+from numpy.typing import NDArray
 from matplotlib.figure import Figure as Figure_plt
 from rdkit import Chem
 from rdkit.Chem import AllChem, Mol
@@ -21,9 +22,9 @@ from .utils import is_jupyter, state_str_to_q
 
 logger = logging.getLogger(__name__)
 
-def draw_mols(mols, subImgSize=(250,200)):
+def draw_mols(mols: list[Mol], subImgSize: tuple[int, int] = (250, 200)) -> Any:
     opts = MolDrawOptions()
-    opts.backgroundColour = (1, 1, 1, 1)  # RGBA, values 0-1
+    opts.backgroundColour = (1, 1, 1, 1) # type: ignore
 
     img = MolsToGridImage( # type: ignore
     mols,
@@ -36,7 +37,7 @@ def draw_mols(mols, subImgSize=(250,200)):
     )
     return img
 
-def save_sdf(mols: list[Mol], file: Path):
+def save_sdf(mols: list[Mol], file: Path) -> None:
     """ Save embedded and optimized mols to sdf"""
     with Chem.SDWriter(file) as f:
         for mol in mols:
@@ -144,10 +145,10 @@ class Scan:
     indices: list[int]
     state_strs_relevant: list[str]
     mols_relevant: list[Mol]
-    sfreqs_relevant: list[np.ndarray]
-    pHs: np.ndarray
-    net_charges: np.ndarray
-    sfreqs_not_relevant: list[np.ndarray]
+    sfreqs_relevant: list[NDArray[np.float64]]
+    pHs: NDArray[np.float64]
+    net_charges: NDArray[np.float64]
+    sfreqs_not_relevant: list[NDArray[np.float64]]
     pkas_macro: dict[int, float]
 
     def __post_init__(self) -> None:
@@ -166,7 +167,7 @@ class Scan:
         for idx, (q, pka) in enumerate(self.pkas_macro.items()):
             print(f'pKa{idx+1} | {q+1} --> {q} | {pka:.3f}')
 
-    def plot_mols(self, size_x: float = 200, size_y: float = 175, molsPerRow=4) -> Any:
+    def plot_mols(self, size_x: int = 200, size_y: int = 175, molsPerRow: int = 4) -> Any:
         """ Plot rdkit molecules for relevant states together with state strings. 
         
         Returns IPython.core.display.SVG when called from notebook
@@ -175,7 +176,7 @@ class Scan:
         """
 
         opts = MolDrawOptions()
-        opts.backgroundColour = (1, 1, 1, 1)  # RGBA, values 0-1
+        opts.backgroundColour = (1, 1, 1, 1) # type: ignore
 
         for mol in self.mols_relevant:
             _ = AllChem.Compute2DCoords(mol) # type: ignore

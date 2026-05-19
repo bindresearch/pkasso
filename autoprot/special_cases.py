@@ -1,23 +1,21 @@
 """Special-case handling for protonation state generation."""
+# mypy: disable-error-code=no-untyped-call
 
 import logging
-from typing import Any
-
-import numpy as np
-from numpy.typing import NDArray
-from rdkit import Chem
-from rdkit.Chem.rdchem import Mol, Atom
-from rdkit.Chem import rdmolops
 from collections import deque
 
-from .transitions import calc_freqs_from_states, calc_state_diffs
-from .utils import unpack_vec, get_atom_with_map_idx
+from rdkit import Chem
+from rdkit.Chem import rdmolops
+from rdkit.Chem.rdchem import Atom, Mol
+
+from .utils import get_atom_with_map_idx
 
 logger = logging.getLogger(__name__)
 
-def match_smarts(mol: Mol, smarts: str) -> tuple[tuple[int]]:
+
+def match_smarts(mol: Mol, smarts: str) -> tuple[tuple[int, ...], ...]:
     """ Match smarts pattern in rdkit molecule.
-    
+
     Parameters:
     -----------
     mol
@@ -34,10 +32,12 @@ def match_smarts(mol: Mol, smarts: str) -> tuple[tuple[int]]:
     """
 
     pattern = Chem.MolFromSmarts(smarts)
+    assert pattern is not None, f"Invalid SMARTS pattern: {smarts}"
 
     # found = mol.HasSubstructMatch(pattern)
-    matches = mol.GetSubstructMatches(pattern)
+    matches: tuple[tuple[int, ...], ...] = mol.GetSubstructMatches(pattern)
     return matches
+
 
 def find_charged(mol: Mol) -> list[int]:
     """
@@ -46,11 +46,11 @@ def find_charged(mol: Mol) -> list[int]:
     """
 
     mol_h = Chem.rdmolops.AddHs(mol)
-    q0s = np.array([at.GetFormalCharge() for at in mol.GetAtoms()]) # type: ignore
+    q0s = [at.GetFormalCharge() for at in mol.GetAtoms()]
 
     charged_indices = []
     for at_idx, q in enumerate(q0s):
-        atom = mol_h.GetAtomWithIdx(at_idx) 
+        atom = mol_h.GetAtomWithIdx(at_idx)
         map_idx = atom.GetAtomMapNum()
 
         if q != 0:
@@ -59,7 +59,8 @@ def find_charged(mol: Mol) -> list[int]:
 
     return charged_indices
 
-def add_exclusion(exclusion_ids: set, mol: Mol, atom: Atom, smarts: str) -> set[int]:
+
+def add_exclusion(exclusion_ids: set[int], mol: Mol, atom: Atom, smarts: str) -> set[int]:
     """
     Add simple q_options exclusion based on smarts pattern. Adds to previous exclusion_ids set.
     """
@@ -70,17 +71,18 @@ def add_exclusion(exclusion_ids: set, mol: Mol, atom: Atom, smarts: str) -> set[
     for mat in matches:
         if atom.GetIdx() in mat:
             exclusion_ids.add(map_idx)
-    
+
     return exclusion_ids
 
+
 def add_exclusions(mol: Mol) -> tuple[list[int], list[int]]:
-    """ 
+    """
     Exclusions act on the q_options level. Exclusions are removed from consideration
     for protonation/deprotonation. This is specified separately for acids and bases.
     For example, only a protonation event could be excluded for a given index,
     but not the deprotonation event.
     This does not affect the indices or cluster splitting/
-    
+
     Parameters
     ----------
     mol
@@ -96,14 +98,14 @@ def add_exclusions(mol: Mol) -> tuple[list[int], list[int]]:
         be excluded.
     """
 
-    q0s = np.array([at.GetFormalCharge() for at in mol.GetAtoms()]) # type: ignore
+    q0s = [at.GetFormalCharge() for at in mol.GetAtoms()]
 
     exclude_acid_indices: set[int] = set()
     exclude_base_indices: set[int] = set()
     # mol_h = Chem.rdmolops.AddHs(mol)
 
     smarts_imine = "NC(=N)"
-    matches_imine = match_smarts(mol,smarts_imine)
+    matches_imine = match_smarts(mol, smarts_imine)
 
     smarts_sulfonamide = "NS(=O)(=O)"
 
@@ -184,6 +186,7 @@ def add_exclusions(mol: Mol) -> tuple[list[int], list[int]]:
 
     return exclude_base_indices_sorted, exclude_acid_indices_sorted
 
+
 def has_phosphate(mol: Mol) -> tuple[bool, dict[int, list[int]]]:
     """
     Detect phosphate groups and their protonable hydroxyl atoms.
@@ -202,11 +205,13 @@ def has_phosphate(mol: Mol) -> tuple[bool, dict[int, list[int]]]:
     """
 
     smarts = "P(=O)(O)(O)"
-    matches = match_smarts(mol,smarts)
+    matches = match_smarts(mol, smarts)
 
     phosphate_groups: dict[int, list[int]] = {}
 
     for mat in matches:
+        p_map_idx: int | None = None
+
         # Find central P of phosphate
         for idx in mat:
             atom = mol.GetAtomWithIdx(idx)
@@ -214,110 +219,26 @@ def has_phosphate(mol: Mol) -> tuple[bool, dict[int, list[int]]]:
                 p_map_idx = atom.GetAtomMapNum()
                 if p_map_idx not in phosphate_groups:
                     phosphate_groups[p_map_idx] = []
+
+        assert p_map_idx is not None, "Phosphate SMARTS match did not include a phosphorus atom"
+
         # Find protonable O of phosphate
         for idx in mat:
             atom = mol.GetAtomWithIdx(idx)
-            if atom.GetSymbol() == "O" and (atom.GetTotalNumHs() > 0 or atom.GetFormalCharge() == -1.):
+            if atom.GetSymbol() == "O" and (atom.GetTotalNumHs() > 0 or atom.GetFormalCharge() == -1):
                 oh_map_idx = atom.GetAtomMapNum()
-                if oh_map_idx not in phosphate_groups[p_map_idx]: # type: ignore
-                    phosphate_groups[p_map_idx].append(oh_map_idx) # type: ignore
+                if oh_map_idx not in phosphate_groups[p_map_idx]:
+                    phosphate_groups[p_map_idx].append(oh_map_idx)
 
     found = len(matches) > 0
     return found, phosphate_groups
 
-def calc_phosphate_clusters(
-    phosphate_groups: dict[int, list[int]],
-    pH: float,
-    matrix_def: str,
-) -> tuple[list[list[str]], list[list[float]], list[list[int]]]:
-    """
-    Compute protonation state distributions for phosphate groups.
 
-    Phosphates are treated as independent clusters with predefined
-    pKa values. This function enumerates possible protonation states
-    of the phosphate OH groups and calculates their equilibrium
-    populations at the given pH.
-
-    Returns
-    -------
-    state_strs_poh
-        Protonation state encodings for each phosphate cluster.
-    state_freqs_poh
-        Corresponding microstate frequencies.
-    oh_ids_poh
-        Atom map indices of protonable OH atoms for each cluster.
-    """
-
-    state_strs_poh = []
-    state_freqs_poh = []
-    oh_ids_poh = []
-    
-    pka1 = 2.0
-    pka2 = 6.5
-
-    poh_acid_pkas_single: dict[str, list[float]] = {
-        '0' : [pka1],
-        '1' : [pka1],
-    }
-
-    base_lib_poh_single: dict[str, Any] = {
-        '0': {},
-        '1': {},
-    }
-
-    poh_acid_pkas_double: dict[str, list[float]] = {
-        '00' : [pka2, pka2],
-        '01' : [pka1, pka2],
-        '10' : [pka2, pka1],
-        '11' : [pka1, pka1],
-    }
-
-    base_lib_poh_double: dict[str, Any] = {
-        '00': {},
-        '01': {},
-        '10': {},
-        '11': {},
-    }
-
-    for p_idx, oh_ids in phosphate_groups.items():
-        if len(oh_ids) == 1:
-            state_strs = ['0','1']
-            state_vecs = [unpack_vec(state_str) for state_str in state_strs]
-            poh_acid_pkas = poh_acid_pkas_single
-            base_lib_poh = base_lib_poh_single
-        elif len(oh_ids) == 2:
-            state_strs = ['00','01','10','11']
-            state_vecs = [unpack_vec(state_str) for state_str in state_strs]
-            poh_acid_pkas = poh_acid_pkas_double
-            base_lib_poh = base_lib_poh_double
-        else:
-            logger.debug(f'Did not find protonable O for phosphate {p_idx}')
-            continue
-        acid_lib_poh: dict[str, dict[int, float]] = {}
-        for key, val in poh_acid_pkas.items():
-            acid_lib_poh[key] = {}
-            for jdx, oh_id in enumerate(oh_ids):
-                acid_lib_poh[key][oh_id] = val[jdx]
-
-        logger.debug(oh_ids)
-        logger.debug(acid_lib_poh)
-        
-        ps_all = calc_state_diffs(state_strs, state_vecs, oh_ids, base_lib_poh, acid_lib_poh, 
-                                    pH=pH,matrix_def=matrix_def)
-        
-        state_strs_curated, state_freqs = calc_freqs_from_states(state_strs,state_vecs,ps_all,matrix_def)
-
-        state_strs_poh.append(state_strs_curated)
-        state_freqs_poh.append(state_freqs)
-        oh_ids_poh.append(oh_ids)
-
-    return state_strs_poh, state_freqs_poh, oh_ids_poh
-
-def short_alkyl(n_atom, mol):
+def short_alkyl(n_atom: Atom, mol: Mol) -> bool:
     n_idx = n_atom.GetIdx()
 
-    visited = set([n_idx])
-    queue = deque([(n_atom, 0)])
+    visited: set[int] = {n_idx}
+    queue: deque[tuple[Atom, int]] = deque([(n_atom, 0)])
 
     max_dist = 0
 
@@ -353,7 +274,7 @@ def short_alkyl(n_atom, mol):
     return True
 
 
-def has_invalid_amine(mol):
+def has_invalid_amine(mol: Mol) -> int:
     """ Special case amine with only ethyl or methyl or isopropyl (or no) substituents
     e.g.
     CCNCC
@@ -366,7 +287,7 @@ def has_invalid_amine(mol):
         if atom.GetAtomicNum() != 7:
             continue
 
-        map_idx = atom.GetAtomMapNum()
+        map_idx: int = atom.GetAtomMapNum()
 
         for nbr in atom.GetNeighbors():
             if nbr.GetAtomicNum() == 1:
@@ -379,39 +300,8 @@ def has_invalid_amine(mol):
         return map_idx
     return 0
 
-def calc_single_fixed_pka(
-    pH: float,
-    pka: float,
-    ss_lower: int,
-    matrix_def: str,
-) -> tuple[list[str], NDArray[np.float64]]:
-    """ Fix the pka for an amine with only methyl or ethyl substituents (molgpka bug)"""
 
-    state_strs = [f'{ss_lower}',f'{ss_lower+1}']
-    state_vecs = [unpack_vec(state_str) for state_str in state_strs]
-
-    # pka = 10.4 # rough average value from different short amines in IUPAC list
-
-    base_lib: dict[str, dict[int, float]] = {
-        f'{ss_lower}' : {0: pka},
-        f'{ss_lower+1}' : {0: pka},
-    }
-
-    acid_lib: dict[str, dict[int, float]] = {
-        f'{ss_lower}' : {},
-        f'{ss_lower+1}' : {},
-    }
-
-    ids = [0] # pseudo index
-
-    ps_all = calc_state_diffs(state_strs, state_vecs, ids, base_lib, acid_lib, 
-                                    pH=pH,matrix_def=matrix_def)
-
-    state_strs_curated, state_freqs = calc_freqs_from_states(state_strs,state_vecs,ps_all,matrix_def)
-
-    return state_strs_curated, state_freqs
-
-def oh_ring_sulfonate(mol) -> list[int]:
+def oh_ring_sulfonate(mol: Mol) -> list[int]:
     """
     Return atom indices of hydroxyl oxygens attached to the same fused/conjugated
     aromatic ring system as a sulfonate/sulfonic acid substituent.
@@ -419,15 +309,17 @@ def oh_ring_sulfonate(mol) -> list[int]:
 
     phenol_pat = Chem.MolFromSmarts("[c][OX2H]")  # aromatic OH
     sulfo_pat = Chem.MolFromSmarts("[c]S(=O)(=O)[OX1H0-,OX2H1]")  # sulfonic acid / sulfonate
+    assert phenol_pat is not None
+    assert sulfo_pat is not None
 
-    aromatic_rings = [
+    aromatic_rings: list[set[int]] = [
         set(ring)
         for ring in mol.GetRingInfo().AtomRings()
         if all(mol.GetAtomWithIdx(i).GetIsAromatic() for i in ring)
     ]
 
     # Merge fused aromatic rings into aromatic ring systems
-    systems = []
+    systems: list[set[int]] = []
     for ring in aromatic_rings:
         merged = False
         for system in systems:
@@ -442,7 +334,7 @@ def oh_ring_sulfonate(mol) -> list[int]:
     changed = True
     while changed:
         changed = False
-        new_systems = []
+        new_systems: list[set[int]] = []
         while systems:
             system = systems.pop()
             overlaps = [s for s in systems if s & system]
@@ -463,7 +355,7 @@ def oh_ring_sulfonate(mol) -> list[int]:
         for mat in mol.GetSubstructMatches(sulfo_pat)
     }
 
-    matching_oxygen_indices = set()
+    matching_oxygen_indices: set[int] = set()
 
     for aromatic_atom_idx, oxygen_idx in phenol_matches:
         for system in systems:
@@ -473,14 +365,15 @@ def oh_ring_sulfonate(mol) -> list[int]:
 
     return sorted(matching_oxygen_indices)
 
-def has_nplus_base_proximity(map_idx, mol, max_distance=3):
+
+def has_nplus_base_proximity(map_idx: int, mol: Mol, max_distance: int = 3) -> int:
     """
     Detect whether any neutral/basic nitrogen is within
     <= max_distance bonds of a positively charged nitrogen.
     """
 
     # Collect atom indices
-    cation_nitrogens = []
+    cation_nitrogens: list[int] = []
 
     atom0 = get_atom_with_map_idx(mol, map_idx)
     assert atom0 is not None
@@ -488,22 +381,22 @@ def has_nplus_base_proximity(map_idx, mol, max_distance=3):
 
     # atom0 = mol.GetAtomWithIdx(at_idx)
     if atom0.GetAtomicNum() != 7:
-        return False
+        return 0
     aromatic0 = atom0.GetIsAromatic()
-    
+
     for atom in mol.GetAtoms():
         if atom.GetAtomicNum() != 7:
             continue
-        
+
         charge = atom.GetFormalCharge()
         aromatic = atom.GetIsAromatic()
         # positively charged nitrogen
-        if (charge > 0):# and aromatic:
+        if charge > 0:
             cation_nitrogens.append(atom.GetIdx())
             if aromatic:
-                cation_nitrogens.append(atom.GetIdx()) # add again for aromatics
+                cation_nitrogens.append(atom.GetIdx())  # add again for aromatics
             if aromatic0:
-                cation_nitrogens.append(atom.GetIdx()) # add again for aromatics
+                cation_nitrogens.append(atom.GetIdx())  # add again for aromatics
 
     # If no candidates, exit early
     if not cation_nitrogens:
@@ -519,4 +412,3 @@ def has_nplus_base_proximity(map_idx, mol, max_distance=3):
             count += 1
 
     return count
-
