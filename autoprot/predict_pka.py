@@ -118,7 +118,7 @@ class MolgpkaPredictor(Predictor):
 
         smarts_sulfonamide = "NS(=O)(=O)"
 
-        smarts_diphenylamine = 'N(c)c'
+
         smarts_Ncnn = 'Nc(n)n'
         smarts_Nccn = 'Nc(c)n'
         smarts_Nccn2 = 'Nccn'
@@ -163,9 +163,11 @@ class MolgpkaPredictor(Predictor):
                 if atom.GetIsAromatic():
                     for smarts in [
                         smarts_nnn,
-                        smarts_ncnn
                     ]:
                         exclude_base_indices = add_exclusion(exclude_base_indices, self.mol, atom, smarts)
+                    if not any(neigh.GetAtomicNum() == 7 for neigh in atom.GetNeighbors()):
+                        exclude_base_indices = add_exclusion(exclude_base_indices, self.mol, atom, smarts_ncnn)
+                    
                     # ring Ns contributing to pi system
                     if (atom.GetTotalNumHs() > 0) or (atom.GetDegree() == 3):
                         exclude_base_indices.add(map_idx)
@@ -173,7 +175,7 @@ class MolgpkaPredictor(Predictor):
                 else:
                     for smarts in [
                         smarts_sulfonamide,
-                        smarts_diphenylamine,
+                        # smarts_diphenylamine,
                         smarts_Ncnn,
                         smarts_Nccn,
                         smarts_Nccn2,
@@ -307,6 +309,12 @@ class MolgpkaPredictor(Predictor):
         smarts_NphenNOO = "Ncccc([N+](=O)[O-])"
         matches_NphenNOO = match_smarts(self.mol,smarts_NphenNOO)
 
+        smarts_diphenylamine = 'N(c)c'
+        matches_diphenylamine = match_smarts(self.mol,smarts_diphenylamine)
+
+        # smarts_triphenylamine = 'N(c)(c)c'
+        # matches_triphenylamine = match_smarts(self.mol,smarts_triphenylamine)
+
         for at_idx, q in zip(self.atom_indices, self.qs):
             if q != 0.:
                 continue
@@ -334,6 +342,9 @@ class MolgpkaPredictor(Predictor):
                     if (at_idx in match):
                         # print('found',smarts_NphenNOO)
                         pka = 2.0
+                for match in matches_diphenylamine:
+                    if (at_idx in match):
+                        pka = 1.8
 
             # none of the added hydrogens should be considered here
             if (map_idx > 0) and (map_idx == invalid_amine_map_idx):

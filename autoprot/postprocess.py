@@ -51,7 +51,7 @@ def save_sdf(mols: list[Mol], file: Path) -> None:
 
 @dataclass
 class Microstate:
-    """ Single microstate class. """
+    """ Single microstate class for output. """
 
     name: str
     name_state: str
@@ -62,7 +62,7 @@ class Microstate:
 
 @dataclass
 class Molecule:
-    """ Molecule class storing the microstate output from autoprot. """
+    """ Molecule class storing the microstate output from autoprot for output. """
 
     name: str
     microstates: list[Microstate]
