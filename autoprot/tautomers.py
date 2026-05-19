@@ -1,95 +1,3 @@
-# import os
-# import logging
-# import subprocess
-# import tempfile
-# from rdkit import Chem
-# from rdkit.Chem import AllChem
-# from rdkit.Chem.MolStandardize import rdMolStandardize
-# import re
-
-# logger = logging.getLogger(__name__)
-
-# def mol_to_xyz(mol, filename):
-#     conf = mol.GetConformer()
-#     with open(filename, "w") as f:
-#         f.write(f"{mol.GetNumAtoms()}\n\n")
-#         for atom in mol.GetAtoms():
-#             pos = conf.GetAtomPosition(atom.GetIdx())
-#             f.write(f"{atom.GetSymbol()} {pos.x:.6f} {pos.y:.6f} {pos.z:.6f}\n")
-
-# def run_xtb(xyz_file, workdir, optimize=False):
-
-#     env = os.environ.copy()
-#     env["OMP_NUM_THREADS"] = "1"
-
-#     if optimize:
-#         cmd = ["xtb", xyz_file, "--opt", "--gfn2", "--alpb", "water"] # "--opt",
-#     else:
-#         cmd = ["xtb", xyz_file, "--gfn2", "--alpb", "water"] # "--opt",
-
-#     result = subprocess.run(cmd, env=env, cwd=workdir, capture_output=True, text=True)
-
-#     energy = None
-#     for line in result.stdout.splitlines():
-#         if "TOTAL ENERGY" in line:
-#             # Extract float using regex (robust to formatting)
-#             match = re.search(r"[-+]?\d+\.\d+", line)
-#             if match:
-#                 energy = float(match.group(0))
-#                 break
-
-#     return energy
-
-# def prepare_3d(mol):
-#     mol = Chem.AddHs(mol)
-#     AllChem.EmbedMolecule(mol, AllChem.ETKDG())
-#     AllChem.UFFOptimizeMolecule(mol)
-#     return mol
-
-# def best_tautomer_smiles(smiles, max_tautomers: int = 100, xtb_optimize=False):
-
-#     mol = Chem.MolFromSmiles(smiles)
-
-#     enumerator = rdMolStandardize.TautomerEnumerator()
-#     tautomers = enumerator.Enumerate(mol)
-
-#     if len(tautomers) == 1:
-#         return Chem.MolToSmiles(tautomers[0])
-#     if len(tautomers) > max_tautomers:
-#         # logger.info('Exceeding max tautomers, using input smiles.')
-#         print('Exceeding max tautomers, using input smiles.')
-#         return smiles
-    
-#     best_energy = None
-#     best_mol = None
-
-#     for i, taut in enumerate(tautomers):
-#         try:
-#             taut3d = prepare_3d(Chem.Mol(taut))
-
-#             with tempfile.TemporaryDirectory() as tmpdir:
-#                 xyz_path = os.path.join(tmpdir, f"mol_{i}.xyz")
-#                 mol_to_xyz(taut3d, xyz_path)
-
-#                 energy = run_xtb(xyz_path, tmpdir, optimize=xtb_optimize)
-
-#             if energy is None:
-#                 continue
-
-#             if best_energy is None or energy < best_energy:
-#                 best_energy = energy
-#                 best_mol = taut
-
-#         except Exception as e:
-#             logger.info(f"Skipping tautomer {i}: {e}")
-
-#     if best_mol is None:
-#         logger.info('Did not find good tautomer, using input smiles.')
-#         return smiles
-
-#     return Chem.MolToSmiles(best_mol)
-
-
 import os
 import re
 import math
@@ -239,6 +147,69 @@ def mol_to_xyz(mol, xyz_path, conf_id=0):
                 f"{pos.y:.6f} "
                 f"{pos.z:.6f}\n"
             )
+
+
+def rank_tautomers_with_xtb(
+    ranked,
+    num_xtb_confs=3,
+    xtb_optimize=True,
+    temperature=DEFAULT_TEMPERATURE_K,
+):
+    """Return the tautomer with the lowest xTB conformer ensemble free energy."""
+
+    best_free_energy = None
+    best_taut = None
+    num_xtb_confs = max(1, num_xtb_confs)
+
+    for entry in ranked:
+
+        try:
+
+            xtb_energies = []
+
+            with tempfile.TemporaryDirectory() as tmpdir:
+
+                for conf_id, _ in entry["conf_energies"][:num_xtb_confs]:
+
+                    xyz_path = os.path.join(
+                        tmpdir,
+                        f"taut_{entry['idx']}_conf_{conf_id}.xyz"
+                    )
+
+                    mol_to_xyz(
+                        entry["mol3d"],
+                        xyz_path,
+                        conf_id=conf_id,
+                    )
+                    # print(f'running xtb on entry {entry["idx"]}')
+                    xtb_energy = run_xtb(
+                        xyz_path,
+                        tmpdir,
+                        optimize=xtb_optimize,
+                    )
+
+                    if xtb_energy is None:
+                        continue
+
+                    xtb_energies.append(xtb_energy)
+
+            taut_free_energy = conformer_ensemble_free_energy(
+                xtb_energies,
+                temperature=temperature,
+            )
+
+            if taut_free_energy is None:
+                continue
+
+            if best_free_energy is None or taut_free_energy < best_free_energy:
+
+                best_free_energy = taut_free_energy
+                best_taut = entry["taut"]
+
+        except Exception as e:
+            print(f"xTB failed for tautomer {entry['idx']}: {e}")
+
+    return best_taut
 
 
 def prepare_tautomer_conformers(
@@ -418,60 +389,12 @@ def best_tautomer_smiles(
     # ---------------------------------------------------------
 
     if use_xtb:
-
-        best_free_energy = None
-        best_taut = None
-
-        num_xtb_confs = max(1, num_xtb_confs)
-
-        for entry in ranked:
-
-            try:
-
-                xtb_energies = []
-
-                with tempfile.TemporaryDirectory() as tmpdir:
-
-                    for conf_id, _ in entry["conf_energies"][:num_xtb_confs]:
-
-                        xyz_path = os.path.join(
-                            tmpdir,
-                            f"taut_{entry['idx']}_conf_{conf_id}.xyz"
-                        )
-
-                        mol_to_xyz(
-                            entry["mol3d"],
-                            xyz_path,
-                            conf_id=conf_id,
-                        )
-                        # print(f'running xtb on entry {entry["idx"]}')
-                        xtb_energy = run_xtb(
-                            xyz_path,
-                            tmpdir,
-                            optimize=xtb_optimize,
-                        )
-
-                        if xtb_energy is None:
-                            continue
-
-                        xtb_energies.append(xtb_energy)
-
-                taut_free_energy = conformer_ensemble_free_energy(
-                    xtb_energies,
-                    temperature=temperature,
-                )
-
-                if taut_free_energy is None:
-                    continue
-
-                if best_free_energy is None or taut_free_energy < best_free_energy:
-
-                    best_free_energy = taut_free_energy
-                    best_taut = entry["taut"]
-
-            except Exception as e:
-                print(f"xTB failed for tautomer {entry['idx']}: {e}")
-
+        best_taut = rank_tautomers_with_xtb(
+            ranked,
+            num_xtb_confs=num_xtb_confs,
+            xtb_optimize=xtb_optimize,
+            temperature=temperature,
+        )
         if best_taut is None:
             return Chem.MolToSmiles(ranked[0]["taut"])
         return Chem.MolToSmiles(best_taut)
