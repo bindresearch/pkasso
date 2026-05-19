@@ -187,5 +187,5 @@ def test_construct_mol(smiles_raw,net_charge):
             indices.append(map_idx)
             state_vec.append(0)
     state_vec = np.array(state_vec)
-    mol_cand, _ = main.construct_mol(mol, indices, state_vec)
+    mol_cand = main.construct_mol(mol, indices, state_vec)
     assert Chem.GetFormalCharge(mol_cand) == net_charge
