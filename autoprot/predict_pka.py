@@ -10,7 +10,14 @@ import numpy as np
 from rdkit import Chem
 from rdkit.Chem.rdchem import Mol
 
-from .special_cases import has_invalid_amine, has_nplus_base_proximity, has_phosphate, match_smarts, oh_ring_sulfonate
+from .special_cases import (
+    add_exclusion,
+    has_invalid_amine,
+    has_nplus_base_proximity,
+    has_phosphate,
+    match_smarts,
+    oh_ring_sulfonate,
+)
 from .external.net import GCNNet
 from .external.pka import load_model
 from .external.pka import predict_acid as molgpka_predict_acid
@@ -61,6 +68,11 @@ class Predictor(ABC):
         """Predict basic pKa values keyed by atom map index."""
         ...
 
+    @abstractmethod
+    def exclude_sites(self) -> tuple[list[int], list[int]]:
+        """Return base and acid atom map indices to exclude for this backend."""
+        ...
+
 class MolgpkaPredictor(Predictor):
 
     model_file_base: ClassVar[Path] = ROOT / 'weight_base.pth'
@@ -86,6 +98,99 @@ class MolgpkaPredictor(Predictor):
     def pred_acid(self) -> dict[int, float]:
         acid = self._predict_acid_raw()
         return self._curate_acid(acid)
+
+    def exclude_sites(self) -> tuple[list[int], list[int]]:
+        return self._exclude_molgpka_sites()
+
+    def _exclude_molgpka_sites(self) -> tuple[list[int], list[int]]:
+        """
+        Exclude sites where molgpka predictions are not used directly.
+
+        Exclusions act on the q_options level and are tracked separately
+        for protonation (base behavior) and deprotonation (acid behavior).
+        """
+
+        exclude_acid_indices: set[int] = set()
+        exclude_base_indices: set[int] = set()
+
+        smarts_imine = "NC(=N)"
+        matches_imine = match_smarts(self.mol, smarts_imine)
+
+        smarts_sulfonamide = "NS(=O)(=O)"
+
+        smarts_diphenylamine = 'N(c)c'
+        smarts_Ncnn = 'Nc(n)n'
+        smarts_Nccn = 'Nc(c)n'
+        smarts_Nccn2 = 'Nccn'
+        smarts_nnn = 'nnn'
+        smarts_ncnn = 'ncnn'
+        smarts_cNO = 'C=NO'
+        smarts_NNC = 'N-N=C'
+        smarts_carbonyl = '[#7]~[#6X3](=[#8])'
+
+        smarts_ONphos = 'OC=NP(=O)(O)O'
+        matches_ONphos = match_smarts(self.mol, smarts_ONphos)
+        smarts_ONO = '[O]-[N+]([O-])'
+        smarts_ONCO1 = 'O=N-C=O'
+        smarts_ONCO2 = 'C=C(N=O)O'
+
+        for at_idx, q in zip(self.atom_indices, self.qs):
+            atom = self.mol.GetAtomWithIdx(at_idx)
+            map_idx = atom.GetAtomMapNum()
+
+            if q != 0:
+                continue
+            if atom.GetSymbol() == 'O':
+                for mat in matches_ONphos:
+                    if atom.GetIdx() in mat:
+                        correct_O = False
+                        neighbors = atom.GetNeighbors()
+                        for nbr in neighbors:
+                            if nbr.GetSymbol() == 'C':
+                                correct_O = True # O=CN part of the match
+                        if correct_O:
+                            exclude_acid_indices.add(map_idx)
+                for smarts in [
+                    smarts_ONO,
+                    smarts_ONCO1,
+                    smarts_ONCO2
+                ]:
+                    exclude_acid_indices = add_exclusion(exclude_acid_indices, self.mol, atom, smarts)
+
+            if atom.GetSymbol() == 'N':
+                exclude_base_indices = add_exclusion(exclude_base_indices, self.mol, atom, smarts_carbonyl)
+                # aromatic n
+                if atom.GetIsAromatic():
+                    for smarts in [
+                        smarts_nnn,
+                        smarts_ncnn
+                    ]:
+                        exclude_base_indices = add_exclusion(exclude_base_indices, self.mol, atom, smarts)
+                    # ring Ns contributing to pi system
+                    if (atom.GetTotalNumHs() > 0) or (atom.GetDegree() == 3):
+                        exclude_base_indices.add(map_idx)
+                # non-aromatic N
+                else:
+                    for smarts in [
+                        smarts_sulfonamide,
+                        smarts_diphenylamine,
+                        smarts_Ncnn,
+                        smarts_Nccn,
+                        smarts_Nccn2,
+                        smarts_cNO,
+                        smarts_NNC
+                    ]:
+                        exclude_base_indices = add_exclusion(exclude_base_indices, self.mol, atom, smarts)
+                    for mat in matches_imine: # ...N-C(=N)...
+                        if atom.GetIdx() in mat:
+                            accept = True
+                            for bond in atom.GetBonds(): # Find the correct of the two Ns
+                                if bond.GetBondType() == Chem.BondType.DOUBLE:
+                                    accept = False
+                            if accept:
+                                exclude_base_indices.add(map_idx)
+
+        return sorted(exclude_base_indices), sorted(exclude_acid_indices)
 
     def _predict_acid_raw(self) -> dict[int, float]:
         """Run molgpka acid prediction and convert results to atom map indices."""

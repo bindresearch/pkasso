@@ -13,7 +13,7 @@ from rdkit.Chem.MolStandardize import rdMolStandardize
 from rdkit.Chem.rdchem import Mol
 
 from . import coupling, special_cases, utils
-from .predict_pka import MolgpkaPredictor, Predictor, predict_acid, predict_base
+from .predict_pka import MolgpkaPredictor, Predictor
 from .postprocess import combine_results
 from .transitions import calc_freqs_from_states, calc_state_diffs
 from .utils import pack_indices, pack_vec, unpack_vec
@@ -599,6 +599,11 @@ class Autoprot:
     max_tautomers: int = 20
     num_confs: int = 10
 
+    def pka_predictor(self, mol: Mol) -> Predictor:
+        """Create the configured molecule-specific pKa predictor."""
+
+        return self.pka_predictor_cls(mol, device=self.device)
+
     def run_single(self, pH: float = 7.0) -> None:
         """
         Run the full Autoprot pipeline.
@@ -655,7 +660,8 @@ class Autoprot:
         )
 
         self.charged_indices = special_cases.find_charged(self.mol0)
-        self.exclude_base_indices, self.exclude_acid_indices = special_cases.add_exclusions(self.mol0)
+        pka_predictor = self.pka_predictor(self.mol0)
+        self.exclude_base_indices, self.exclude_acid_indices = pka_predictor.exclude_sites()
         # self.except_indices, self.except_q_options = special_cases.add_except_indices(self.mol0)
 
         logger.debug('Processed:')
@@ -664,16 +670,8 @@ class Autoprot:
         logger.debug(f'Exclude acid indices: {self.exclude_acid_indices}')
         # logger.debug(f'Except indices: {self.except_indices}')
        
-        self.acid0 = predict_acid(
-            self.mol0,
-            device=self.device,
-            predictor_cls=self.pka_predictor_cls,
-        ) # returns pkas for map indices
-        self.base0 = predict_base(
-            self.mol0,
-            device=self.device,
-            predictor_cls=self.pka_predictor_cls,
-        ) # returns pkas for map indices
+        self.acid0 = pka_predictor.pred_acid() # returns pkas for map indices
+        self.base0 = pka_predictor.pred_base() # returns pkas for map indices
 
         # print(self.exclude_base_indices)
 
@@ -1086,7 +1084,7 @@ class Autoprot:
 
             mol_base = self.mols_libs[indices_str][state_str_base]
 
-            base_tmp = predict_base(mol_base, device=self.device, predictor_cls=self.pka_predictor_cls)
+            base_tmp = self.pka_predictor(mol_base).pred_base()
             base = {}
             for map_idx, b in base_tmp.items():
                 if map_idx not in indices:
@@ -1102,7 +1100,7 @@ class Autoprot:
             mol_acid = self.mols_libs[indices_str][state_str_acid]
             # mol_acid_h = Chem.rdmolops.AddHs(mol_acid)
 
-            acid_tmp = predict_acid(mol_acid, device=self.device, predictor_cls=self.pka_predictor_cls)
+            acid_tmp = self.pka_predictor(mol_acid).pred_acid()
             
             acid = {}
             for map_idx, a in acid_tmp.items():
