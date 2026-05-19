@@ -69,10 +69,10 @@ class Molecule:
     def __post_init__(self) -> None:
         """ Add attributes to list properties of all microstates of a molecule. """
 
-        self.smiles = [m.smiles for m in self.microstates]
-        self.mols = [m.mol for m in self.microstates]
-        self.freqs = [m.freq for m in self.microstates]
-        self.qs = [m.q for m in self.microstates]
+        self.smiles: list[str] = [m.smiles for m in self.microstates]
+        self.mols: list[Mol] = [m.mol for m in self.microstates]
+        self.freqs: list[float] = [m.freq for m in self.microstates]
+        self.qs: list[int] = [m.q for m in self.microstates]
 
     # def draw(self) -> Any:
     #     """ Draw all microstates of a molecule. """

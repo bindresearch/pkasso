@@ -30,6 +30,7 @@ dependencies = [
     "pandas",
     "tqdm",
     "click",
+    "networkx",
 ]
 
 [project.optional-dependencies]
