@@ -28,9 +28,9 @@ def protonate(inp: str | Mol, pH: float = 7.0, **kwargs: Any) -> tuple[list[str]
     """
 
     if isinstance(inp, Mol):
-        smiles: str = MolToSmiles(inp)
+        smiles = MolToSmiles(inp)
     else:
-        smiles: str = inp
+        smiles = inp
 
     ap = Autoprot(
         smiles, **kwargs)

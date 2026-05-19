@@ -1,3 +1,6 @@
+""" molgpka pka calculations with custom rules"""
+# mypy: disable-error-code=no-untyped-call
+
 from pathlib import Path
 
 import torch
@@ -56,7 +59,7 @@ def get_acid_neighbors(mol_h: Mol, acid: dict[int, float], verbose: bool = False
             acid_heavy[neighbor_map_idx] = pka
     return acid_heavy
 
-def predict_base(mol_h: Mol, model_base: GCNNet, device: str = "cpu", use_map_idx=True,
+def predict_base(mol_h: Mol, model_base: GCNNet, device: str = "cpu", use_map_idx: bool = True,
 ) -> dict[int, float]:
     """ Predict base pKas with molgpka model. """
   
@@ -86,7 +89,7 @@ def predict_acid_base(
     mol_h = Chem.rdmolops.AddHs(Chem.Mol(mol))
 
     atom_indices = [atom.GetIdx() for atom in mol.GetAtoms()]
-    qs = np.array([at.GetFormalCharge() for at in mol.GetAtoms()]) # type: ignore
+    qs = np.array([at.GetFormalCharge() for at in mol.GetAtoms()])
 
     if pred_base:
         base = predict_base(mol_h,model_base,device=device)

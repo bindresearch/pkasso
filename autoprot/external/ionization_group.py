@@ -3,7 +3,7 @@ from __future__ import division, unicode_literals
 import os
 from importlib import resources
 
-import pandas as pd
+import pandas as pd # type: ignore
 from pandas import DataFrame
 from rdkit import Chem
 from rdkit.Chem import Mol
