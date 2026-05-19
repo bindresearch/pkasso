@@ -65,9 +65,22 @@ class MolgpkaPredictor(Predictor):
         model: GCNNet,
         device: str = "cpu",
     ) -> dict[int, float]:
-        
+        acid = self._predict_acid_raw(model, device=device)
+        return self._curate_acid(acid)
+
+    def _predict_acid_raw(
+        self,
+        model: GCNNet,
+        device: str = "cpu",
+    ) -> dict[int, float]:
+        """Run molgpka acid prediction and convert results to atom map indices."""
+
         acid = molgpka_predict_acid(self.mol_h, model, device=device)
-        acid = get_acid_neighbors(self.mol_h, acid)
+        return get_acid_neighbors(self.mol_h, acid)
+
+    def _curate_acid(self, acid: dict[int, float]) -> dict[int, float]:
+        """Apply AutoProt correction rules to raw acid pKa predictions."""
+
         matches_ncS = match_smarts(self.mol, '[n,nH,n+]~[c,C]~[S,s]')
 
         smarts_OHcRO = [
@@ -157,9 +170,22 @@ class MolgpkaPredictor(Predictor):
         model: GCNNet,
         device: str = "cpu",
     ) -> dict[int, float]:
-        
+        base = self._predict_base_raw(model, device=device)
+        return self._curate_base(base)
+
+    def _predict_base_raw(
+        self,
+        model: GCNNet,
+        device: str = "cpu",
+    ) -> dict[int, float]:
+        """Run molgpka base prediction and convert results to atom map indices."""
+
         base_aid = molgpka_predict_base(self.mol_h, model, device=device)
-        base = convert_base_map_idx(self.mol_h, base_aid)
+        return convert_base_map_idx(self.mol_h, base_aid)
+
+    def _curate_base(self, base: dict[int, float]) -> dict[int, float]:
+        """Apply AutoProt correction rules to raw base pKa predictions."""
+
         base_curated = {} # atom mapping
 
         invalid_amine_map_idx = has_invalid_amine(self.mol)
