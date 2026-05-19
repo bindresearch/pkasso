@@ -59,21 +59,24 @@ def get_acid_neighbors(mol_h: Mol, acid: dict[int, float], verbose: bool = False
             acid_heavy[neighbor_map_idx] = pka
     return acid_heavy
 
-def predict_base(mol_h: Mol, model_base: GCNNet, device: str = "cpu", use_map_idx: bool = True,
+def predict_base(mol_h: Mol, model_base: GCNNet, device: str = "cpu"
 ) -> dict[int, float]:
     """ Predict base pKas with molgpka model. """
   
     base_idxs = get_ionization_aid(mol_h, "base")
     base_res = {}
     for aid in base_idxs:
-        atom = mol_h.GetAtomWithIdx(aid)
         bpka = model_pred(mol_h, aid, model_base, device=device)
-        if use_map_idx:
-            map_idx = atom.GetAtomMapNum()       
-            base_res.update({map_idx:bpka}) # changed!
-        else:
-            base_res.update({aid:bpka}) # changed!
+        base_res.update({aid:bpka})
     return base_res
+
+def convert_base_map_idx(mol_h: Mol, base_res: dict[int, float]) -> dict[int, float]:
+    base_res_map_ids: dict[int, float] = {}
+    for aid, pka in base_res.items():
+        atom = mol_h.GetAtomWithIdx(aid)
+        map_idx = atom.GetAtomMapNum()
+        base_res_map_ids[map_idx] = pka
+    return base_res_map_ids
 
 def predict_acid_base(
     mol: Mol,
@@ -92,8 +95,8 @@ def predict_acid_base(
     qs = np.array([at.GetFormalCharge() for at in mol.GetAtoms()])
 
     if pred_base:
-        base = predict_base(mol_h,model_base,device=device)
-
+        base_aid = predict_base(mol_h,model_base,device=device)
+        base = convert_base_map_idx(mol_h, base_aid)
         base_curated = {} # atom mapping
 
         invalid_amine_map_idx = has_invalid_amine(mol)
