@@ -4,8 +4,6 @@ import copy
 import itertools
 import logging
 from dataclasses import dataclass
-from importlib import resources
-from pathlib import Path
 
 import numpy as np
 from numpy.typing import NDArray
@@ -15,8 +13,7 @@ from rdkit.Chem.MolStandardize import rdMolStandardize
 from rdkit.Chem.rdchem import Mol
 
 from . import coupling, special_cases, utils
-from .external.pka import load_model
-from .predict_pka import predict_acid, predict_base
+from .predict_pka import MolgpkaPredictor, Predictor, predict_acid, predict_base
 from .postprocess import combine_results
 from .transitions import calc_freqs_from_states, calc_state_diffs
 from .utils import pack_indices, pack_vec, unpack_vec
@@ -24,10 +21,6 @@ from .tautomers import best_tautomer_smiles
 
 logger = logging.getLogger(__name__)
 RDLogger.DisableLog("rdApp.*") # type: ignore
-
-pkg_base = resources.files('autoprot')
-
-ROOT = Path(f'{pkg_base}/data')
 
 def preprocess(
         smiles_raw: str, 
@@ -585,6 +578,7 @@ class Autoprot:
 
         Pipeline parameters:
             name, cutoff_states, device,
+            pka_predictor_cls,
             sfreq_cutoff_individual, sfreq_cutoff_combined,
             matrix_def, cutoff_export
 
@@ -600,6 +594,7 @@ class Autoprot:
     cutoff_export: float = 0.2
     matrix_def: str = 'dG'
     device: str = 'cpu' # fixed!
+    pka_predictor_cls: type[Predictor] = MolgpkaPredictor
     tautomer_search: bool = False
     max_tautomers: int = 20
     num_confs: int = 10
@@ -669,8 +664,16 @@ class Autoprot:
         logger.debug(f'Exclude acid indices: {self.exclude_acid_indices}')
         # logger.debug(f'Except indices: {self.except_indices}')
        
-        self.acid0 = predict_acid(self.mol0, self.model_acid, device=self.device) # returns pkas for map indices
-        self.base0 = predict_base(self.mol0, self.model_base, device=self.device) # returns pkas for map indices
+        self.acid0 = predict_acid(
+            self.mol0,
+            device=self.device,
+            predictor_cls=self.pka_predictor_cls,
+        ) # returns pkas for map indices
+        self.base0 = predict_base(
+            self.mol0,
+            device=self.device,
+            predictor_cls=self.pka_predictor_cls,
+        ) # returns pkas for map indices
 
         # print(self.exclude_base_indices)
 
@@ -775,7 +778,7 @@ class Autoprot:
         - Generating pH scan plots
         """
 
-        self.net_charges_arr = np.round(np.array(self.net_charges, dtype=np.float64),decimals=4)
+        self.net_charges_arr = np.array(np.round(np.array(self.net_charges),decimals=4),dtype=np.float64)
 
         self.pkas_macro = combine_pkas_macro(self.pHs, self.freqs_macro_all)
 
@@ -827,15 +830,8 @@ class Autoprot:
 
     def initialize_paths_models_libs(self) -> None:
         """
-        Initialize output directories, load ML models, and reset internal libraries.
+        Reset internal libraries used to cache state-dependent predictions.
         """
-
-        # molgpka ML models
-        model_file_base: Path = ROOT / 'weight_base.pth'
-        model_file_acid: Path = ROOT / 'weight_acid.pth'
-
-        self.model_base = load_model(model_file_base,device=self.device)
-        self.model_acid = load_model(model_file_acid,device=self.device)
 
         self.base_libs: dict[str, dict[str, dict[int, float]]] = {} # index_str, state_str, map_idx, value
         self.acid_libs: dict[str, dict[str, dict[int, float]]] = {} # index_str, state_str, map_idx, value
@@ -1090,7 +1086,7 @@ class Autoprot:
 
             mol_base = self.mols_libs[indices_str][state_str_base]
 
-            base_tmp = predict_base(mol_base, self.model_base, device=self.device)
+            base_tmp = predict_base(mol_base, device=self.device, predictor_cls=self.pka_predictor_cls)
             base = {}
             for map_idx, b in base_tmp.items():
                 if map_idx not in indices:
@@ -1106,7 +1102,7 @@ class Autoprot:
             mol_acid = self.mols_libs[indices_str][state_str_acid]
             # mol_acid_h = Chem.rdmolops.AddHs(mol_acid)
 
-            acid_tmp = predict_acid(mol_acid, self.model_acid, device=self.device)
+            acid_tmp = predict_acid(mol_acid, device=self.device, predictor_cls=self.pka_predictor_cls)
             
             acid = {}
             for map_idx, a in acid_tmp.items():

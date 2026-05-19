@@ -1,4 +1,10 @@
 """ Module to abstract pka prediction away from model """
+# mypy: disable-error-code=no-untyped-call
+
+from abc import ABC, abstractmethod
+from importlib import resources
+from pathlib import Path
+from typing import ClassVar
 
 import numpy as np
 from rdkit import Chem
@@ -6,11 +12,13 @@ from rdkit.Chem.rdchem import Mol
 
 from .special_cases import has_invalid_amine, has_nplus_base_proximity, has_phosphate, match_smarts, oh_ring_sulfonate
 from .external.net import GCNNet
+from .external.pka import load_model
 from .external.pka import predict_acid as molgpka_predict_acid
 from .external.pka import predict_base as molgpka_predict_base
 
-from abc import ABC, abstractmethod
-from typing import Any
+pkg_base = resources.files('autoprot')
+
+ROOT = Path(f'{pkg_base}/data')
 
 # from dataclasses import dataclass
 
@@ -39,43 +47,50 @@ def convert_base_map_idx(mol_h: Mol, base_res: dict[int, float]) -> dict[int, fl
 
 class Predictor(ABC):
 
-    def __init__(self, mol: Mol):
+    def __init__(self, mol: Mol, device: str = "cpu"):
         self.mol = mol
+        self.device = device
     
     @abstractmethod
-    def pred_acid(self, model: Any, device: str = "cpu") -> dict[int, float]:
+    def pred_acid(self) -> dict[int, float]:
         """Predict acidic pKa values keyed by atom map index."""
         ...
 
     @abstractmethod
-    def pred_base(self, model: Any, device: str = "cpu") -> dict[int, float]:
+    def pred_base(self) -> dict[int, float]:
         """Predict basic pKa values keyed by atom map index."""
         ...
 
 class MolgpkaPredictor(Predictor):
 
-    def __init__(self, mol: Mol):
-        super().__init__(mol)
+    model_file_base: ClassVar[Path] = ROOT / 'weight_base.pth'
+    model_file_acid: ClassVar[Path] = ROOT / 'weight_acid.pth'
+    _model_cache: ClassVar[dict[tuple[type, str], tuple[GCNNet, GCNNet]]] = {}
+
+    def __init__(self, mol: Mol, device: str = "cpu") -> None:
+        super().__init__(mol, device=device)
+        self.model_base, self.model_acid = self._load_models(device)
         self.mol_h = Chem.rdmolops.AddHs(Chem.Mol(mol))
         self.atom_indices = [atom.GetIdx() for atom in mol.GetAtoms()]
         self.qs = np.array([at.GetFormalCharge() for at in mol.GetAtoms()])
 
-    def pred_acid(
-        self,
-        model: GCNNet,
-        device: str = "cpu",
-    ) -> dict[int, float]:
-        acid = self._predict_acid_raw(model, device=device)
+    @classmethod
+    def _load_models(cls, device: str) -> tuple[GCNNet, GCNNet]:
+        cache_key = (cls, device)
+        if cache_key not in cls._model_cache:
+            model_base = load_model(cls.model_file_base, device=device)
+            model_acid = load_model(cls.model_file_acid, device=device)
+            cls._model_cache[cache_key] = (model_base, model_acid)
+        return cls._model_cache[cache_key]
+
+    def pred_acid(self) -> dict[int, float]:
+        acid = self._predict_acid_raw()
         return self._curate_acid(acid)
 
-    def _predict_acid_raw(
-        self,
-        model: GCNNet,
-        device: str = "cpu",
-    ) -> dict[int, float]:
+    def _predict_acid_raw(self) -> dict[int, float]:
         """Run molgpka acid prediction and convert results to atom map indices."""
 
-        acid = molgpka_predict_acid(self.mol_h, model, device=device)
+        acid = molgpka_predict_acid(self.mol_h, self.model_acid, device=self.device)
         return get_acid_neighbors(self.mol_h, acid)
 
     def _curate_acid(self, acid: dict[int, float]) -> dict[int, float]:
@@ -165,22 +180,14 @@ class MolgpkaPredictor(Predictor):
         acid = acid_curated
         return acid
 
-    def pred_base(
-        self,
-        model: GCNNet,
-        device: str = "cpu",
-    ) -> dict[int, float]:
-        base = self._predict_base_raw(model, device=device)
+    def pred_base(self) -> dict[int, float]:
+        base = self._predict_base_raw()
         return self._curate_base(base)
 
-    def _predict_base_raw(
-        self,
-        model: GCNNet,
-        device: str = "cpu",
-    ) -> dict[int, float]:
+    def _predict_base_raw(self) -> dict[int, float]:
         """Run molgpka base prediction and convert results to atom map indices."""
 
-        base_aid = molgpka_predict_base(self.mol_h, model, device=device)
+        base_aid = molgpka_predict_base(self.mol_h, self.model_base, device=self.device)
         return convert_base_map_idx(self.mol_h, base_aid)
 
     def _curate_base(self, base: dict[int, float]) -> dict[int, float]:
@@ -238,23 +245,20 @@ class MolgpkaPredictor(Predictor):
 
 def predict_acid(
     mol: Mol,
-    model: Any,
     device: str = "cpu",
     predictor_cls: type[Predictor] = MolgpkaPredictor,
 ) -> dict[int, float]:
     """Predict acidic pKa values with the selected predictor backend."""
 
-    predictor = predictor_cls(mol)
-    return predictor.pred_acid(model, device=device)
-
+    predictor = predictor_cls(mol, device=device)
+    return predictor.pred_acid()
 
 def predict_base(
     mol: Mol,
-    model: Any,
     device: str = "cpu",
     predictor_cls: type[Predictor] = MolgpkaPredictor,
 ) -> dict[int, float]:
     """Predict basic pKa values with the selected predictor backend."""
 
-    predictor = predictor_cls(mol)
-    return predictor.pred_base(model, device=device)
+    predictor = predictor_cls(mol, device=device)
+    return predictor.pred_base()
