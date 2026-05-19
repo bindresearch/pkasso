@@ -45,10 +45,7 @@ def preprocess(
     smiles_raw
         Input SMILES string representing the molecule.
     tautomer_search
-        Perform rough tautomer search using xtb energies for neutral state
-    xtb_optimize
-        Perform more expensive optimization for tautomer search
-
+        Perform rough tautomer search
     Returns
     -------
     mol
@@ -604,10 +601,7 @@ class Autoprot:
     device: str = 'cpu' # fixed!
     tautomer_search: bool = False
     max_tautomers: int = 20
-    use_xtb: int = False
-    xtb_optimize: bool = True
     num_confs: int = 10
-    tautomer_debug: bool = False
 
     def run_single(self, pH: float = 7.0) -> None:
         """
@@ -781,7 +775,7 @@ class Autoprot:
         - Generating pH scan plots
         """
 
-        self.net_charges_arr = np.round(np.array(self.net_charges),decimals=4)
+        self.net_charges_arr = np.round(np.array(self.net_charges, dtype=np.float64),decimals=4)
 
         self.pkas_macro = combine_pkas_macro(self.pHs, self.freqs_macro_all)
 
@@ -991,9 +985,8 @@ class Autoprot:
             Final set of stable coupling clusters.
         """
 
-        accept_clusters = False
         coupling_cutoff = 0.0
-        while not accept_clusters:
+        while True:
             logger.debug(f'coupling cutoff: {coupling_cutoff}')
             accept_clusters = True
             clusters = self.coupling_assay(indices0, q_options0, coupling_cutoff)
@@ -1006,9 +999,11 @@ class Autoprot:
                 if (N_states == 0):
                     accept_clusters = False
                     coupling_cutoff += 0.2
-        if coupling_cutoff > 1.5:
-            logger.info(f'Coupling cutoff high: {coupling_cutoff}')
-        return clusters
+                    break
+            if accept_clusters:
+                if coupling_cutoff > 1.5:
+                    logger.info(f'Coupling cutoff high: {coupling_cutoff}')
+                return clusters
 
     def construct_mols(self, state_strs: list[str], state_vecs: list[NDArray[np.int64]], indices: list[int]) -> None:
         """

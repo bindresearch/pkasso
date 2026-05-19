@@ -149,10 +149,11 @@ def add_exclusions(mol: Mol) -> tuple[list[int], list[int]]:
                 exclude_acid_indices = add_exclusion(exclude_acid_indices, mol, atom, smarts)
 
         if atom.GetSymbol() == 'N':
+            exclude_base_indices = add_exclusion(exclude_base_indices, mol, atom, smarts_carbonyl)
             # aromatic n
             if atom.GetIsAromatic():
                 for smarts in [
-                    smarts_carbonyl,
+                    
                     smarts_nnn,
                     smarts_ncnn
                 ]:
