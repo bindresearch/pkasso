@@ -15,7 +15,8 @@ from rdkit.Chem.MolStandardize import rdMolStandardize
 from rdkit.Chem.rdchem import Mol
 
 from . import coupling, special_cases, utils
-from .external.pka import load_model, predict_acid_base
+from .external.pka import load_model
+from .predict_pka import predict_acid, predict_base
 from .postprocess import combine_results
 from .transitions import calc_freqs_from_states, calc_state_diffs
 from .utils import pack_indices, pack_vec, unpack_vec
@@ -668,9 +669,8 @@ class Autoprot:
         logger.debug(f'Exclude acid indices: {self.exclude_acid_indices}')
         # logger.debug(f'Except indices: {self.except_indices}')
        
-        self.base0, self.acid0 = predict_acid_base(self.mol0,
-                                         self.model_base,self.model_acid,
-                                         device=self.device) # returns pkas for map indices
+        self.acid0 = predict_acid(self.mol0, self.model_acid, device=self.device) # returns pkas for map indices
+        self.base0 = predict_base(self.mol0, self.model_base, device=self.device) # returns pkas for map indices
 
         # print(self.exclude_base_indices)
 
@@ -1090,9 +1090,7 @@ class Autoprot:
 
             mol_base = self.mols_libs[indices_str][state_str_base]
 
-            base_tmp, _ = predict_acid_base(
-                    mol_base,self.model_base,self.model_acid,device=self.device,
-                    pred_acid=False)
+            base_tmp = predict_base(mol_base, self.model_base, device=self.device)
             base = {}
             for map_idx, b in base_tmp.items():
                 if map_idx not in indices:
@@ -1108,9 +1106,7 @@ class Autoprot:
             mol_acid = self.mols_libs[indices_str][state_str_acid]
             # mol_acid_h = Chem.rdmolops.AddHs(mol_acid)
 
-            _, acid_tmp = predict_acid_base(
-                    mol_acid,self.model_base,self.model_acid,device=self.device,
-                    pred_base=False)
+            acid_tmp = predict_acid(mol_acid, self.model_acid, device=self.device)
             
             acid = {}
             for map_idx, a in acid_tmp.items():
