@@ -1,17 +1,12 @@
-import os
-import re
-import math
-import tempfile
-import subprocess
+from __future__ import annotations
+
+from typing import TypedDict
 
 from rdkit import Chem
 from rdkit.Chem import AllChem
 from rdkit.Chem.MolStandardize import rdMolStandardize
 
 
-HARTREE_PER_KCAL_MOL = 1.0 / 627.5094740631
-GAS_CONSTANT_KCAL_MOL_K = 0.00198720425864083
-DEFAULT_TEMPERATURE_K = 298.15
 IMIDIC_ACID_PATTERN = Chem.MolFromSmarts(
     "[NX2;!$([N+])]=[CX3]([OX2H1])"
 )
@@ -25,33 +20,58 @@ HYDROXIMIC_ACID_PATTERN = Chem.MolFromSmarts(
     "[CX3]([OX2H1])=[NX2]-[OX2H1]"
 )
 
-def has_imidic_acid_amide_tautomer(mol):
+
+ConformerEnergy = tuple[int, float]
+
+
+class TautomerEntry(TypedDict):
+    """Store a prepared tautomer and its ranking data."""
+
+    idx: int
+    taut: Chem.Mol
+    mol3d: Chem.Mol
+    conf_energies: list[ConformerEnergy]
+    mmff_energy: float
+    rdkit_score: int
+
+
+def has_imidic_acid_amide_tautomer(mol: Chem.Mol) -> bool:
+    """Return whether a molecule matches an imidic or thioimidic acid pattern."""
+
     return (
         mol.HasSubstructMatch(IMIDIC_ACID_PATTERN)
         or mol.HasSubstructMatch(THIOIMIDIC_ACID_PATTERN)
     )
 
-def has_hydroxamate_tautomer(mol):
+
+def has_hydroxamate_tautomer(mol: Chem.Mol) -> bool:
+    """Return whether a molecule matches the hydroxamate tautomer pattern."""
+
     return mol.HasSubstructMatch(HYDROXAMATE_PATTERN)
 
-def has_hydroximic_acid_tautomer(mol):
+
+def has_hydroximic_acid_tautomer(mol: Chem.Mol) -> bool:
+    """Return whether a molecule matches the hydroximic acid tautomer pattern."""
+
     return mol.HasSubstructMatch(HYDROXIMIC_ACID_PATTERN)
 
+
 def rdkit_tautomer_conformers(
-    mol,
-    num_confs=10,
+    mol: Chem.Mol,
+    num_confs: int = 10,
     # random_seed=0xF00D,
-):
+) -> tuple[Chem.Mol, list[ConformerEnergy]] | None:
+    """Generate and MMFF-rank conformers for a tautomer."""
 
     mol = Chem.AddHs(mol)
 
-    params = AllChem.ETKDGv3()
+    params = AllChem.ETKDGv3() # type: ignore
 
     # Deterministic embeddings
     # params.randomSeed = random_seed
     params.useRandomCoords = False
 
-    conf_ids = AllChem.EmbedMultipleConfs(
+    conf_ids = AllChem.EmbedMultipleConfs( # type: ignore
         mol,
         numConfs=num_confs,
         params=params,
@@ -61,17 +81,17 @@ def rdkit_tautomer_conformers(
         return None
 
     # MMFF optimization
-    mmff_props = AllChem.MMFFGetMoleculeProperties(mol)
+    mmff_props = AllChem.MMFFGetMoleculeProperties(mol) # type: ignore
 
     if mmff_props is None:
         return None
 
-    results = AllChem.MMFFOptimizeMoleculeConfs(
+    results = AllChem.MMFFOptimizeMoleculeConfs( # type: ignore
         mol,
         mmffVariant="MMFF94s",
     )
 
-    conf_energies = []
+    conf_energies: list[ConformerEnergy] = []
 
     for conf_id, (_, energy) in zip(conf_ids, results):
         conf_energies.append((conf_id, energy))
@@ -80,15 +100,13 @@ def rdkit_tautomer_conformers(
 
     return mol, conf_energies
 
-def best_tautomer_smiles(
-    smiles,
-    max_tautomers: int = 20, # max number of tautomers for rdkit
-    num_confs: int = 10, # conformations per tautomer (rdkit)
-):
-    """Return a chemically plausible low-energy tautomer.
 
-    RDKit's tautomer score is used to rank tautomers followed by filtering.
-    """
+def best_tautomer_smiles(
+    smiles: str,
+    max_tautomers: int = 20,  # max number of tautomers for rdkit
+    num_confs: int = 10,  # conformations per tautomer (rdkit)
+) -> str:
+    """Return a chemically plausible tautomer SMILES using RDKit and MMFF ranking."""
 
     mol = Chem.MolFromSmiles(smiles)
 
@@ -111,7 +129,7 @@ def best_tautomer_smiles(
     # Generate conformers + MMFF pre-ranking
     # ---------------------------------------------------------
 
-    ranked = []
+    ranked: list[TautomerEntry] = []
 
     for i, taut in enumerate(tautomers):
 

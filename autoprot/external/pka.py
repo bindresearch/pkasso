@@ -9,7 +9,7 @@ from .descriptor import mol2vec
 from .ionization_group import get_ionization_aid
 from .net import GCNNet
 
-from autoprot.special_cases import match_smarts, oh_ring_sulfonate, has_nplus_base_proximity, has_invalid_amine, has_phosphate
+from ..special_cases import match_smarts, oh_ring_sulfonate, has_nplus_base_proximity, has_invalid_amine, has_phosphate
 
 def load_model(model_file: Path, device: str = "cpu") -> GCNNet:
     """ Load molgpka ML torch model. """
@@ -83,41 +83,6 @@ def predict_acid_base(
     ) -> tuple[dict[int, float], dict[int, float]]:
     """ Wrapper for acid-base prediction with molgpka. """
 
-    ### TODO: ###### ADD CORRECTION FOR PREVIOUS EXCEPTIONS! ####
-
-        # # Inject phosphate clusters:
-        # if self.phosphate_groups:
-        #     state_strs_poh, state_freqs_poh, oh_ids_poh = special_cases.calc_phosphate_clusters(
-        #             self.phosphate_groups,pH,self.matrix_def,
-        #     )
-        #     for state_strs, state_freqs, oh_ids in zip(state_strs_poh,state_freqs_poh,oh_ids_poh):
-        #         state_strs_clusters.append(state_strs)
-        #         state_freqs_clusters.append(state_freqs)
-        #         indices_clusters.append(oh_ids)
-
-        # if (self.invalid_amine_map_idx > 0) and (self.invalid_amine_map_idx in self.indices0):
-        #     pka = 10.4
-        #     ss_lower = 1 # basic, state_str 1 -> 2
-        #     state_strs_invalid_amine, state_freqs_invalid_amine = special_cases.calc_single_fixed_pka(
-        #         pH,
-        #         pka,
-        #         ss_lower,
-        #         self.matrix_def
-        #     )
-        #     state_strs_clusters.append(state_strs_invalid_amine)
-        #     state_freqs_clusters.append(state_freqs_invalid_amine)
-        #     indices_clusters.append([self.invalid_amine_map_idx])
-
-        # if len(self.NphenNOO_indices) > 0:
-        #     pka = 2.0
-        #     ss_lower = 1 # basic
-        #     for map_idx in self.NphenNOO_indices:
-        #         state_strs_NphenNOO, state_freqs_NphenNOO = special_cases.calc_single_fixed_pka(
-        #             pH,pka,ss_lower,self.matrix_def)
-        #         state_strs_clusters.append(state_strs_NphenNOO)
-        #         state_freqs_clusters.append(state_freqs_NphenNOO)
-        #         indices_clusters.append([map_idx])
-
     mol_h = Chem.rdmolops.AddHs(Chem.Mol(mol))
 
     atom_indices = [atom.GetIdx() for atom in mol.GetAtoms()]
@@ -167,13 +132,6 @@ def predict_acid_base(
             if (map_idx > 0) and (map_idx == invalid_amine_map_idx):
                 pka = 10.4
 
-            # pattern = Chem.MolFromSmarts(smarts_NN)
-            # _, matches = match_pattern(mol, pattern)
-            # for match in matches:
-            #     if at_idx in match:
-            #         pka -= 2.
-
-            # pka -= 2.
             if pka is not None:
                 # print(pka)
                 if map_idx == 0:
@@ -215,15 +173,8 @@ def predict_acid_base(
         matches_ncncO = match_smarts(mol, '[n;r6][c;r6][nH;r6][c;r6](=O)')
 
         acid_curated = {} # atom mapping
-        # for at_idx, pka in acid.items():
-            # atom = mol_h.GetAtomWithIdx(at_idx)
 
         phosphate_found, phosphate_groups = has_phosphate(mol)
-        
-        # print('-'*20)
-        # print(Chem.MolToSmiles(mol))
-        # print(phosphate_found)
-        # print(phosphate_groups)
 
         for at_idx, q in zip(atom_indices, qs):
             if q != 0.:
@@ -262,10 +213,7 @@ def predict_acid_base(
 
             for p_idx, oh_map_ids in phosphate_groups.items():
                 if map_idx in oh_map_ids:
-                    # if len(oh_map_ids) == 1:
-                    #     pka = 2.0
-                    # else:
-                    #     pka = 6.5
+
                     other_O_deprotonated = False
                     for atom in mol.GetAtoms():
                         o_map_idx = atom.GetAtomMapNum()
@@ -275,9 +223,9 @@ def predict_acid_base(
                                 other_O_deprotonated = True
                                 break
                     if other_O_deprotonated:
-                        pka = 6.5 # 2.0
+                        pka = 6.5
                     else:
-                        pka = 2.0 # 6.5
+                        pka = 2.0
 
                     # matches = match_smarts(mol_h, smarts_ON)
                     # for match in matches:
@@ -289,9 +237,6 @@ def predict_acid_base(
                 if map_idx == 0:
                     raise
                 acid_curated[map_idx] = pka
-        # if verbose:
-        # print('acid curated')
-        # print(acid_curated)
         acid = acid_curated
     else:
         acid = {}

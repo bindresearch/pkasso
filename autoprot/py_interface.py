@@ -11,7 +11,7 @@ from rdkit.Chem.rdchem import Mol
 from .main import Autoprot
 from .postprocess import Molecule, Scan
 
-def protonate(inp: str | Mol, pH: float = 7.0, **kwargs: Any) -> Molecule:
+def protonate(inp: str | Mol, pH: float = 7.0, **kwargs: Any) -> tuple[list[str], list[Mol]]:
     """
     Helper function to run autoprot via:
 

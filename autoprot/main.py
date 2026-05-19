@@ -20,53 +20,19 @@ from .postprocess import combine_results
 from .transitions import calc_freqs_from_states, calc_state_diffs
 from .utils import pack_indices, pack_vec, unpack_vec
 from .tautomers import best_tautomer_smiles
-from .special_cases import match_smarts
 
 logger = logging.getLogger(__name__)
 RDLogger.DisableLog("rdApp.*") # type: ignore
 
 pkg_base = resources.files('autoprot')
 
-ROOT = f'{pkg_base}/data'
-
-def overwrite_xtb_flag(mol):
-    smarts_complicated = [
-        r'[N]-[O]',
-        r'[N+]([O-])',
-        r'[O-][n+]',
-        r'[N]~[C](~[N])~[N]',
-        r'[n,N+]~[n,N+]',
-        r'[SX4](=[OX1])(=[OX1])',
-        
-        # r'c(~[#7])(~[#7])',
-    ]
-
-    for smarts in smarts_complicated:
-        matches = match_smarts(mol, smarts)
-        if len(matches) > 0:
-            return True # overwrite to more advance tautomer search
-        
-    ct_n = 0
-    ct_N = 0
-    for atom in mol.GetAtoms():
-        if atom.GetSymbol() == 'N':
-            if atom.GetIsAromatic():
-                ct_n += 1
-            else:
-                ct_N += 1
-    if ct_n >= 3 or (ct_n >= 2 and ct_N >= 2):
-        return True
-    
-    return False
+ROOT = Path(f'{pkg_base}/data')
 
 def preprocess(
         smiles_raw: str, 
         tautomer_search: bool = False,
         max_tautomers: int = 100,
-        use_xtb: bool = False,
-        xtb_optimize: bool = False,
         num_confs: int = 10,
-        tautomer_debug: bool = False,
     ) -> tuple[Mol,  str]:
     """ 
     Construct and standardize an RDKit molecule from a SMILES string.
@@ -104,10 +70,8 @@ def preprocess(
         smiles = best_tautomer_smiles(
             smiles,
             max_tautomers=max_tautomers,
-            use_xtb=use_xtb,
-            xtb_optimize=xtb_optimize,
             num_confs=num_confs,
-            debug=tautomer_debug)
+        )
     mol = Chem.MolFromSmiles(smiles, sanitize=True)
 
     logger.debug('Formal charges before cleanup')
@@ -143,10 +107,6 @@ def find_candidate_sites(
         exclude_base_indices: list[int],
         exclude_acid_indices: list[int],
         charged_indices: list[int],
-        # except_indices: list[int],
-        # except_q_options: NDArray[np.int64],
-        pH: float,
-        pH_band: float = 8.,
 ) -> tuple[list[int], NDArray[np.int64]]:
     """
     Determine possible protonation and deprotonation sites for a molecule.
@@ -168,11 +128,6 @@ def find_candidate_sites(
         Atom map indices that require special treatment
     except_q_options
         q_options for except_indices
-    pH
-        Target pH value used to evaluate protonation states.
-    pH_band
-        Allowed pKa tolerance around the pH when determining candidate
-        sites. Default is 8.
 
     Returns
     -------
@@ -203,22 +158,11 @@ def find_candidate_sites(
         q_options[rel_idx,1] = 1 # always allow stay
         if map_idx in prot_candidates:
             if map_idx not in exclude_base_indices:
-                if base[map_idx] >= pH - pH_band:
-                    q_options[rel_idx,2] = 1 # allow protonation
+                q_options[rel_idx,2] = 1 # allow protonation
         if map_idx in deprot_candidates:
             if map_idx not in exclude_acid_indices:
-                if acid[map_idx] <= pH + pH_band:
-                    q_options[rel_idx,0] = 1 # allow deprotonation
+                q_options[rel_idx,0] = 1 # allow deprotonation
 
-    # Add indices that should be considered but not recognized by molgpka
-    # for map_idx, q_option in zip(except_indices, except_q_options):
-    #     if map_idx not in indices:
-    #         indices.append(map_idx)
-    #         q_options = np.append(q_options, q_option)
-    #     else:
-    #         rel_idx = indices.index(map_idx)
-    #         q_options[rel_idx] = q_option # overwrite q_option if already present
-       
     ps = np.argsort(indices)
     indices = [indices[p] for p in ps]
     q_options = q_options[ps]
@@ -642,7 +586,7 @@ class Autoprot:
         Optional configuration parameters. Supported keys include:
 
         Pipeline parameters:
-            name, cutoff_states, device, pH_band,
+            name, cutoff_states, device,
             sfreq_cutoff_individual, sfreq_cutoff_combined,
             matrix_def, cutoff_export
 
@@ -657,7 +601,6 @@ class Autoprot:
     sfreq_cutoff_combined: float = 0.001
     cutoff_export: float = 0.2
     matrix_def: str = 'dG'
-    pH_band: float = 10.0
     device: str = 'cpu' # fixed!
     tautomer_search: bool = False
     max_tautomers: int = 20
@@ -709,7 +652,7 @@ class Autoprot:
         """
 
         logger.debug(self.name)
-        logger.debug(self.smiles, flush=True)
+        logger.debug(self.smiles)
 
         self.initialize_paths_models_libs()
         # self.prepare_neutral_state()
@@ -718,10 +661,8 @@ class Autoprot:
             self.smiles,
             tautomer_search=self.tautomer_search,
             max_tautomers=self.max_tautomers,
-            use_xtb=self.use_xtb,
-            xtb_optimize=self.xtb_optimize,
             num_confs=self.num_confs,
-            tautomer_debug=self.tautomer_debug)
+        )
 
         self.charged_indices = special_cases.find_charged(self.mol0)
         self.exclude_base_indices, self.exclude_acid_indices = special_cases.add_exclusions(self.mol0)
@@ -740,13 +681,13 @@ class Autoprot:
         # print(self.exclude_base_indices)
 
         self.indices0, self.q_options0 = find_candidate_sites(
-                self.base0, self.acid0, self.exclude_base_indices, self.exclude_acid_indices,
-                self.charged_indices, # self.except_indices, self.except_q_options,
-                0., pH_band=100)
-        
-        # print(self.q_options0)
+            self.base0,
+            self.acid0,
+            self.exclude_base_indices,
+            self.exclude_acid_indices,
+            self.charged_indices
+        )
 
-        # self.indices0 = list(sorted(self.indices0))
         self.indices0_str = pack_indices(self.indices0)
 
         # Screen coupling between residues, now pH independent
@@ -770,23 +711,12 @@ class Autoprot:
             state_freqs_clusters.append(state_freqs_cl)
             indices_clusters.append(indices_cl)
 
-        # if len(self.n_poor_arom_indices) > 0:
-        #     pka = 1.
-        #     ss_lower = 1
-        #     for map_idx in self.n_poor_arom_indices:
-        #         state_strs_tmp, state_freqs_tmp = special_cases.calc_single_fixed_pka(pH,pka,ss_lower,self.matrix_def)
-        #         state_strs_clusters.append(state_strs_tmp)
-        #         state_freqs_clusters.append(state_freqs_tmp)
-        #         indices_clusters.append([map_idx])
-
         # Combine clusters and their frequencies
         indices, state_strs, state_freqs_lib = combine_clusters(
             state_strs_clusters, state_freqs_clusters, indices_clusters, 
             sfreq_cutoff_individual=self.sfreq_cutoff_individual,
             sfreq_cutoff_combined=self.sfreq_cutoff_combined,
         )
-
-        # print(state_strs, state_freqs_lib)
 
         indices_str = pack_indices(indices)
         # Check if indices from clusters have been combined correctly to the full list of indices
@@ -796,20 +726,13 @@ class Autoprot:
         state_vecs = [unpack_vec(state_str) for state_str in state_strs]
         self.construct_mols(state_strs, state_vecs, indices)
 
-        # Reweight states by some criterion
-        # state_freqs_lib_reweighted = reweight_states(
-            # state_strs, state_freqs_lib, self.mols_libs[indices_str])
-
-        state_freqs_lib_reweighted = state_freqs_lib
-
         # Symmetry (combine frequencies for chemically identical microstates)
         state_strs_sym, state_freqs_sym = calc_symmetry(
-            state_strs, state_freqs_lib_reweighted, self.mols_libs[indices_str])
+            state_strs, state_freqs_lib, self.mols_libs[indices_str])
 
         # Macro-pka properties from combined microstates
         net_charge, state_qs, freqs_macro = calc_macro_props(
             state_strs_sym, state_freqs_sym, self.mols_libs[indices_str])
-        
 
         return net_charge, freqs_macro, state_strs_sym, state_freqs_sym, state_qs, indices
 
@@ -819,7 +742,7 @@ class Autoprot:
 
         For each pH value in the configured pH grid, this method:
 
-        - Identifies curated candidate titration sites (base on the pH window pH_band)
+        - Identifies curated candidate titration sites
         - Screens residue coupling and builds clusters of coupled sites
         - Processes each cluster to generate microstates and frequencies
         - Optionally injects phosphate-specific clusters
@@ -836,7 +759,7 @@ class Autoprot:
 
         for pH_idx, pH in enumerate(self.pHs.flat):
             # print(pH)
-            net_charge, freqs_macro, state_strs_sym, state_freqs_sym, state_qs, indices = self._calc_microstates(pH)
+            net_charge, freqs_macro, state_strs_sym, state_freqs_sym, state_qs, indices = self._calc_microstates(float(pH))
 
             self.net_charges.append(net_charge)
             self.freqs_macro_all.append(freqs_macro)
@@ -872,30 +795,32 @@ class Autoprot:
         """ Reduce number of states to max_states for plotting. """
 
         cutoff = 0.01
-        tries = 0
 
-        N_relevant_states = int(1e5)
-        while N_relevant_states > max_states:
-            state_strs_relevant = []
-            sfreqs_relevant = []
-            sfreqs_not_relevant = []
-            mols_relevant = []
-            pH_argmaxs = []
+        while True:
+            state_strs_relevant: list[str] = []
+            sfreqs_relevant: list[NDArray[np.float64]] = []
+            sfreqs_not_relevant: list[NDArray[np.float64]] = []
+            mols_relevant: list[Mol] = []
+            pH_argmaxs: list[int] = []
 
             for state_str, sfreqs in self.state_freqs_all.items():
                 if np.max(sfreqs) > cutoff:
                     state_strs_relevant.append(state_str)
                     sfreqs_relevant.append(sfreqs)
                     mols_relevant.append(self.mols_libs[self.indices0_str][state_str])
-                    pH_argmaxs.append(np.argmax(sfreqs))
+                    pH_argmaxs.append(int(np.argmax(sfreqs)))
                 else:
                     sfreqs_not_relevant.append(sfreqs)
+
             N_relevant_states = len(state_strs_relevant)
-            tries += 1
+            if N_relevant_states <= max_states:
+                break
+
             cutoff += 0.02
 
         # Sort by pH value of max freq.
-        ps = np.argsort(pH_argmaxs)
+        # ps = np.argsort(pH_argmaxs)
+        ps: list[int] = [int(p) for p in np.argsort(pH_argmaxs)]
 
         self.N_relevant_states = N_relevant_states
         self.state_strs_relevant = [state_strs_relevant[p] for p in ps]
@@ -912,8 +837,8 @@ class Autoprot:
         """
 
         # molgpka ML models
-        model_file_base: Path = f'{ROOT}/weight_base.pth'
-        model_file_acid: Path = f'{ROOT}/weight_acid.pth'
+        model_file_base: Path = ROOT / 'weight_base.pth'
+        model_file_acid: Path = ROOT / 'weight_acid.pth'
 
         self.model_base = load_model(model_file_base,device=self.device)
         self.model_acid = load_model(model_file_acid,device=self.device)
@@ -923,101 +848,10 @@ class Autoprot:
         self.smiles_libs: dict[str, dict[str, str]] = {} # index_str, state_str, smiles_str
         self.mols_libs: dict[str, dict[str, Mol]] = {} # index_str, state_str, rdkit Mol
 
-    # def prepare_neutral_state(self) -> None:
-    #     """
-    #     Prepare the neutral reference state of the molecule and compute
-    #     initial pKa predictions.
-
-    #     This method performs the following steps:
-
-    #     1. Preprocess the input SMILES into a standardized RDKit molecule.
-    #     2. Identify atom indices to exclude from protonation/deprotonation.
-    #     3. Identify special exception sites (e.g., phosphate groups).
-    #     4. Add explicit hydrogens to the molecule.
-    #     5. Predict base and acid pKa values using the loaded ML models.
-
-    #     The resulting molecule and prediction dictionaries are stored as
-    #     instance attributes for downstream pipeline steps.
-    #     """
-
-    #     self.mol0, self.smiles0 = preprocess(
-    #         self.smiles,
-    #         tautomer_search=self.tautomer_search,
-    #         max_tautomers=self.max_tautomers,
-    #         use_xtb=self.use_xtb,
-    #         xtb_optimize=self.xtb_optimize,
-    #         num_confs=self.num_confs,
-    #         tautomer_debug=self.tautomer_debug)
-
-    #     self.charged_indices = special_cases.find_charged(self.mol0)
-    #     self.exclude_base_indices, self.exclude_acid_indices = special_cases.add_exclusions(self.mol0)
-
-    #     self.except_indices, self.except_q_options = special_cases.add_except_indices(self.mol0)
-
-    #     logger.debug('Processed:')
-    #     logger.debug(self.smiles0)
-    #     logger.debug(f'Exclude base indices: {self.exclude_base_indices}')
-    #     logger.debug(f'Exclude acid indices: {self.exclude_acid_indices}')
-    #     logger.debug(f'Except indices: {self.except_indices}')
-
-    #     if self.phosphate_groups:
-    #         logger.debug(self.phosphate_groups)
-
-    #     mol0_h = Chem.rdmolops.AddHs(self.mol0)
-
-    #     self.base0, self.acid0 = predict_acid_base(mol0_h,
-    #                                      self.model_base,self.model_acid,
-    #                                      device=self.device) # returns pkas for map indices
-
-    # def calc_curated_indices(self, pH: float) -> tuple[list[int], NDArray[np.int64]]:
-    #     """
-    #     Determine protonation candidate sites and apply exception filtering
-    #     for a given pH value.
-
-    #     1. Identify possible protonation/deprotonation sites based on
-    #     predicted pKa values and the current pH.
-    #     2. Apply exclusion rules.
-    #     3. Split and remove exception sites (e.g., special functional groups).
-    #     4. Return the curated site indices along with the
-    #     corresponding state options.
-
-    #     Parameters
-    #     ----------
-    #     pH
-    #         Target pH value for state evaluation.
-
-    #     Returns
-    #     -------
-    #     indices0_curated
-    #         Curated indices after applying exception rules.
-    #     q_options0
-    #         Corresponding state option matrix.
-    #     """
-
-    #     logger.debug('='*50)
-    #     logger.debug(f'pH: {pH}',flush=True)
-    #     indices0, q_options0 = find_candidate_sites(
-    #         self.base0,
-    #         self.acid0,
-    #         self.exclude_base_indices,
-    #         self.exclude_acid_indices,
-    #         self.charged_indices,
-    #         pH,
-    #         pH_band=self.pH_band,
-    #     )
-    #     logger.debug(f'indices0: {indices0}')
-    #     logger.debug(f'q_options0: {q_options0}')
-    #     indices0_curated, q_options0 = special_cases.split_exceptions(indices0, q_options0, self.except_indices)
-
-    #     logger.debug(f'curated indices0: {indices0_curated}')
-    #     logger.debug(f'curated q_options0: {q_options0}')
-
-    #     return indices0_curated, q_options0
-
     def process_cluster(
         self,
         cluster: list[int],
-        indices0_curated: list[int],
+        indices0: list[int],
         q_options0: NDArray[np.int64],
         pH: float,
     ) -> tuple[list[str], NDArray[np.float64], list[int]]:
@@ -1029,7 +863,7 @@ class Autoprot:
         cluster
             Indices (relative to `indices0_curated`) defining the sites
             that belong to the current coupled cluster.
-        indices0_curated
+        indices0
             Absolute indices of all protonable sites after exclusion
             and exception handling.
         q_options0
@@ -1052,7 +886,7 @@ class Autoprot:
             Absolute atom map ids (GetAtomMapNum()) corresponding to this cluster.
         """
 
-        indices = [indices0_curated[c] for c in cluster]
+        indices = [indices0[c] for c in cluster]
         indices_str = pack_indices(indices)
 
         q_options = q_options0[cluster]
@@ -1072,7 +906,6 @@ class Autoprot:
             state_strs,
             state_vecs,
             ps_all,
-            # self.mols_libs[indices_str],
             self.matrix_def,
         )
         return state_strs, state_freqs, indices
@@ -1114,10 +947,6 @@ class Autoprot:
 
         state_vecs = coupling.construct_state_vectors_single(indices, q_options)
         state_strs = utils.calc_state_strs(state_vecs)
-
-        # print(indices)
-        # print(state_strs)
-        # print(q_options)
 
         self.construct_mols(state_strs, state_vecs, indices)
         self.run_acid_base_calcs(state_strs, state_vecs, indices)
@@ -1179,7 +1008,7 @@ class Autoprot:
                     coupling_cutoff += 0.2
         if coupling_cutoff > 1.5:
             logger.info(f'Coupling cutoff high: {coupling_cutoff}')
-        return clusters
+        return clusters # type: ignore
 
     def construct_mols(self, state_strs: list[str], state_vecs: list[NDArray[np.int64]], indices: list[int]) -> None:
         """
@@ -1265,7 +1094,6 @@ class Autoprot:
             state_str_base = pack_vec(state_vec_base)
 
             mol_base = self.mols_libs[indices_str][state_str_base]
-            # mol_base_h = Chem.rdmolops.AddHs(mol_base)
 
             base_tmp, _ = predict_acid_base(
                     mol_base,self.model_base,self.model_acid,device=self.device,
@@ -1353,7 +1181,7 @@ class Autoprot:
         indices_str = pack_indices(indices)
         self.check_chiral_consistency(state_strs, indices)
 
-        logger.debug(f'Export at pH {self.pH}:',flush=True)
+        logger.debug(f'Export at pH {self.pH}:')
         for e_idx, (state_str, sfreq) in enumerate(zip(state_strs_export, state_freqs_export)):
             logger.debug(e_idx, state_str, sfreq)
 
