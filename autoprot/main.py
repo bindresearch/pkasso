@@ -261,7 +261,7 @@ def construct_mol(mol0: Mol, indices: list[int], state_vec: NDArray[np.int64]) -
 # Cluster tests and operations
 
 @dataclass
-class ProtonationStateSpace:
+class ProtonationIndexSpace:
     """pH-independent caches for one fixed protonation site space."""
 
     indices: list[int]
@@ -276,19 +276,19 @@ class ProtonationStateSpace:
 
 
 @dataclass
-class StateSpaceRegistry:
-    """Registry of pH-independent state spaces keyed by atom map indices."""
+class IndexSpaceRegistry:
+    """Registry of pH-independent index spaces keyed by atom map indices."""
 
-    spaces: dict[str, ProtonationStateSpace] = field(default_factory=dict)
+    spaces: dict[str, ProtonationIndexSpace] = field(default_factory=dict)
 
     def get_or_create(
         self,
         indices: list[int],
         q_options: NDArray[np.int64],
-    ) -> ProtonationStateSpace:
+    ) -> ProtonationIndexSpace:
         indices_str = pack_indices(indices)
         if indices_str not in self.spaces:
-            self.spaces[indices_str] = ProtonationStateSpace(
+            self.spaces[indices_str] = ProtonationIndexSpace(
                 indices=list(indices),
                 q_options=q_options.copy(),
             )
@@ -297,15 +297,15 @@ class StateSpaceRegistry:
             raise ValueError(f"Conflicting q_options for indices {indices_str}")
         return space
 
-    def get(self, indices: list[int]) -> ProtonationStateSpace:
+    def get(self, indices: list[int]) -> ProtonationIndexSpace:
         return self.spaces[pack_indices(indices)]
 
 
 @dataclass
 class MicrostateDistribution:
-    """pH-dependent microstate distribution over one fixed state space."""
+    """pH-dependent microstate distribution over one fixed index space."""
 
-    state_space: ProtonationStateSpace
+    index_space: ProtonationIndexSpace
     pH: float
     state_strs: list[str]
     state_vecs: list[NDArray[np.int64]]
@@ -316,11 +316,11 @@ class MicrostateDistribution:
 
     @property
     def indices(self) -> list[int]:
-        return self.state_space.indices
+        return self.index_space.indices
 
     @property
     def mols_lib(self) -> dict[str, Mol]:
-        return self.state_space.mols_lib
+        return self.index_space.mols_lib
 
     def apply_symmetry(self) -> None:
         """Merge symmetry-equivalent states and keep state fields aligned."""
@@ -349,7 +349,7 @@ class MicrostateDistribution:
 
 def combine_cluster_distributions(
     cluster_dists: list[MicrostateDistribution],
-    state_space: ProtonationStateSpace,
+    index_space: ProtonationIndexSpace,
     pH: float,
     sfreq_cutoff_individual: float = 0.01,
     sfreq_cutoff_combined: float = 0.001,
@@ -373,7 +373,7 @@ def combine_cluster_distributions(
     ----------
     cluster_dists
         pH-dependent microstate distributions for independent clusters.
-    state_space
+    index_space
         Combined protonation state space that the output distribution belongs to.
     pH
         Current pH value.
@@ -387,7 +387,7 @@ def combine_cluster_distributions(
     Returns
     -------
     microstate_distribution
-        Combined microstate distribution over ``state_space``.
+        Combined microstate distribution over ``index_space``.
     """
 
     state_strs_clusters = [dist.state_strs for dist in cluster_dists]
@@ -423,8 +423,8 @@ def combine_cluster_distributions(
     ps = np.argsort(indices)
     indices = [indices[p] for p in ps]
     indices_str = pack_indices(indices)
-    if indices_str != state_space.indices_str:
-        raise ValueError(f"indices_str {indices_str} not equal state_space.indices_str {state_space.indices_str}")
+    if indices_str != index_space.indices_str:
+        raise ValueError(f"indices_str {indices_str} not equal to full indices list {index_space.indices_str}")
     
     for s_idxs in combinations:
         state_str = ''
@@ -443,7 +443,7 @@ def combine_cluster_distributions(
     state_freqs /= np.sum(state_freqs)
 
     return MicrostateDistribution(
-        state_space=state_space,
+        index_space=index_space,
         pH=pH,
         state_strs=state_strs,
         state_vecs=[unpack_vec(state_str) for state_str in state_strs],
@@ -724,7 +724,8 @@ class Autoprot:
         self.pH = pH
         self._setup()
         distribution = self._calc_microstates(self.pH)
-        self.prep_single_output(distribution)
+        molecule = self.prep_single_output(distribution)
+        return molecule
 
     def run_scan(
             self, 
@@ -792,12 +793,12 @@ class Autoprot:
         )
 
         self.indices0_str = pack_indices(self.indices0)
-        self.state_space0 = self.state_spaces.get_or_create(self.indices0, self.q_options0)
+        self.index_space0 = self.index_spaces.get_or_create(self.indices0, self.q_options0)
 
         # Screen coupling between residues, now pH independent
         self.clusters = self.screen_clusters(self.indices0, self.q_options0)
         self.cluster_spaces = [
-            self.state_spaces.get_or_create(
+            self.index_spaces.get_or_create(
                 [self.indices0[c] for c in cluster],
                 self.q_options0[cluster],
             )
@@ -818,13 +819,13 @@ class Autoprot:
         # Combine clusters and their frequencies
         dist = combine_cluster_distributions(
             cluster_dists,
-            self.state_space0,
+            self.index_space0,
             pH,
             sfreq_cutoff_individual=self.sfreq_cutoff_individual,
             sfreq_cutoff_combined=self.sfreq_cutoff_combined,
         )
 
-        self.construct_mols(dist.state_space, dist.state_strs, dist.state_vecs)
+        self.construct_mols(dist.index_space, dist.state_strs, dist.state_vecs)
 
         # Symmetry (combine frequencies for chemically identical microstates)
         dist.apply_symmetry()
@@ -907,7 +908,7 @@ class Autoprot:
                 if np.max(sfreqs) > cutoff:
                     state_strs_relevant.append(state_str)
                     sfreqs_relevant.append(sfreqs)
-                    mols_relevant.append(self.state_space0.mols_lib[state_str])
+                    mols_relevant.append(self.index_space0.mols_lib[state_str])
                     pH_argmaxs.append(int(np.argmax(sfreqs)))
                 else:
                     sfreqs_not_relevant.append(sfreqs)
@@ -936,11 +937,11 @@ class Autoprot:
         Reset internal libraries used to cache state-dependent predictions.
         """
 
-        self.state_spaces = StateSpaceRegistry()
+        self.index_spaces = IndexSpaceRegistry()
 
     def process_cluster(
         self,
-        space: ProtonationStateSpace,
+        space: ProtonationIndexSpace,
         pH: float,
     ) -> MicrostateDistribution:
         """ 
@@ -979,7 +980,7 @@ class Autoprot:
         )
         state_vecs = [unpack_vec(state_str) for state_str in state_strs]
         return MicrostateDistribution(
-            state_space=space,
+            index_space=space,
             pH=pH,
             state_strs=state_strs,
             state_vecs=state_vecs,
@@ -1019,7 +1020,7 @@ class Autoprot:
             mutually coupled sites.
         """
 
-        space = self.state_spaces.get_or_create(indices, q_options)
+        space = self.index_spaces.get_or_create(indices, q_options)
 
         state_vecs = coupling.construct_state_vectors_single(indices, q_options)
         state_strs = utils.calc_state_strs(state_vecs)
@@ -1089,7 +1090,7 @@ class Autoprot:
 
     def construct_mols(
         self,
-        space: ProtonationStateSpace,
+        space: ProtonationIndexSpace,
         state_strs: list[str],
         state_vecs: list[NDArray[np.int64]],
     ) -> None:
@@ -1127,7 +1128,7 @@ class Autoprot:
 
     def run_acid_base_calcs(
         self,
-        space: ProtonationStateSpace,
+        space: ProtonationIndexSpace,
         state_strs: list[str],
         state_vecs: list[NDArray[np.int64]],
     ) -> None:
@@ -1239,19 +1240,20 @@ class Autoprot:
         state_strs_export = [state_strs_export[p] for p in ps]
 
         self.check_chiral_consistency(distribution.state_strs, distribution.indices)
-        space = self.state_spaces.get(distribution.indices)
+        space = self.index_spaces.get(distribution.indices)
 
         logger.debug(f'Export at pH {self.pH}:')
         for e_idx, (state_str, sfreq) in enumerate(zip(state_strs_export, state_freqs_export)):
             logger.debug(e_idx, state_str, sfreq)
 
-        self.molecule = combine_results(
+        molecule = combine_results(
             self.name,
             state_strs_export,
             state_freqs_export,
             space.mols_lib,
             distribution.state_qs,
         )
+        return molecule
 
     def check_chiral_consistency(
         self,
@@ -1276,7 +1278,7 @@ class Autoprot:
             Absolute atom indices defining the current cluster.
         """
 
-        space = self.state_spaces.get(indices)
+        space = self.index_spaces.get(indices)
         for state_str in state_strs:
             mol = space.mols_lib[state_str]
 
