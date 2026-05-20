@@ -2,6 +2,7 @@
 
 import copy
 import logging
+import os
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -301,7 +302,7 @@ class Scan:
                 svg_mols.move(0, 420),
             ).save(f.name)
 
-            cairosvg.svg2pdf(url=f.name,write_to=file)
+            cairosvg.svg2pdf(url=f.name, write_to=os.fspath(file))
 
     def save_sdf(self, file: Path) -> None:
         """ 

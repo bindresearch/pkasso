@@ -715,7 +715,7 @@ class Autoprot:
     cutoff_states: int = 1000
     sfreq_cutoff_individual: float = 0.01
     sfreq_cutoff_combined: float = 0.001
-    cutoff_export: float = 0.2
+    cutoff_export: float = 1.0
     matrix_def: str = 'dG'
     device: str = 'cpu' # fixed!
     pka_predictor_cls: type[Predictor] = MolgpkaPredictor

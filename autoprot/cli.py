@@ -110,8 +110,9 @@ def cli() -> None:
 @click.option('--sdf-out', required=False, type=click.Path(path_type=Path), help='sdf output file name')
 @click.option(
     "--cutoff-export",
+    required=False,
     type=float,
-    default=0.2,
+    default=1.0,
     show_default=True,
     help='Min. probability of microstate w.r.t. highest probable microstate to be included for export',
 )
@@ -190,8 +191,9 @@ def single(
 )
 @click.option(
     "--cutoff-export",
+    required=False,
     type=float,
-    default=0.2,
+    default=1.0,
     show_default=True,
     help='Min. probability of microstate w.r.t. highest probable microstate to be included for export',
 )
@@ -265,7 +267,6 @@ def scan(
     cutoff_states: int,
     sfreq_cutoff_individual: float,
     sfreq_cutoff_combined: float,
-    cutoff_export: float, 
     tautomer_search: bool,
     max_tautomers: int,
     num_confs: int,
@@ -290,7 +291,6 @@ def scan(
         cutoff_states=cutoff_states,
         sfreq_cutoff_individual=sfreq_cutoff_individual,
         sfreq_cutoff_combined=sfreq_cutoff_combined,
-        cutoff_export=cutoff_export,
         tautomer_search=tautomer_search,
         max_tautomers=max_tautomers,
         num_confs=num_confs,
