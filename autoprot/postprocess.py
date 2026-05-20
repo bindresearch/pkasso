@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 ### import cairosvg before anything in rdkit.Chem.Draw, svgutils breaks otherwise !!
-import cairosvg  # type: ignore
+import cairosvg
 import matplotlib.pyplot as plt
 import numpy as np
 from numpy.typing import NDArray
@@ -17,7 +17,7 @@ from matplotlib.figure import Figure as Figure_plt
 from rdkit import Chem
 from rdkit.Chem import AllChem, Mol
 from rdkit.Chem.Draw import MolsToGridImage, MolDrawOptions
-from svgutils.compose import SVG, Figure  # type: ignore
+from svgutils.compose import SVG, Figure
 
 from .utils import is_jupyter, state_str_to_q
 

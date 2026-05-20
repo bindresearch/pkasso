@@ -3,7 +3,7 @@ from typing import Any
 import torch.nn.functional as F
 from torch import nn
 from torch.nn import BatchNorm1d, Linear
-from torch_geometric.nn import AttentionalAggregation  # type: ignore
+from torch_geometric.nn import AttentionalAggregation
 
 from .gcn_conv import GCNConv
 

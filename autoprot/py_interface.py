@@ -4,7 +4,7 @@ from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
-from tqdm import tqdm  # type: ignore
+from tqdm import tqdm
 from rdkit.Chem import MolToSmiles
 from rdkit.Chem.rdchem import Mol
 

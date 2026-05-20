@@ -5,7 +5,7 @@ import torch
 from rdkit import Chem
 from rdkit.Chem import AllChem
 from rdkit.Chem.rdchem import Mol
-from torch_geometric.data import Data  # type: ignore
+from torch_geometric.data import Data
 
 def one_hot(x: Any, allowable_set: list[Any]) -> list[bool]:
     if x not in allowable_set:
