@@ -46,11 +46,25 @@ COMMON_OPTIONS = [
         help='Min. probability of combined microstate (from independent clusters) to be considered',
     ),
     click.option(
-        "--ph-band",
-        type=float,
-        default=10.0,
+        "--tautomer-search/--no-tautomer-search",
+        is_flag=True,
+        default=True,
         show_default=True,
-        help='Allowed pKa tolerance around the pH when determining candidate sites',
+        help='Run tautomer search before Autoprot.'
+    ),
+    click.option(
+        "--max-tautomers",
+        type=int,
+        default=20,
+        show_default=True,
+        help='Max. number of tautomers to enumerate',
+    ),
+    click.option(
+        "--num-confs",
+        type=int,
+        default=10,
+        show_default=True,
+        help='Number of conformations per tautomer',
     ),
 ]
 
@@ -91,13 +105,13 @@ def cli() -> None:
 @click.option('--sdf-out', required=False, type=click.Path(path_type=Path), help='sdf output file name')
 @click.option(
     "--cutoff-export",
+    required=False,
     type=float,
-    default=0.2,
+    default=1.0,
     show_default=True,
     help='Min. probability of microstate w.r.t. highest probable microstate to be included for export',
 )
 @common_options
-# @click.pass_context
 def single(
     name: str,
     smiles: str,
@@ -108,7 +122,9 @@ def single(
     cutoff_states: int,
     sfreq_cutoff_individual: float,
     sfreq_cutoff_combined: float,
-    ph_band: float,
+    tautomer_search: bool,
+    max_tautomers: int,
+    num_confs: int,
 ) -> None:
     """ Run single protonation state prediction given a smiles string and pH values. """
 
@@ -121,8 +137,10 @@ def single(
         cutoff_states=cutoff_states,
         sfreq_cutoff_individual=sfreq_cutoff_individual,
         sfreq_cutoff_combined=sfreq_cutoff_combined,
-        pH_band=ph_band,
-        cutoff_export=cutoff_export
+        cutoff_export=cutoff_export,
+        tautomer_search=tautomer_search,
+        max_tautomers=max_tautomers,
+        num_confs=num_confs,
     )
     print(f'{name} | pH: {ph}')
     print('Microstate SMILES Probability Net_Charge')
@@ -153,7 +171,7 @@ def single(
     help='pH value (for sdf and csv output)'
 )
 @click.option(
-    '--overwrite',
+    '--overwrite/--no-overwrite',
     is_flag=True,
     default=True,
     help='Overwrite sdf file if exists'
@@ -167,13 +185,13 @@ def single(
 )
 @click.option(
     "--cutoff-export",
+    required=False,
     type=float,
-    default=0.2,
+    default=1.0,
     show_default=True,
     help='Min. probability of microstate w.r.t. highest probable microstate to be included for export',
 )
 @common_options
-# @click.pass_context
 def batch(
     smi: Path,
     ph: float,
@@ -184,8 +202,9 @@ def batch(
     cutoff_states: int,
     sfreq_cutoff_individual: float,
     sfreq_cutoff_combined: float,
-    ph_band: float,
-
+    tautomer_search: bool,
+    max_tautomers: int,
+    num_confs: int,
 ) -> None:
     """ Batch process an input .smi file and write output microstates to csv 
     (optionally write sdf files of individual molecules)"""
@@ -203,8 +222,10 @@ def batch(
             cutoff_states=cutoff_states,
             sfreq_cutoff_individual=sfreq_cutoff_individual,
             sfreq_cutoff_combined=sfreq_cutoff_combined,
-            pH_band=ph_band,
-            cutoff_export=cutoff_export
+            cutoff_export=cutoff_export,
+            tautomer_search=tautomer_search,
+            max_tautomers=max_tautomers,
+            num_confs=num_confs,
         )
         print(name, smiles_out)
 
@@ -232,15 +253,16 @@ def scan(
     smiles: str,
     min_ph: float,
     max_ph: float,
+    fig_out: Path,
+    sdf_out: Path,
+    pkas_out: Path,
     matrix_def: str,
     cutoff_states: int,
     sfreq_cutoff_individual: float,
     sfreq_cutoff_combined: float,
-    ph_band: float,
-    cutoff_export: float, 
-    fig_out: Path,
-    sdf_out: Path,
-    pkas_out: Path,
+    tautomer_search: bool,
+    max_tautomers: int,
+    num_confs: int,
 ) -> None:
     """ Scan pH values, output plot of microstate distributions and macro pKa values """
 
@@ -262,8 +284,9 @@ def scan(
         cutoff_states=cutoff_states,
         sfreq_cutoff_individual=sfreq_cutoff_individual,
         sfreq_cutoff_combined=sfreq_cutoff_combined,
-        pH_band=ph_band,
-        cutoff_export=cutoff_export
+        tautomer_search=tautomer_search,
+        max_tautomers=max_tautomers,
+        num_confs=num_confs,
     )
     
     scan.export_macro_pkas(file=pkas_out)

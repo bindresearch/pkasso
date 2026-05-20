@@ -1,9 +1,72 @@
+import importlib.util
+import sys
+import types
+from pathlib import Path
+
 import pytest
 import numpy as np
 
-from autoprot import main
-
 from rdkit import Chem
+
+
+def load_main_module():
+    root = Path(__file__).resolve().parents[1]
+    package = types.ModuleType("autoprot")
+    package.__path__ = [str(root / "autoprot")]
+
+    predict_pka = types.ModuleType("autoprot.predict_pka")
+    predict_pka.Predictor = object
+    predict_pka.MolgpkaPredictor = object
+
+    postprocess = types.ModuleType("autoprot.postprocess")
+    postprocess.Molecule = type("Molecule", (), {})
+    postprocess.Scan = type("Scan", (), {"__init__": lambda self, *args, **kwargs: None})
+    postprocess.combine_results = lambda *args, **kwargs: None
+
+    transitions = types.ModuleType("autoprot.transitions")
+    transitions.calc_freqs_from_states = lambda *args, **kwargs: None
+    transitions.calc_state_diffs = lambda *args, **kwargs: None
+
+    coupling = types.ModuleType("autoprot.coupling")
+    coupling.compare_pkas = lambda *args, **kwargs: None
+    coupling.find_coupled_sites = lambda *args, **kwargs: []
+
+    old_modules = {
+        name: sys.modules.get(name)
+        for name in (
+            "autoprot",
+            "autoprot.coupling",
+            "autoprot.main",
+            "autoprot.predict_pka",
+            "autoprot.postprocess",
+            "autoprot.transitions",
+        )
+    }
+
+    sys.modules["autoprot"] = package
+    sys.modules["autoprot.coupling"] = coupling
+    sys.modules["autoprot.predict_pka"] = predict_pka
+    sys.modules["autoprot.postprocess"] = postprocess
+    sys.modules["autoprot.transitions"] = transitions
+
+    spec = importlib.util.spec_from_file_location(
+        "autoprot.main",
+        root / "autoprot" / "main.py",
+    )
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["autoprot.main"] = module
+    spec.loader.exec_module(module)
+
+    for name, old_module in old_modules.items():
+        if old_module is None:
+            sys.modules.pop(name, None)
+        else:
+            sys.modules[name] = old_module
+
+    return module
+
+
+main = load_main_module()
 
 # @pytest.mark.parametrize(
 #     ("smiles_raw","net_charge"),
@@ -26,36 +89,7 @@ from rdkit import Chem
 #             assert (at_idx in exclude_base_indices) and (at_idx in exclude_acid_indices)
 #     assert Chem.GetFormalCharge(mol) == net_charge
 
-@pytest.mark.parametrize(
-    ("pH","pH_band","expected_indices","expected_q_options"),
-    [
-        (1., 4.5,
-         [0,1,2,3],
-         np.array([
-             [1,0,0,0],
-             [1,1,1,1],
-             [1,1,1,0]
-         ]).T
-         ),
-        (8., 4.5,
-         [0,1,2,3],
-         np.array([
-             [1,0,0,1],
-             [1,1,1,1],
-             [0,1,1,0]
-         ]).T
-         ),
-        (8., 0.,
-         [0,1,2,3],
-         np.array([
-             [1,0,0,0],
-             [1,1,1,1],
-             [0,0,1,0]
-         ]).T
-         ),
-    ],
-)
-def test_find_candidate_sites(pH,pH_band,expected_indices,expected_q_options):
+def test_find_candidate_sites():
     base = {
         0: 2.0,
         1: 7.0,
@@ -68,8 +102,41 @@ def test_find_candidate_sites(pH,pH_band,expected_indices,expected_q_options):
     exclude_acid_indices = []
     charged_indices = []
     indices, q_options = main.find_candidate_sites(
-        base, acid, exclude_base_indices, exclude_acid_indices, charged_indices, pH, pH_band=pH_band)
+        base, acid, exclude_base_indices, exclude_acid_indices, charged_indices)
+    expected_indices = [0, 1, 2, 3]
+    expected_q_options = np.array([
+        [1, 1, 1],
+        [0, 1, 1],
+        [0, 1, 1],
+        [1, 1, 0],
+    ])
     assert (np.allclose(indices,expected_indices)) and (np.allclose(q_options,expected_q_options))
+
+
+def test_find_candidate_sites_respects_excluded_and_charged_indices():
+    base = {
+        0: 2.0,
+        1: 7.0,
+        2: 12.0,
+    }
+    acid = {
+        0: 4.0,
+        3: 12.0,
+    }
+    indices, q_options = main.find_candidate_sites(
+        base,
+        acid,
+        exclude_base_indices=[1],
+        exclude_acid_indices=[0],
+        charged_indices=[2],
+    )
+    expected_indices = [0, 1, 3]
+    expected_q_options = np.array([
+        [0, 1, 1],
+        [0, 1, 0],
+        [1, 1, 0],
+    ])
+    assert (np.allclose(indices, expected_indices)) and (np.allclose(q_options, expected_q_options))
 
 def test_construct_state_vectors():
     q_options = np.array([
@@ -122,5 +189,5 @@ def test_construct_mol(smiles_raw,net_charge):
             indices.append(map_idx)
             state_vec.append(0)
     state_vec = np.array(state_vec)
-    mol_cand, _ = main.construct_mol(mol, indices, state_vec)
+    mol_cand = main.construct_mol(mol, indices, state_vec)
     assert Chem.GetFormalCharge(mol_cand) == net_charge

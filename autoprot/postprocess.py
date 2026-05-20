@@ -2,28 +2,30 @@
 
 import copy
 import logging
+import os
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 ### import cairosvg before anything in rdkit.Chem.Draw, svgutils breaks otherwise !!
-import cairosvg  # type: ignore
+import cairosvg
 import matplotlib.pyplot as plt
 import numpy as np
+from numpy.typing import NDArray
 from matplotlib.figure import Figure as Figure_plt
 from rdkit import Chem
 from rdkit.Chem import AllChem, Mol
 from rdkit.Chem.Draw import MolsToGridImage, MolDrawOptions
-from svgutils.compose import SVG, Figure  # type: ignore
+from svgutils.compose import SVG, Figure
 
 from .utils import is_jupyter, state_str_to_q
 
 logger = logging.getLogger(__name__)
 
-def draw_mols(mols, subImgSize=(250,200)):
+def draw_mols(mols: list[Mol], subImgSize: tuple[int, int] = (250, 200)) -> Any:
     opts = MolDrawOptions()
-    opts.backgroundColour = (1, 1, 1, 1)  # RGBA, values 0-1
+    opts.backgroundColour = (1, 1, 1, 1) # type: ignore
 
     img = MolsToGridImage( # type: ignore
     mols,
@@ -36,7 +38,7 @@ def draw_mols(mols, subImgSize=(250,200)):
     )
     return img
 
-def save_sdf(mols: list[Mol], file: Path):
+def save_sdf(mols: list[Mol], file: Path) -> None:
     """ Save embedded and optimized mols to sdf"""
     with Chem.SDWriter(file) as f:
         for mol in mols:
@@ -50,7 +52,7 @@ def save_sdf(mols: list[Mol], file: Path):
 
 @dataclass
 class Microstate:
-    """ Single microstate class. """
+    """ Single microstate class for output. """
 
     name: str
     name_state: str
@@ -61,7 +63,7 @@ class Microstate:
 
 @dataclass
 class Molecule:
-    """ Molecule class storing the microstate output from autoprot. """
+    """ Molecule class storing the microstate output from autoprot for output. """
 
     name: str
     microstates: list[Microstate]
@@ -69,37 +71,10 @@ class Molecule:
     def __post_init__(self) -> None:
         """ Add attributes to list properties of all microstates of a molecule. """
 
-        self.smiles = [m.smiles for m in self.microstates]
-        self.mols = [m.mol for m in self.microstates]
-        self.freqs = [m.freq for m in self.microstates]
-        self.qs = [m.q for m in self.microstates]
-
-    # def draw(self) -> Any:
-    #     """ Draw all microstates of a molecule. """
-
-    #     mols = [state.mol for state in self.microstates]
-    #     img = MolsToGridImage( # type: ignore
-    #         mols,molsPerRow=len(mols),subImgSize=(250,200),
-    #         legends=[x.GetProp("_Name") for x in mols],
-    #         returnPNG=False,useSVG=True
-    #         )
-    #     return img
-    
-    # def save(self, file: Path) -> None:
-    #     """ 
-    #     Write sdf file with all relevant mols, optimized geometry with rdkit.
-    #     Includes explicit hydrogens.
-    #     """
-
-    #     with Chem.SDWriter(file) as f:
-    #         for mol in self.mols:
-    #             mol_3d = copy.deepcopy(mol)
-    #             mol_h = Chem.AddHs(mol_3d)
-    #             cid = AllChem.EmbedMolecule(mol_h, randomSeed=1, useRandomCoords=True) # type: ignore
-    #             if cid != 0:
-    #                 raise ValueError(f'{mol.GetProp("_Name")} could not be embedded.')
-    #             AllChem.UFFOptimizeMolecule(mol_h) # type: ignore
-    #             f.write(mol_h)
+        self.smiles: list[str] = [m.smiles for m in self.microstates]
+        self.mols: list[Mol] = [m.mol for m in self.microstates]
+        self.freqs: list[float] = [m.freq for m in self.microstates]
+        self.qs: list[int] = [m.q for m in self.microstates]
 
 def combine_results(
         name: str,
@@ -118,7 +93,7 @@ def combine_results(
         mol.SetProp("_Name", name_state)
         mol.SetProp("Probability", f'{sfreq}')
         mol.SetProp('state_str', state_str)
-        for atom in mol.GetAtoms(): # type: ignore
+        for atom in mol.GetAtoms():
             atom.SetAtomMapNum(0)
         _ = AllChem.Compute2DCoords(mol) # type: ignore
         smiles = Chem.MolToSmiles(mol)
@@ -133,38 +108,6 @@ def combine_results(
     molecule = Molecule(name, microstates)
     return molecule
 
-# def df_from_mols(mols):
-    # pass
-    # def to_pandas(self) -> pd.DataFrame:
-    #     df = pd.DataFrame()
-    #     for name, molecule in self.molecules.items():
-    #         for m in molecule.microstates:
-    #             df.loc[m.name_state,'name'] = m.name
-    #             df.loc[m.name_state,'SMILES'] = m.smiles
-    #             df.loc[m.name_state,'frequency'] = m.freq
-    #             df.loc[m.name_state,'q'] = m.q
-    #     df.index.rename('name_state', inplace=True)
-    #     return df
-
-# @dataclass
-# class Batch:
-#     """
-#     Store the outputs of an autoprot batch processing run.
-#     """
-
-#     molecules: dict[str, Molecule]
-
-#     def to_pandas(self) -> pd.DataFrame:
-#         df = pd.DataFrame()
-#         for name, molecule in self.molecules.items():
-#             for m in molecule.microstates:
-#                 df.loc[m.name_state,'name'] = m.name
-#                 df.loc[m.name_state,'SMILES'] = m.smiles
-#                 df.loc[m.name_state,'frequency'] = m.freq
-#                 df.loc[m.name_state,'q'] = m.q
-#         df.index.rename('name_state', inplace=True)
-#         return df
-
 @dataclass
 class Scan:
     """ 
@@ -176,10 +119,10 @@ class Scan:
     indices: list[int]
     state_strs_relevant: list[str]
     mols_relevant: list[Mol]
-    sfreqs_relevant: list[np.ndarray]
-    pHs: np.ndarray
-    net_charges: np.ndarray
-    sfreqs_not_relevant: list[np.ndarray]
+    sfreqs_relevant: list[NDArray[np.float64]]
+    pHs: NDArray[np.float64]
+    net_charges: NDArray[np.float64]
+    sfreqs_not_relevant: list[NDArray[np.float64]]
     pkas_macro: dict[int, float]
 
     def __post_init__(self) -> None:
@@ -198,7 +141,7 @@ class Scan:
         for idx, (q, pka) in enumerate(self.pkas_macro.items()):
             print(f'pKa{idx+1} | {q+1} --> {q} | {pka:.3f}')
 
-    def plot_mols(self, size_x: float = 200, size_y: float = 175, molsPerRow=4) -> Any:
+    def plot_mols(self, size_x: int = 200, size_y: int = 175, molsPerRow: int = 4) -> Any:
         """ Plot rdkit molecules for relevant states together with state strings. 
         
         Returns IPython.core.display.SVG when called from notebook
@@ -207,11 +150,11 @@ class Scan:
         """
 
         opts = MolDrawOptions()
-        opts.backgroundColour = (1, 1, 1, 1)  # RGBA, values 0-1
+        opts.backgroundColour = (1, 1, 1, 1) # type: ignore
 
         for mol in self.mols_relevant:
             _ = AllChem.Compute2DCoords(mol) # type: ignore
-            for atom in mol.GetAtoms(): # type: ignore
+            for atom in mol.GetAtoms():
                 atom.SetAtomMapNum(0)
         
         fig_mols = MolsToGridImage(
@@ -306,8 +249,6 @@ class Scan:
         else:
             img_data = fig_mols
 
-        # img_data = img_data.replace('fill:#FFFFFF', 'fill:none')
-
         with tempfile.NamedTemporaryFile(suffix=".svg", mode="w", delete=True) as f:
             f.write(img_data)
             f.flush()
@@ -332,7 +273,7 @@ class Scan:
                 svg_mols.move(0, 420),
             ).save(f.name)
 
-            cairosvg.svg2pdf(url=f.name,write_to=file)
+            cairosvg.svg2pdf(url=f.name, write_to=os.fspath(file))
 
     def save_sdf(self, file: Path) -> None:
         """ 

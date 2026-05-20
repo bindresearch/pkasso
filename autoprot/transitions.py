@@ -2,10 +2,10 @@
 
 import logging
 
-import networkx as nx  # type: ignore
+import networkx as nx
 import numpy as np
 from numpy.typing import NDArray
-from scipy.sparse import csr_matrix  # type: ignore
+from scipy.sparse import csr_matrix
 
 from .utils import pack_vec
 
@@ -26,9 +26,6 @@ def calc_p_up_down(
     pka: float,
     pH: float,
     matrix_def: str,
-    # q_up: int,
-    # q_down: int,
-    # alpha_q: float = 0.0,
 ) -> tuple[float, float]:
     """Compute upward/downward transition values from a pKa at given pH.
 
@@ -51,9 +48,10 @@ def calc_p_up_down(
 
 def calc_state_freqs_sparse(tmatrix: NDArray[np.float64]) -> NDArray[np.float64]:
     """ Compute stationary distribution using power iteration. """
+    n_states = tmatrix.shape[0]
     P = csr_matrix(tmatrix)
 
-    pi: NDArray[np.float64] = np.ones(P.shape[0]) / P.shape[0]
+    pi: NDArray[np.float64] = np.ones(n_states) / n_states
     for idx in range(1000):
         pi = pi @ P
     return pi
@@ -79,15 +77,7 @@ def calc_raw_matrix(
         pss = [ps_up, ps_down]
         dqs = [1, -1]
 
-        # recipes = [
-            # [ps_up, 1],
-            # [ps_down, -1]
-        # ]
-
         for ps, dq in zip(pss, dqs):
-        # for rec in recipes:
-        #     ps = rec[0]
-        #     dq = rec[1]
 
             for rel_idx, p in ps.items():
                 state_target_vec = state_vec.copy()
@@ -142,7 +132,7 @@ def calc_dGmatrix(
     state_vecs: list[NDArray[np.int64]],
     ps_all: list[dict[str, dict[int, float]]],
     N_states: int,
-    ) -> list[NDArray[np.float64]]:
+    ) -> NDArray[np.float64]:
     """Construct matrix of pairwise free-energy differences between states."""
 
     matrix_raw, nonzero_entries = calc_raw_matrix(state_strs,state_vecs,ps_all,N_states,'dG')
@@ -192,6 +182,7 @@ def remove_orphans(
     """Keep the largest connected cluster and discard isolated states."""
 
     nmax = 0
+    keep_idx = 0
     for idx, dG_cluster in enumerate(dG_clusters):
         if len(dG_cluster) > nmax:
             keep_idx = idx
@@ -219,40 +210,6 @@ def check_connectivity(dG_matrix: NDArray[np.float64]) -> bool:
     connected = bool(nx.is_connected(G))
     return connected
 
-# def reconstruct_free_energies_incomplete_half(dG_matrix: NDArray[np.float64]) -> NDArray[np.float64]:
-#     """ Reconstruct absolute free energies from incomplete pairwise deltaG data. """
-#     N = dG_matrix.shape[0]
-#     rows, rhs = [], []
-
-#     # print(dG_matrix)
-
-#     if N == 1:
-#         return np.array([0.])
-
-#     for i in range(N):
-#         for j in range(i+1, N):
-#             if dG_matrix[i, j] == MISSING:
-#                 continue
-
-#             row = np.zeros(N)
-#             row[i] = -1.0
-#             row[j] =  1.0
-#             rows.append(row)
-#             rhs.append(dG_matrix[i, j])
-
-#     if not rows:
-#         raise ValueError("No valid transitions found.")
-
-#     A = np.vstack(rows)
-#     b = np.array(rhs)
-
-#     A = A[:, 1:]
-#     G_reduced, *_ = np.linalg.lstsq(A, b, rcond=None)
-
-#     G = np.zeros(N)
-#     G[1:] = G_reduced
-#     return G
-
 def calc_populations(Gs: NDArray[np.float64]) -> NDArray[np.float64]:
     """Compute Boltzmann populations from free energies."""
     Z: NDArray[np.float64] = np.sum(np.exp(-Gs))
@@ -263,7 +220,6 @@ def calc_freqs_from_states(
     state_strs: list[str],
     state_vecs: list[NDArray[np.int64]],
     ps_all: list[dict[str, dict[int, float]]],
-    # mols_lib: dict[str, Mol],
     matrix_def: str,
     ) -> tuple[list[str], NDArray[np.float64]]:
     """Compute microstate frequencies using MSM or dG reconstruction."""
@@ -279,34 +235,11 @@ def calc_freqs_from_states(
         is_connected = check_connectivity(dGmatrix)
         if not is_connected:
             raise ValueError('Matrix not connected (or not symmetric)')
-        # Gs = reconstruct_free_energies_incomplete_half(dGmatrix)
         Gs = reconstruct_free_energies_weighted(dGmatrix)
-        # print(state_strs)
-        # print(Gs)
         state_freqs = calc_populations(Gs)
-        # print(state_freqs)
-        # if len(state_strs) < 10:
-        #     filtered_ids = np.where(state_freqs>1e-5)[0]
-        #     # print(filtered_ids)
-        #     dGmatrix_filtered = dGmatrix[np.ix_(filtered_ids,filtered_ids)]
-        #     # print(dGmatrix_filtered)
-
-        #     if (len(filtered_ids) > 0) and (not np.mean(dGmatrix_filtered) == -1000.):
-        #         is_connected = check_connectivity(dGmatrix_filtered)
-        #         # print(is_connected)
-        #         if is_connected:
-        #             Gs_filtered = reconstruct_free_energies_incomplete_half(dGmatrix_filtered)
-        #             # print(Gs_filtered)
-        #             state_freqs = calc_populations(Gs_filtered)
-                    
-        #             state_strs = [state_strs[idx] for idx in filtered_ids]
-        #             # print(state_strs)
-        #             # print(state_freqs)
-        #             return state_strs, state_freqs
+    else:
+        raise ValueError
     return state_strs, state_freqs
-
-def Gs_from_prob(freqs):
-    return np.log(freqs)
 
 def calc_state_diffs(
     state_strs: list[str],
@@ -330,7 +263,6 @@ def calc_state_diffs(
 
         base = base_lib[state_str]
         acid = acid_lib[state_str]
-        # q = GetFormalCharge(mols_lib[state_str])
 
         for map_idx, pka in base.items():
             if map_idx not in indices: # Excluded at the start

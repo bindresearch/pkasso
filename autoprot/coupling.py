@@ -83,15 +83,15 @@ def compare_pkas(
 
     base_pka_diff = np.zeros(len(indices))
     acid_pka_diff = np.zeros(len(indices))
-    for rel_idx, at_idx in enumerate(indices):
+    for rel_idx, map_idx in enumerate(indices):
         if (q_options[rel_idx][2] == 1): # allowed for base
-            if (at_idx in base_lib[state_str0]) and (at_idx in base_lib[state_str1]):
-                base_pka_diff[rel_idx] = abs(base_lib[state_str1][at_idx] - base_lib[state_str0][at_idx])
+            if (map_idx in base_lib[state_str0]) and (map_idx in base_lib[state_str1]):
+                base_pka_diff[rel_idx] = abs(base_lib[state_str1][map_idx] - base_lib[state_str0][map_idx])
             else:
                 base_pka_diff[rel_idx] = 10. # one disappeared
         if (q_options[rel_idx][0] == 1): # allowed for acid
-            if (at_idx in acid_lib[state_str0]) and (at_idx in acid_lib[state_str1]):
-                acid_pka_diff[rel_idx] = abs(acid_lib[state_str1][at_idx] - acid_lib[state_str0][at_idx])
+            if (map_idx in acid_lib[state_str0]) and (map_idx in acid_lib[state_str1]):
+                acid_pka_diff[rel_idx] = abs(acid_lib[state_str1][map_idx] - acid_lib[state_str0][map_idx])
             else:
                 acid_pka_diff[rel_idx] = 10. # one disappeared
     return base_pka_diff, acid_pka_diff
