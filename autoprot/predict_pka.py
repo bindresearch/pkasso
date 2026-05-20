@@ -27,8 +27,6 @@ pkg_base = resources.files('autoprot')
 
 ROOT = Path(f'{pkg_base}/data')
 
-# from dataclasses import dataclass
-
 def get_acid_neighbors(mol_h: Mol, acid: dict[int, float]) -> dict[int, float]:
     """ Find heavy-atom neighbour for acidic proton. """
     acid_heavy = {}
@@ -38,9 +36,6 @@ def get_acid_neighbors(mol_h: Mol, acid: dict[int, float]) -> dict[int, float]:
         for bond in H_acid.GetBonds():
             neighbor = bond.GetOtherAtom(H_acid)
             neighbor_map_idx = neighbor.GetAtomMapNum()
-            # if verbose:
-                # print(f'Neighbor to acid H{at_idx}: {neighbor.GetSymbol()}{neighbor.GetIdx()}')
-                # print(f'pka: {pka}')
             acid_heavy[neighbor_map_idx] = pka
     return acid_heavy
 
@@ -175,7 +170,6 @@ class MolgpkaPredictor(Predictor):
                 else:
                     for smarts in [
                         smarts_sulfonamide,
-                        # smarts_diphenylamine,
                         smarts_Ncnn,
                         smarts_Nccn,
                         smarts_Nccn2,
@@ -274,12 +268,6 @@ class MolgpkaPredictor(Predictor):
                     else:
                         pka = 2.0
 
-                    # matches = match_smarts(mol_h, smarts_ON)
-                    # for match in matches:
-                    #     if (at_idx in match):
-                    #         pka += 0. # 2. # 3.
-                    #         continue
-                    # print(pka)
             if pka is not None:
                 if map_idx == 0:
                     raise
@@ -311,9 +299,6 @@ class MolgpkaPredictor(Predictor):
 
         smarts_diphenylamine = 'N(c)c'
         matches_diphenylamine = match_smarts(self.mol,smarts_diphenylamine)
-
-        # smarts_triphenylamine = 'N(c)(c)c'
-        # matches_triphenylamine = match_smarts(self.mol,smarts_triphenylamine)
 
         for at_idx, q in zip(self.atom_indices, self.qs):
             if q != 0.:
@@ -351,7 +336,6 @@ class MolgpkaPredictor(Predictor):
                 pka = 10.4
 
             if pka is not None:
-                # print(pka)
                 if map_idx == 0:
                     raise
                 base_curated[map_idx] = pka

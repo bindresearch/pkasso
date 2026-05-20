@@ -76,33 +76,6 @@ class Molecule:
         self.freqs: list[float] = [m.freq for m in self.microstates]
         self.qs: list[int] = [m.q for m in self.microstates]
 
-    # def draw(self) -> Any:
-    #     """ Draw all microstates of a molecule. """
-
-    #     mols = [state.mol for state in self.microstates]
-    #     img = MolsToGridImage( # type: ignore
-    #         mols,molsPerRow=len(mols),subImgSize=(250,200),
-    #         legends=[x.GetProp("_Name") for x in mols],
-    #         returnPNG=False,useSVG=True
-    #         )
-    #     return img
-    
-    # def save(self, file: Path) -> None:
-    #     """ 
-    #     Write sdf file with all relevant mols, optimized geometry with rdkit.
-    #     Includes explicit hydrogens.
-    #     """
-
-    #     with Chem.SDWriter(file) as f:
-    #         for mol in self.mols:
-    #             mol_3d = copy.deepcopy(mol)
-    #             mol_h = Chem.AddHs(mol_3d)
-    #             cid = AllChem.EmbedMolecule(mol_h, randomSeed=1, useRandomCoords=True) # type: ignore
-    #             if cid != 0:
-    #                 raise ValueError(f'{mol.GetProp("_Name")} could not be embedded.')
-    #             AllChem.UFFOptimizeMolecule(mol_h) # type: ignore
-    #             f.write(mol_h)
-
 def combine_results(
         name: str,
         state_strs: list[str],
@@ -275,8 +248,6 @@ class Scan:
             img_data = fig_mols.data
         else:
             img_data = fig_mols
-
-        # img_data = img_data.replace('fill:#FFFFFF', 'fill:none')
 
         with tempfile.NamedTemporaryFile(suffix=".svg", mode="w", delete=True) as f:
             f.write(img_data)

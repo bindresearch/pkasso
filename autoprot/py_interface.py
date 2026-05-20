@@ -39,7 +39,7 @@ def protonate(inp: str | Mol, pH: float = 7.0, **kwargs: Any) -> tuple[list[str]
     return molecule.smiles, molecule.mols
 
 def batch_protonate(
-        input_list: list[str | Mol], # dict[str, str],
+        input_list: list[str | Mol],
         pH: float = 7.0,
         **kwargs: Any) -> tuple[list[list[str]], list[list[Mol]]]:
     """
@@ -64,7 +64,7 @@ def batch_protonate(
 
     for inp in tqdm(input_list):
         ap = Autoprot(
-            inp, **kwargs) # name=name,
+            inp, **kwargs)
         molecule = ap.run_single(pH=pH)
 
         batch_smiles.append(molecule.smiles)

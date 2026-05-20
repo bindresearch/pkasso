@@ -34,7 +34,6 @@ def match_smarts(mol: Mol, smarts: str) -> tuple[tuple[int, ...], ...]:
     pattern = Chem.MolFromSmarts(smarts)
     assert pattern is not None, f"Invalid SMARTS pattern: {smarts}"
 
-    # found = mol.HasSubstructMatch(pattern)
     matches: tuple[tuple[int, ...], ...] = mol.GetSubstructMatches(pattern)
     return matches
 
@@ -267,7 +266,6 @@ def has_nplus_base_proximity(map_idx: int, mol: Mol, max_distance: int = 3) -> i
     assert atom0 is not None
     at_idx = atom0.GetIdx()
 
-    # atom0 = mol.GetAtomWithIdx(at_idx)
     if atom0.GetAtomicNum() != 7:
         return 0
     aromatic0 = atom0.GetIsAromatic()

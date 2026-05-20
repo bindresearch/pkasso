@@ -77,15 +77,7 @@ def calc_raw_matrix(
         pss = [ps_up, ps_down]
         dqs = [1, -1]
 
-        # recipes = [
-            # [ps_up, 1],
-            # [ps_down, -1]
-        # ]
-
         for ps, dq in zip(pss, dqs):
-        # for rec in recipes:
-        #     ps = rec[0]
-        #     dq = rec[1]
 
             for rel_idx, p in ps.items():
                 state_target_vec = state_vec.copy()
