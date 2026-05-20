@@ -3,8 +3,8 @@ from typing import Any, Optional, Tuple
 import torch
 from torch import Tensor
 from torch.nn import Parameter
-from torch_geometric.nn.conv import MessagePassing  # type: ignore
-from torch_geometric.utils import add_remaining_self_loops  # type: ignore
+from torch_geometric.nn.conv import MessagePassing
+from torch_geometric.utils import add_remaining_self_loops
 
 from .inits import glorot, zeros
 from .scatter import scatter_add

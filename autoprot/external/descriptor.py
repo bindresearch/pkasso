@@ -5,7 +5,7 @@ import torch
 from rdkit import Chem
 from rdkit.Chem import AllChem
 from rdkit.Chem.rdchem import Mol
-from torch_geometric.data import Data  # type: ignore
+from torch_geometric.data import Data
 
 def one_hot(x: Any, allowable_set: list[Any]) -> list[bool]:
     if x not in allowable_set:
@@ -13,7 +13,7 @@ def one_hot(x: Any, allowable_set: list[Any]) -> list[bool]:
     return list(map(lambda s: x == s, allowable_set))
 
 def get_bond_pair(mol: Mol) -> list[list[int]]:
-    bonds = mol.GetBonds() # type: ignore
+    bonds = mol.GetBonds()
     res: list[list[int]] = [[],[]]
     for bond in bonds:
         res[0] += [bond.GetBeginAtomIdx(), bond.GetEndAtomIdx()]
@@ -63,7 +63,6 @@ def get_atom_features(mol: Mol, aid: int) -> list[Any]:
                                                Chem.rdchem.HybridizationType.SP3,
                                                Chem.rdchem.HybridizationType.SP3D,
                                                Chem.rdchem.HybridizationType.SP3D2])
-        # o += [atom.GetImplicitValence()]
         o += [atom.GetValence(Chem.ValenceType.IMPLICIT)]
         o += [atom.GetIsAromatic()]
         o += [ring.IsAtomInRingOfSize(atom_idx, 3),

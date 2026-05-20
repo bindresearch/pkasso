@@ -4,14 +4,14 @@ from typing import Any
 
 import numpy as np
 from numpy.typing import NDArray
-from tqdm import tqdm  # type: ignore
+from tqdm import tqdm
 from rdkit.Chem import MolToSmiles
 from rdkit.Chem.rdchem import Mol
 
 from .main import Autoprot
-from .postprocess import Molecule, Scan
+from .postprocess import Scan
 
-def protonate(inp: str | Mol, pH: float = 7.0, **kwargs: Any) -> Molecule:
+def protonate(inp: str | Mol, pH: float = 7.0, **kwargs: Any) -> tuple[list[str], list[Mol]]:
     """
     Helper function to run autoprot via:
 
@@ -23,23 +23,23 @@ def protonate(inp: str | Mol, pH: float = 7.0, **kwargs: Any) -> Molecule:
     pH = 7.0
     cutoff_export = 0.2 
 
-    molecule = protonate(smiles, name=name, pH=pH, cutoff_export=cutoff_export)
+    smiles, mols = protonate(smiles, name=name, pH=pH, cutoff_export=cutoff_export)
     ```
     """
 
     if isinstance(inp, Mol):
-        smiles: str = MolToSmiles(inp)
+        smiles = MolToSmiles(inp)
     else:
-        smiles: str = inp
+        smiles = inp
 
     ap = Autoprot(
         smiles, **kwargs)
-    ap.run_single(pH=pH)
+    molecule = ap.run_single(pH=pH)
 
-    return ap.molecule.smiles, ap.molecule.mols
+    return molecule.smiles, molecule.mols
 
 def batch_protonate(
-        input_list: list[str | Mol], # dict[str, str],
+        input_list: list[str | Mol],
         pH: float = 7.0,
         **kwargs: Any) -> tuple[list[list[str]], list[list[Mol]]]:
     """
@@ -64,11 +64,11 @@ def batch_protonate(
 
     for inp in tqdm(input_list):
         ap = Autoprot(
-            inp, **kwargs) # name=name,
-        ap.run_single(pH=pH)
+            inp, **kwargs)
+        molecule = ap.run_single(pH=pH)
 
-        batch_smiles.append(ap.molecule.smiles)
-        batch_mols.append(ap.molecule.mols)
+        batch_smiles.append(molecule.smiles)
+        batch_mols.append(molecule.mols)
 
     return batch_smiles, batch_mols
 
@@ -101,17 +101,4 @@ def scan_pH(
 
     ap = Autoprot(
         inp, **kwargs)
-    ap.run_scan(pHs=pHs_arr)
-
-    scan = Scan(
-        ap.name,
-        ap.indices0,
-        ap.state_strs_relevant,
-        ap.mols_relevant,
-        ap.sfreqs_relevant,
-        ap.pHs,
-        ap.net_charges_arr,
-        ap.sfreqs_not_relevant,
-        ap.pkas_macro,
-    )
-    return scan
+    return ap.run_scan(pHs=pHs_arr)

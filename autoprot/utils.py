@@ -8,13 +8,13 @@ from numpy.typing import NDArray
 from rdkit.Chem.rdchem import Atom, Mol
 
 
-def pack_vec(state_vec: np.ndarray) -> str:
+def pack_vec(state_vec: NDArray[np.int64]) -> str:
     """ Pack vector into string. """
 
     state_str = "".join([str(x) for x in state_vec])
     return state_str
 
-def unpack_vec(state_str: str) -> np.ndarray:
+def unpack_vec(state_str: str) -> NDArray[np.int64]:
     """ Unpack string into vector. """
 
     state_vec = np.array([int(s) for s in state_str],dtype=int)
@@ -29,7 +29,7 @@ def calc_state_strs(state_vecs: list[NDArray[np.int64]]) -> list[str]:
         state_strs.append(state_str)
     return state_strs
 
-def calc_qs_all(state_vecs: list[np.ndarray]) -> list[np.ndarray]:
+def calc_qs_all(state_vecs: list[NDArray[np.int64]]) -> list[NDArray[np.int64]]:
     """ Convert state vectors into a vector of charges. """
 
     qs_all = []
@@ -41,12 +41,12 @@ def calc_qs_all(state_vecs: list[np.ndarray]) -> list[np.ndarray]:
 def get_atom_with_map_idx(mol: Mol, map_idx: int) -> Atom | None:
     """ Find atom of rdkit Mol object with specific map index. """
 
-    for atom in cast(list[Atom], mol.GetAtoms()): # type: ignore
+    for atom in cast(list[Atom], mol.GetAtoms()):
         if atom.GetAtomMapNum() == map_idx:
             return atom
     return None
 
-def sort_string(string: str, ps: np.ndarray) -> str:
+def sort_string(string: str, ps: NDArray[np.int64]) -> str:
     """ Sort string by custom indices ps. """
 
     s = list(string)
@@ -92,14 +92,10 @@ def state_str_to_q(state_str: str) -> str:
 def read_smi(smi: Path) -> dict[str, str]:
     """Parse input .smi files"""
 
-    # smiles_batch = []
-    # names_batch = []
     batch_dict: dict[str, str] = {}
 
     with open(smi,'r') as f:
         for line in f.readlines():
             spl = line.split()
             batch_dict[spl[1]] = spl[0]
-            # smiles_batch.append(spl[0])
-            # names_batch.append(spl[1])
     return batch_dict
