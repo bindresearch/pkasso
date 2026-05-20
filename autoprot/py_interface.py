@@ -9,7 +9,7 @@ from rdkit.Chem import MolToSmiles
 from rdkit.Chem.rdchem import Mol
 
 from .main import Autoprot
-from .postprocess import Molecule, Scan
+from .postprocess import Scan
 
 def protonate(inp: str | Mol, pH: float = 7.0, **kwargs: Any) -> tuple[list[str], list[Mol]]:
     """
@@ -65,10 +65,10 @@ def batch_protonate(
     for inp in tqdm(input_list):
         ap = Autoprot(
             inp, **kwargs) # name=name,
-        ap.run_single(pH=pH)
+        molecule = ap.run_single(pH=pH)
 
-        batch_smiles.append(ap.molecule.smiles)
-        batch_mols.append(ap.molecule.mols)
+        batch_smiles.append(molecule.smiles)
+        batch_mols.append(molecule.mols)
 
     return batch_smiles, batch_mols
 

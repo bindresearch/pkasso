@@ -1252,7 +1252,7 @@ class Autoprot:
     def prep_single_output(
         self,
         distribution: MicrostateDistribution,
-    ) -> None:
+    ) -> Molecule:
         """
         Generate microstate output for the selected pH value.
 
