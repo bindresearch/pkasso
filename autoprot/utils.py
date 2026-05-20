@@ -41,7 +41,7 @@ def calc_qs_all(state_vecs: list[NDArray[np.int64]]) -> list[NDArray[np.int64]]:
 def get_atom_with_map_idx(mol: Mol, map_idx: int) -> Atom | None:
     """ Find atom of rdkit Mol object with specific map index. """
 
-    for atom in cast(list[Atom], mol.GetAtoms()): # type: ignore
+    for atom in cast(list[Atom], mol.GetAtoms()):
         if atom.GetAtomMapNum() == map_idx:
             return atom
     return None

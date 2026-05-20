@@ -66,7 +66,7 @@ def preprocess(
     mol = Chem.MolFromSmiles(smiles, sanitize=True)
 
     logger.debug('Formal charges before cleanup')
-    charges = [at.GetFormalCharge() for at in mol.GetAtoms()] # type: ignore
+    charges = [at.GetFormalCharge() for at in mol.GetAtoms()]
     logger.debug(charges)
 
     mol = rdMolStandardize.Cleanup(mol)
@@ -83,11 +83,11 @@ def preprocess(
 
     # print(f'smiles after clean-up: {smiles}')
 
-    for atom in mol.GetAtoms(): # type: ignore
+    for atom in mol.GetAtoms():
         atom.SetAtomMapNum(atom.GetIdx() + 1)
 
     logger.debug('Formal charges after cleanup')
-    symbols = [at.GetFormalCharge() for at in mol.GetAtoms()] # type: ignore
+    symbols = [at.GetFormalCharge() for at in mol.GetAtoms()]
     logger.debug(symbols)
 
     return mol, smiles
@@ -1332,13 +1332,13 @@ class Autoprot:
             cid = AllChem.EmbedMolecule(mol_h, randomSeed=1, useRandomCoords=True) # type: ignore
             if cid != 0:
                 logger.warning(f'Needed to remove chirality for embedding for {state_str}!')
-                for atom in mol_h.GetAtoms(): # type: ignore
+                for atom in mol_h.GetAtoms():
                     atom.SetChiralTag(Chem.ChiralType.CHI_UNSPECIFIED) 
             cid = AllChem.EmbedMolecule(mol_h, randomSeed=1, useRandomCoords=True) # type: ignore
 
             if cid != 0:
                 raise ValueError(f'{state_str} could not be embedded.')
-            for atom in mol.GetAtoms(): # type: ignore
+            for atom in mol.GetAtoms():
                 atom.SetChiralTag(Chem.ChiralType.CHI_UNSPECIFIED)
             
             space.mols_lib[state_str] = mol

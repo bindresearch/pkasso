@@ -13,7 +13,7 @@ def one_hot(x: Any, allowable_set: list[Any]) -> list[bool]:
     return list(map(lambda s: x == s, allowable_set))
 
 def get_bond_pair(mol: Mol) -> list[list[int]]:
-    bonds = mol.GetBonds() # type: ignore
+    bonds = mol.GetBonds()
     res: list[list[int]] = [[],[]]
     for bond in bonds:
         res[0] += [bond.GetBeginAtomIdx(), bond.GetEndAtomIdx()]

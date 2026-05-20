@@ -93,7 +93,7 @@ def combine_results(
         mol.SetProp("_Name", name_state)
         mol.SetProp("Probability", f'{sfreq}')
         mol.SetProp('state_str', state_str)
-        for atom in mol.GetAtoms(): # type: ignore
+        for atom in mol.GetAtoms():
             atom.SetAtomMapNum(0)
         _ = AllChem.Compute2DCoords(mol) # type: ignore
         smiles = Chem.MolToSmiles(mol)
@@ -154,7 +154,7 @@ class Scan:
 
         for mol in self.mols_relevant:
             _ = AllChem.Compute2DCoords(mol) # type: ignore
-            for atom in mol.GetAtoms(): # type: ignore
+            for atom in mol.GetAtoms():
                 atom.SetAtomMapNum(0)
         
         fig_mols = MolsToGridImage(
