@@ -21,9 +21,9 @@ pip install .
 Basic example:
 
 ```
-autoprot --smiles 'OC(=O)C(c1ccc(O)cc1)CNCCN' --name mymolecule
+autoprot --smiles 'OC(=O)C(c1ccc(O)cc1)CNCCN'
 # equivalent to
-# autoprot single --smiles 'OC(=O)C(c1ccc(O)cc1)CNCCN' --name mymolecule
+# autoprot single --smiles 'OC(=O)C(c1ccc(O)cc1)CNCCN'
 ```
 
 Get help for different autoprot options (single prediction, batch prediction, pH scan) with
