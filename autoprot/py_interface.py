@@ -101,17 +101,4 @@ def scan_pH(
 
     ap = Autoprot(
         inp, **kwargs)
-    ap.run_scan(pHs=pHs_arr)
-
-    scan = Scan(
-        ap.name,
-        ap.indices0,
-        ap.state_strs_relevant,
-        ap.mols_relevant,
-        ap.sfreqs_relevant,
-        ap.pHs,
-        ap.net_charges_arr,
-        ap.sfreqs_not_relevant,
-        ap.pkas_macro,
-    )
-    return scan
+    return ap.run_scan(pHs=pHs_arr)

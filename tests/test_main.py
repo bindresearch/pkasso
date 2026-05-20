@@ -19,6 +19,8 @@ def load_main_module():
     predict_pka.MolgpkaPredictor = object
 
     postprocess = types.ModuleType("autoprot.postprocess")
+    postprocess.Molecule = type("Molecule", (), {})
+    postprocess.Scan = type("Scan", (), {"__init__": lambda self, *args, **kwargs: None})
     postprocess.combine_results = lambda *args, **kwargs: None
 
     transitions = types.ModuleType("autoprot.transitions")

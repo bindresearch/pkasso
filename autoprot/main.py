@@ -14,7 +14,7 @@ from rdkit.Chem.rdchem import Mol
 
 from . import coupling, special_cases, utils
 from .predict_pka import MolgpkaPredictor, Predictor
-from .postprocess import combine_results
+from .postprocess import Molecule, Scan, combine_results
 from .transitions import calc_freqs_from_states, calc_state_diffs
 from .utils import pack_indices, pack_vec, unpack_vec
 from .tautomers import best_tautomer_smiles
@@ -345,6 +345,22 @@ class MicrostateDistribution:
             self.state_freqs,
             self.state_qs,
         )
+
+
+@dataclass
+class PHScanDistribution:
+    """Internal raw pH-scan distribution before public Scan postprocessing.
+
+    This is the scan-level counterpart to MicrostateDistribution: it stores
+    numerical pH-scan data produced by the core engine. The public Scan class
+    in postprocess.py remains the outward-facing result with plotting and
+    export helpers.
+    """
+
+    pHs: NDArray[np.float64]
+    net_charges: list[float]
+    state_freqs_all: dict[str, NDArray[np.float64]]
+    freqs_macro_all: list[dict[int, float]]
 
 
 def combine_cluster_distributions(
@@ -712,7 +728,7 @@ class Autoprot:
 
         return self.pka_predictor_cls(mol, device=self.device)
 
-    def run_single(self, pH: float = 7.0) -> None:
+    def run_single(self, pH: float = 7.0) -> Molecule:
         """
         Run the full Autoprot pipeline.
 
@@ -730,15 +746,14 @@ class Autoprot:
     def run_scan(
             self, 
             pHs: NDArray[np.float64] = np.arange(0, 14.1, 0.5, dtype=np.float64),
-    ) -> None:
+    ) -> Scan:
         """
         Run pH scan
         """
 
-        self.pHs = pHs
         self._setup()
-        self._scan_pH()
-        self._finalize_scan()
+        distribution = self._scan_pH(pHs)
+        return self._finalize_scan(distribution)
 
     #########################
 
@@ -835,7 +850,7 @@ class Autoprot:
 
         return dist
 
-    def _scan_pH(self) -> None:
+    def _scan_pH(self, pHs: NDArray[np.float64]) -> PHScanDistribution:
         """
         Perform the full pH-dependent microstate enumeration and analysis.
 
@@ -852,26 +867,33 @@ class Autoprot:
         - Optionally exports pH-specific outputs
         """
 
-        self.net_charges: list[float] = []
-        self.state_freqs_all: dict[str, NDArray[np.float64]] = {}
-        self.freqs_macro_all: list[dict[int, float]] = []
+        net_charges: list[float] = []
+        state_freqs_all: dict[str, NDArray[np.float64]] = {}
+        freqs_macro_all: list[dict[int, float]] = []
 
-        for pH_idx, pH in enumerate(self.pHs.flat):
+        for pH_idx, pH in enumerate(pHs.flat):
             # print(pH)
             distribution = self._calc_microstates(float(pH))
 
             if distribution.net_charge is None or distribution.freqs_macro is None:
                 raise ValueError("Microstate distribution is missing macro properties.")
-            self.net_charges.append(distribution.net_charge)
-            self.freqs_macro_all.append(distribution.freqs_macro)
+            net_charges.append(distribution.net_charge)
+            freqs_macro_all.append(distribution.freqs_macro)
 
             # Add to results for pH scan
             for state_str, state_freq in zip(distribution.state_strs, distribution.state_freqs):
-                if state_str not in self.state_freqs_all:
-                    self.state_freqs_all[state_str] = np.zeros(len(self.pHs))
-                self.state_freqs_all[state_str][pH_idx] = state_freq
+                if state_str not in state_freqs_all:
+                    state_freqs_all[state_str] = np.zeros(len(pHs))
+                state_freqs_all[state_str][pH_idx] = state_freq
 
-    def _finalize_scan(self) -> None:
+        return PHScanDistribution(
+            pHs=pHs,
+            net_charges=net_charges,
+            state_freqs_all=state_freqs_all,
+            freqs_macro_all=freqs_macro_all,
+        )
+
+    def _finalize_scan(self, distribution: PHScanDistribution) -> Scan:
         """
         Post-process results, compute macro-pKa values, and generate outputs.
 
@@ -882,17 +904,48 @@ class Autoprot:
         - Generating pH scan plots
         """
 
-        self.net_charges_arr = np.array(np.round(np.array(self.net_charges),decimals=4),dtype=np.float64)
+        net_charges = np.array(
+            np.round(np.array(distribution.net_charges), decimals=4),
+            dtype=np.float64,
+        )
 
-        self.pkas_macro = combine_pkas_macro(self.pHs, self.freqs_macro_all)
+        pkas_macro = combine_pkas_macro(distribution.pHs, distribution.freqs_macro_all)
 
-        if self.state_freqs_all:
-            self.calc_relevant_states()
+        state_strs_relevant: list[str] = []
+        sfreqs_relevant: list[NDArray[np.float64]] = []
+        mols_relevant: list[Mol] = []
+        sfreqs_not_relevant: list[NDArray[np.float64]] = []
+
+        if distribution.state_freqs_all:
+            (
+                state_strs_relevant,
+                sfreqs_relevant,
+                mols_relevant,
+                sfreqs_not_relevant,
+            ) = self.calc_relevant_states(distribution.state_freqs_all)
+
+        return Scan(
+            self.name,
+            self.indices0,
+            state_strs_relevant,
+            mols_relevant,
+            sfreqs_relevant,
+            distribution.pHs,
+            net_charges,
+            sfreqs_not_relevant,
+            pkas_macro,
+        )
 
     def calc_relevant_states(
         self,
+        state_freqs_all: dict[str, NDArray[np.float64]],
         max_states: int = 18,
-        ) -> None: 
+        ) -> tuple[
+            list[str],
+            list[NDArray[np.float64]],
+            list[Mol],
+            list[NDArray[np.float64]],
+        ]:
         """ Reduce number of states to max_states for plotting. """
 
         cutoff = 0.01
@@ -904,7 +957,7 @@ class Autoprot:
             mols_relevant: list[Mol] = []
             pH_argmaxs: list[int] = []
 
-            for state_str, sfreqs in self.state_freqs_all.items():
+            for state_str, sfreqs in state_freqs_all.items():
                 if np.max(sfreqs) > cutoff:
                     state_strs_relevant.append(state_str)
                     sfreqs_relevant.append(sfreqs)
@@ -923,12 +976,13 @@ class Autoprot:
         # ps = np.argsort(pH_argmaxs)
         ps: list[int] = [int(p) for p in np.argsort(pH_argmaxs)]
 
-        self.N_relevant_states = N_relevant_states
-        self.state_strs_relevant = [state_strs_relevant[p] for p in ps]
-        self.sfreqs_relevant = [sfreqs_relevant[p] for p in ps]
-        self.mols_relevant = [mols_relevant[p] for p in ps]
-        self.sfreqs_not_relevant = sfreqs_not_relevant
-        logger.debug(f'Final N relevant states: {self.N_relevant_states} with cutoff {cutoff}')
+        logger.debug(f'Final N relevant states: {N_relevant_states} with cutoff {cutoff}')
+        return (
+            [state_strs_relevant[p] for p in ps],
+            [sfreqs_relevant[p] for p in ps],
+            [mols_relevant[p] for p in ps],
+            sfreqs_not_relevant,
+        )
 
     #########################
 
