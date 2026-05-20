@@ -48,33 +48,47 @@ smiles = r'OC(=O)C(c1ccc(O)cc1)CNCCN'
 pH = 7.0
 
 # Include microstates with probability of 20% compared to most probable microstate
-cutoff_export = 0.2 
+# Select cutoff_export = 1. to only output the most likely microstate
+cutoff_export = 0.2
 
-molecule = protonate(smiles, name=name, pH=pH, cutoff_export=cutoff_export)
-print(molecule.smiles)
-
-molecule.draw()
+# protonate accepts a smiles string or an rdkit Mol as input
+smiles_out, mols_out = protonate(smiles, name=name, pH=pH, cutoff_export=cutoff_export)
+print(smiles_out)
 ```
 
 ### Batch molecules (from .smi file)
 
 ```
-from autoprot import batch_protonate
+from autoprot import protonate
 
-batch_file = 'example_molecules.smi'
-batch = batch_protonate(batch_file, pH=7., cutoff_export=0.2)
+batch_input = [
+    'OC(=O)C(c1ccc(O)cc1)CNCCN',
+    'C1CNCCN(C1)S(=O)(=O)C2=CC=CC3=C2C=CN=C3',
+    'C1=C(NC=N1)CCN',
+]
 
-for name, molecule in batch.molecules.items():
-    print(name, molecule.smiles)
+# Use a simple for loop to batch protonate
+
+smiles_batch = []
+mols_batch = []
+
+for smiles in batch_input:
+    smiles_out, mols_out = protonate(smiles, pH=7., cutoff_export=0.2)
+    print(smiles_out)
+    smiles_batch.append(smiles_out)
+    mols_batch.append(mols_out)
+
+print(smiles_batch)
 ```
 
 ### pH scan (single molecule) in notebook
 
 ```
+%config InlineBackend.figure_format = 'svg'
 from autoprot import scan_pH
 from IPython.display import display
 
-# smiles = r'OC(=O)C(c1ccc(O)cc1)CNCCN'
+smiles = r'OC(=O)C(c1ccc(O)cc1)CNCCN'
 name = 'mymolecule'
 
 scan = scan_pH(
