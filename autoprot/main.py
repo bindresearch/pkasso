@@ -774,7 +774,6 @@ class Autoprot:
         logger.debug(self.smiles)
 
         self.initialize_paths_models_libs()
-        # self.prepare_neutral_state()
 
         self.mol0, self.smiles0 = preprocess(
             self.smiles,
@@ -786,18 +785,14 @@ class Autoprot:
         self.charged_indices = special_cases.find_charged(self.mol0)
         pka_predictor = self.pka_predictor(self.mol0)
         self.exclude_base_indices, self.exclude_acid_indices = pka_predictor.exclude_sites()
-        # self.except_indices, self.except_q_options = special_cases.add_except_indices(self.mol0)
 
         logger.debug('Processed:')
         logger.debug(self.smiles0)
         logger.debug(f'Exclude base indices: {self.exclude_base_indices}')
         logger.debug(f'Exclude acid indices: {self.exclude_acid_indices}')
-        # logger.debug(f'Except indices: {self.except_indices}')
        
         self.acid0 = pka_predictor.pred_acid() # returns pkas for map indices
         self.base0 = pka_predictor.pred_base() # returns pkas for map indices
-
-        # print(self.exclude_base_indices)
 
         self.indices0, self.q_options0 = find_candidate_sites(
             self.base0,
@@ -872,7 +867,6 @@ class Autoprot:
         freqs_macro_all: list[dict[int, float]] = []
 
         for pH_idx, pH in enumerate(pHs.flat):
-            # print(pH)
             distribution = self._calc_microstates(float(pH))
 
             if distribution.net_charge is None or distribution.freqs_macro is None:
@@ -973,7 +967,6 @@ class Autoprot:
             cutoff += 0.02
 
         # Sort by pH value of max freq.
-        # ps = np.argsort(pH_argmaxs)
         ps: list[int] = [int(p) for p in np.argsort(pH_argmaxs)]
 
         logger.debug(f'Final N relevant states: {N_relevant_states} with cutoff {cutoff}')
@@ -1215,7 +1208,7 @@ class Autoprot:
             logger.debug(state_str)
 
             state_vec_base = np.maximum(state_vec,1) # disregard de-protonations of other sites to assess base probability
-            # state_vec_base = state_vec
+
             state_str_base = pack_vec(state_vec_base)
 
             mol_base = space.mols_lib[state_str_base]
@@ -1230,11 +1223,9 @@ class Autoprot:
                     base[map_idx] = b
 
             state_vec_acid = np.minimum(state_vec,1) # disregard protonations of other sites to assess acid probability
-            # state_vec_acid = state_vec
             state_str_acid = pack_vec(state_vec_acid)
 
             mol_acid = space.mols_lib[state_str_acid]
-            # mol_acid_h = Chem.rdmolops.AddHs(mol_acid)
 
             acid_tmp = self.pka_predictor(mol_acid).pred_acid()
             

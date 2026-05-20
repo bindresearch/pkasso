@@ -92,14 +92,10 @@ def state_str_to_q(state_str: str) -> str:
 def read_smi(smi: Path) -> dict[str, str]:
     """Parse input .smi files"""
 
-    # smiles_batch = []
-    # names_batch = []
     batch_dict: dict[str, str] = {}
 
     with open(smi,'r') as f:
         for line in f.readlines():
             spl = line.split()
             batch_dict[spl[1]] = spl[0]
-            # smiles_batch.append(spl[0])
-            # names_batch.append(spl[1])
     return batch_dict

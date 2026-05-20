@@ -68,11 +68,6 @@ COMMON_OPTIONS = [
     ),
 ]
 
-# tautomer_search: bool = True
-#    max_tautomers: int = 20
-#    num_confs: int = 10
-
-
 def common_options(command: Callable[..., Any]) -> Callable[..., Any]:
     """Apply the Click options shared by all commands."""
 
@@ -117,7 +112,6 @@ def cli() -> None:
     help='Min. probability of microstate w.r.t. highest probable microstate to be included for export',
 )
 @common_options
-# @click.pass_context
 def single(
     name: str,
     smiles: str,
@@ -198,7 +192,6 @@ def single(
     help='Min. probability of microstate w.r.t. highest probable microstate to be included for export',
 )
 @common_options
-# @click.pass_context
 def batch(
     smi: Path,
     ph: float,

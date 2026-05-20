@@ -59,7 +59,6 @@ def has_hydroximic_acid_tautomer(mol: Chem.Mol) -> bool:
 def rdkit_tautomer_conformers(
     mol: Chem.Mol,
     num_confs: int = 10,
-    # random_seed=0xF00D,
 ) -> tuple[Chem.Mol, list[ConformerEnergy]] | None:
     """Generate and MMFF-rank conformers for a tautomer."""
 
@@ -67,8 +66,6 @@ def rdkit_tautomer_conformers(
 
     params = AllChem.ETKDGv3() # type: ignore
 
-    # Deterministic embeddings
-    # params.randomSeed = random_seed
     params.useRandomCoords = False
 
     conf_ids = AllChem.EmbedMultipleConfs( # type: ignore
