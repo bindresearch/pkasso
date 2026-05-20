@@ -23,7 +23,7 @@ def protonate(inp: str | Mol, pH: float = 7.0, **kwargs: Any) -> tuple[list[str]
     pH = 7.0
     cutoff_export = 0.2 
 
-    molecule = protonate(smiles, name=name, pH=pH, cutoff_export=cutoff_export)
+    smiles, mols = protonate(smiles, name=name, pH=pH, cutoff_export=cutoff_export)
     ```
     """
 
@@ -34,9 +34,9 @@ def protonate(inp: str | Mol, pH: float = 7.0, **kwargs: Any) -> tuple[list[str]
 
     ap = Autoprot(
         smiles, **kwargs)
-    ap.run_single(pH=pH)
+    molecule = ap.run_single(pH=pH)
 
-    return ap.molecule.smiles, ap.molecule.mols
+    return molecule.smiles, molecule.mols
 
 def batch_protonate(
         input_list: list[str | Mol], # dict[str, str],
