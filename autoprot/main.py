@@ -719,7 +719,7 @@ class Autoprot:
     matrix_def: str = 'dG'
     device: str = 'cpu' # fixed!
     pka_predictor_cls: type[Predictor] = MolgpkaPredictor
-    tautomer_search: bool = False
+    tautomer_search: bool = True
     max_tautomers: int = 20
     num_confs: int = 10
 
