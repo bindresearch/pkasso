@@ -23,15 +23,20 @@ from .utils import is_jupyter, state_str_to_q
 
 logger = logging.getLogger(__name__)
 
-def draw_mols(mols: list[Mol], subImgSize: tuple[int, int] = (250, 200)) -> Any:
+def draw_mols(mols: list[Mol], subImgSize: tuple[int, int] = (250, 200), max_cols=4, show_probability=True) -> Any:
     opts = MolDrawOptions()
     opts.backgroundColour = (1, 1, 1, 1) # type: ignore
 
+    if show_probability:
+        legends = [f'{x.GetProp("_Name")}\n{float(x.GetProp("Probability"))*100:.2f}'+r'%' for x in mols]
+    else:
+        legends = [f'{x.GetProp("_Name")}' for x in mols]
+
     img = MolsToGridImage( # type: ignore
     mols,
-    molsPerRow=len(mols),
+    molsPerRow=min(max_cols,len(mols)),
     subImgSize=subImgSize,
-    legends=[f'{x.GetProp("_Name")}\n{float(x.GetProp("Probability"))*100:.2f}'+r'%' for x in mols],
+    legends=legends,
     returnPNG=False,
     useSVG=True,
     drawOptions=opts,
@@ -161,17 +166,21 @@ class Scan:
             self.mols_relevant,
             molsPerRow=molsPerRow,
             subImgSize=(size_x,size_y),
-            legends=[state_str_to_q(x.GetProp("_Name")) for x in self.mols_relevant],
+            legends=[x.GetProp("_Name") for x in self.mols_relevant],
             returnPNG=False,
             useSVG=True,
             drawOptions=opts,
         ) # type: ignore
         return fig_mols
 
-    def plot_scan(self,
+    def plot_scan(
+        self,
+        highlight_idx = 0,
         ) -> Figure_plt:
         """ Plot scan of microstate frequencies for different pH values. """
         
+        # print(highlight_idx)
+
         if len(self.pHs) == 1:
             style = 'o'
         else:
@@ -194,7 +203,17 @@ class Scan:
                     color = cmap(idx/(len(self.state_strs_conv)-1))
             else:
                 color = cmap(0)
-            ax[0].plot(self.pHs,sfreq*100,style,label=state_str,color=color)
+            
+            alpha = 1.0
+            lw = 1.5
+            if highlight_idx > 0:
+                if highlight_idx-1 == idx:
+                    lw = 2.0
+                else:
+                    color = 'gray'
+                    alpha = 0.3
+                    lw = 1.0
+            ax[0].plot(self.pHs,sfreq*100,style,label=state_str,color=color,alpha=alpha,lw=lw)
         if len(self.state_strs_conv) > 8:
             ax[0].legend(ncol=2,fontsize=8)
         elif len(self.state_strs_conv) > 1:
