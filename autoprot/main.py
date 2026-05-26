@@ -16,7 +16,7 @@ from . import coupling, special_cases, utils
 from .predict_pka import MolgpkaPredictor, Predictor
 from .postprocess import Molecule, Scan, combine_results
 from .transitions import calc_freqs_from_states, calc_state_diffs
-from .utils import pack_indices, pack_vec, unpack_vec
+from .utils import pack_indices, pack_vec, unpack_vec, state_str_to_q
 from .tautomers import best_tautomer_smiles
 
 logger = logging.getLogger(__name__)
@@ -952,10 +952,15 @@ class Autoprot:
             pH_argmaxs: list[int] = []
 
             for state_str, sfreqs in state_freqs_all.items():
+                mol = self.index_space0.mols_lib[state_str]
+                mol.SetProp("_Name", state_str_to_q(state_str))
+                for atom in mol.GetAtoms():
+                    atom.SetAtomMapNum(0)
+
                 if np.max(sfreqs) > cutoff:
                     state_strs_relevant.append(state_str)
                     sfreqs_relevant.append(sfreqs)
-                    mols_relevant.append(self.index_space0.mols_lib[state_str])
+                    mols_relevant.append(mol)
                     pH_argmaxs.append(int(np.argmax(sfreqs)))
                 else:
                     sfreqs_not_relevant.append(sfreqs)
@@ -966,6 +971,9 @@ class Autoprot:
 
             cutoff += 0.02
 
+        # for state_str, mol in zip(state_strs_relevant, mols_relevant):
+            # mol.SetProp("_Name", state_str)
+        # print(mols_relevant[0].GetProp("_Name"))
         # Sort by pH value of max freq.
         ps: list[int] = [int(p) for p in np.argsort(pH_argmaxs)]
 
