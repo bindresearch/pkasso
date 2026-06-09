@@ -27,4 +27,4 @@ jobs:
           pip install .[dev]
 
       - name: Run mypy
-        run: mypy autoprot --ignore-missing-imports --strict
+        run: mypy pkasso --ignore-missing-imports --strict
