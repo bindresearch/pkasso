@@ -1,8 +1,8 @@
 # pKasso
 
-pKasso (pKa and state selection optimisation) determines protonation states for small molecules based on pKa calculations from a pKa predictor. Currently, MolGpKa (https://github.com/Xundrug/MolGpKa) is used to predict pKa values per sites, with plans to expand to other pKa predictors. 
+pKasso (pKa state selection optimisation) determines protonation states for small molecules based on pKa calculations from a pKa predictor. Currently, MolGpKa (https://github.com/Xundrug/MolGpKa) is used to predict pKa values per sites, with plans to expand to other pKa predictors. 
 
-pKasso enumerates protonation microstates (one microstate describes a unique charge pattern on the protonable sites of the molecule), screens pKa values between connected microstates and predicts pH-dependent microstate frequencies based on the graph of free energy differences between microstates. 
+One protonation microstate describes a unique charge pattern on the protonable sites of molecules. pKasso enumerates protonation microstates, screens pKa values between connected microstates, and predicts pH-dependent microstate frequencies based on the graph of free energy differences between microstates. 
 
 The program runs in different modes: 
 
