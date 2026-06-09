@@ -1,8 +1,8 @@
-# Autoprot
+# pKasso
 
-Autoprot determines protonation states for small molecules based on pKa calculations from MolGpKa (https://github.com/Xundrug/MolGpKa). 
+pKasso (pKa and state selection optimisation) determines protonation states for small molecules based on pKa calculations from a pKa predictor. Currently, MolGpKa (https://github.com/Xundrug/MolGpKa) is used to predict pKa values per sites, with plans to expand to other pKa predictors. 
 
-Autoprot enumerates protonation microstates (one microstate describes a unique charge pattern on the protonable sites of the molecule), screens pKa values between connected microstates and predicts pH-dependent microstate frequencies based on the graph of free energy differences between microstates. 
+pKasso enumerates protonation microstates (one microstate describes a unique charge pattern on the protonable sites of the molecule), screens pKa values between connected microstates and predicts pH-dependent microstate frequencies based on the graph of free energy differences between microstates. 
 
 The program runs in different modes: 
 
@@ -21,17 +21,17 @@ pip install .
 Basic example:
 
 ```
-autoprot --smiles 'OC(=O)C(c1ccc(O)cc1)CNCCN'
+pkasso --smiles 'OC(=O)C(c1ccc(O)cc1)CNCCN'
 # equivalent to
-# autoprot single --smiles 'OC(=O)C(c1ccc(O)cc1)CNCCN'
+# pkasso single --smiles 'OC(=O)C(c1ccc(O)cc1)CNCCN'
 ```
 
-Get help for different autoprot options (single prediction, batch prediction, pH scan) with
+Get help for different pKasso options (single prediction, batch prediction, pH scan) with
 ```
-autoprot --help
-autoprot single --help
-autoprot batch --help
-autoprot scan --help
+pkasso --help
+pkasso single --help
+pkasso batch --help
+pkasso scan --help
 ```
 
 # Python interface (e.g. in a notebook)
@@ -41,7 +41,7 @@ Also see the example jupyter notebook in `example/example.ipynb`
 ### Single molecule, single pH
 
 ```
-from autoprot import protonate
+from pkasso import protonate
 
 name = 'mymolecule'
 smiles = r'OC(=O)C(c1ccc(O)cc1)CNCCN'
@@ -59,7 +59,7 @@ print(smiles_out)
 ### Batch molecules (from .smi file)
 
 ```
-from autoprot import protonate
+from pkasso import protonate
 
 batch_input = [
     'OC(=O)C(c1ccc(O)cc1)CNCCN',
@@ -85,7 +85,7 @@ print(smiles_batch)
 
 ```
 %config InlineBackend.figure_format = 'svg'
-from autoprot import scan_pH
+from pkasso import scan_pH
 from IPython.display import display
 
 smiles = r'OC(=O)C(c1ccc(O)cc1)CNCCN'

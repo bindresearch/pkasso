@@ -3,14 +3,14 @@ requires = ["setuptools", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "autoprot"
-version = "0.4.0"
+name = "pkasso"
+version = "0.4.1"
 description = "Prediction of protonation states for small molecules"
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.10,<3.14"
 authors = [
-    { name = "Soeren von Buelow", email = "soeren.buelow@bindresearch.org" },
+    { name = "Bind Research", email = "soeren.buelow@bindresearch.org" },
 ]
 classifiers = [
     "Intended Audience :: Science/Research",
@@ -43,13 +43,13 @@ dev = [
 ]
 
 [project.scripts]
-autoprot = "autoprot.cli:run_cli"
+pkasso = "pkasso.cli:run_cli"
 
 [tool.setuptools.packages.find]
 where = ["."]
 
 [tool.setuptools.package-data]
-"autoprot" = ["data/*.csv", "data/*.pth", "data/*.tsv"]
+"pkasso" = ["data/*.csv", "data/*.pth", "data/*.tsv"]
 
 [tool.ruff]
 line-length = 127

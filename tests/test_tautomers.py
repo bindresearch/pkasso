@@ -6,7 +6,7 @@ def load_tautomers_module():
     root = Path(__file__).resolve().parents[1]
     spec = importlib.util.spec_from_file_location(
         "tautomers",
-        root / "autoprot" / "tautomers.py",
+        root / "pkasso" / "tautomers.py",
     )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
