@@ -21,7 +21,7 @@ def get_bond_pair(mol: Mol) -> list[list[int]]:
     return res
 
 def get_atom_features(mol: Mol, aid: int) -> list[Any]:
-    AllChem.ComputeGasteigerCharges(mol) # type: ignore
+    AllChem.ComputeGasteigerCharges(mol)
     Chem.AssignStereochemistry(mol)
 
     acceptor_smarts_one = '[!$([#1,#6,F,Cl,Br,I,o,s,nX3,#7v5,#15v5,#16v4,#16v6,*+1,*+2,*+3])]'

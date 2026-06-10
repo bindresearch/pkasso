@@ -38,7 +38,7 @@ class TautomerEntry(TypedDict):
 def has_imidic_acid_amide_tautomer(mol: Chem.Mol) -> bool:
     """Return whether a molecule matches an imidic or thioimidic acid pattern."""
 
-    return (
+    return bool(
         mol.HasSubstructMatch(IMIDIC_ACID_PATTERN)
         or mol.HasSubstructMatch(THIOIMIDIC_ACID_PATTERN)
     )
@@ -47,13 +47,13 @@ def has_imidic_acid_amide_tautomer(mol: Chem.Mol) -> bool:
 def has_hydroxamate_tautomer(mol: Chem.Mol) -> bool:
     """Return whether a molecule matches the hydroxamate tautomer pattern."""
 
-    return mol.HasSubstructMatch(HYDROXAMATE_PATTERN)
+    return bool(mol.HasSubstructMatch(HYDROXAMATE_PATTERN))
 
 
 def has_hydroximic_acid_tautomer(mol: Chem.Mol) -> bool:
     """Return whether a molecule matches the hydroximic acid tautomer pattern."""
 
-    return mol.HasSubstructMatch(HYDROXIMIC_ACID_PATTERN)
+    return bool(mol.HasSubstructMatch(HYDROXIMIC_ACID_PATTERN))
 
 
 def rdkit_tautomer_conformers(
@@ -64,11 +64,11 @@ def rdkit_tautomer_conformers(
 
     mol = Chem.AddHs(mol)
 
-    params = AllChem.ETKDGv3() # type: ignore
+    params = AllChem.ETKDGv3()
 
     params.useRandomCoords = False
 
-    conf_ids = AllChem.EmbedMultipleConfs( # type: ignore
+    conf_ids = AllChem.EmbedMultipleConfs(
         mol,
         numConfs=num_confs,
         params=params,
@@ -78,12 +78,12 @@ def rdkit_tautomer_conformers(
         return None
 
     # MMFF optimization
-    mmff_props = AllChem.MMFFGetMoleculeProperties(mol) # type: ignore
+    mmff_props = AllChem.MMFFGetMoleculeProperties(mol)
 
     if mmff_props is None:
         return None
 
-    results = AllChem.MMFFOptimizeMoleculeConfs( # type: ignore
+    results = AllChem.MMFFOptimizeMoleculeConfs(
         mol,
         mmffVariant="MMFF94s",
     )
@@ -115,7 +115,7 @@ def best_tautomer_smiles(
     tautomers = list(enumerator.Enumerate(mol))
 
     if len(tautomers) == 1:
-        return Chem.MolToSmiles(tautomers[0])
+        return str(Chem.MolToSmiles(tautomers[0]))
 
     if len(tautomers) > max_tautomers:
         print("Exceeding max tautomers, using input smiles.")
@@ -196,4 +196,4 @@ def best_tautomer_smiles(
     if len(ranked) == 0:
         return smiles
     else:
-        return Chem.MolToSmiles(ranked[0]["taut"])
+        return str(Chem.MolToSmiles(ranked[0]["taut"]))

@@ -13,6 +13,7 @@ import cairosvg
 import matplotlib.pyplot as plt
 import numpy as np
 from numpy.typing import NDArray
+from matplotlib.colors import to_rgba
 from matplotlib.figure import Figure as Figure_plt
 from rdkit import Chem
 from rdkit.Chem import AllChem, Mol
@@ -23,16 +24,21 @@ from .utils import is_jupyter, state_str_to_q
 
 logger = logging.getLogger(__name__)
 
-def draw_mols(mols: list[Mol], subImgSize: tuple[int, int] = (250, 200), max_cols=4, show_probability=True) -> Any:
+def draw_mols(
+        mols: list[Mol],
+        subImgSize: tuple[int, int] = (250, 200),
+        max_cols: int = 4,
+        show_probability: bool = True
+) -> Any:
     opts = MolDrawOptions()
-    opts.backgroundColour = (1, 1, 1, 1) # type: ignore
+    opts.backgroundColour = (1, 1, 1, 1)
 
     if show_probability:
         legends = [f'{x.GetProp("_Name")}\n{float(x.GetProp("Probability"))*100:.2f}'+r'%' for x in mols]
     else:
         legends = [f'{x.GetProp("_Name")}' for x in mols]
 
-    img = MolsToGridImage( # type: ignore
+    img = MolsToGridImage(
     mols,
     molsPerRow=min(max_cols,len(mols)),
     subImgSize=subImgSize,
@@ -49,10 +55,10 @@ def save_sdf(mols: list[Mol], file: Path) -> None:
         for mol in mols:
             mol_3d = copy.deepcopy(mol)
             mol_h = Chem.AddHs(mol_3d)
-            cid = AllChem.EmbedMolecule(mol_h, randomSeed=1, useRandomCoords=True) # type: ignore
+            cid = AllChem.EmbedMolecule(mol_h, randomSeed=1, useRandomCoords=True)
             if cid != 0:
                 raise ValueError(f'{mol.GetProp("_Name")} could not be embedded.')
-            AllChem.UFFOptimizeMolecule(mol_h) # type: ignore
+            AllChem.UFFOptimizeMolecule(mol_h)
             f.write(mol_h)
 
 @dataclass
@@ -100,7 +106,7 @@ def combine_results(
         mol.SetProp('state_str', state_str)
         for atom in mol.GetAtoms():
             atom.SetAtomMapNum(0)
-        _ = AllChem.Compute2DCoords(mol) # type: ignore
+        _ = AllChem.Compute2DCoords(mol)
         smiles = Chem.MolToSmiles(mol)
         mol.SetProp('SMILES', smiles)
         sfreq_out = sfreq/np.sum(state_freqs)
@@ -155,10 +161,10 @@ class Scan:
         """
 
         opts = MolDrawOptions()
-        opts.backgroundColour = (1, 1, 1, 1) # type: ignore
+        opts.backgroundColour = (1, 1, 1, 1)
 
         for mol in self.mols_relevant:
-            _ = AllChem.Compute2DCoords(mol) # type: ignore
+            _ = AllChem.Compute2DCoords(mol)
             for atom in mol.GetAtoms():
                 atom.SetAtomMapNum(0)
         
@@ -170,12 +176,12 @@ class Scan:
             returnPNG=False,
             useSVG=True,
             drawOptions=opts,
-        ) # type: ignore
+        )
         return fig_mols
 
     def plot_scan(
         self,
-        highlight_idx = 0,
+        highlight_idx: int = 0,
         ) -> Figure_plt:
         """ Plot scan of microstate frequencies for different pH values. """
         
@@ -210,7 +216,7 @@ class Scan:
                 if highlight_idx-1 == idx:
                     lw = 2.0
                 else:
-                    color = 'gray'
+                    color = to_rgba('gray')
                     alpha = 0.3
                     lw = 1.0
             ax[0].plot(self.pHs,sfreq*100,style,label=state_str,color=color,alpha=alpha,lw=lw)
@@ -304,8 +310,8 @@ class Scan:
             for mol in self.mols_relevant:
                 mol_3d = copy.deepcopy(mol)
                 mol_h = Chem.AddHs(mol_3d)
-                cid = AllChem.EmbedMolecule(mol_h, randomSeed=1, useRandomCoords=True) # type: ignore
+                cid = AllChem.EmbedMolecule(mol_h, randomSeed=1, useRandomCoords=True)
                 if cid != 0:
                     raise ValueError(f'{mol.GetProp("_Name")} could not be embedded.')
-                AllChem.UFFOptimizeMolecule(mol_h) # type: ignore
+                AllChem.UFFOptimizeMolecule(mol_h)
                 f.write(mol_h)
