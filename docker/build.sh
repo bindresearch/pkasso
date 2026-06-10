@@ -16,6 +16,7 @@ if ! docker info >/dev/null 2>&1; then
 fi
 
 docker build \
+  --no-cache \
   --file "${SCRIPT_DIR}/Dockerfile" \
   --tag "${IMAGE_NAME}" \
   "${REPO_ROOT}"
