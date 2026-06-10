@@ -1,9 +1,16 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import textwrap
 
-import uvicorn
+WEB_DEPENDENCIES = {
+    "fastapi": "fastapi",
+    "jinja2": "jinja2",
+    "multipart": "python-multipart",
+    "itsdangerous": "itsdangerous",
+    "uvicorn": "uvicorn",
+}
 
 
 def main() -> None:
@@ -12,6 +19,21 @@ def main() -> None:
     parser.add_argument("--port", default=8001, type=int)
     parser.add_argument("--reload", action="store_true", help="Reload when local code changes.")
     args = parser.parse_args()
+
+    missing = [
+        package_name
+        for module_name, package_name in WEB_DEPENDENCIES.items()
+        if importlib.util.find_spec(module_name) is None
+    ]
+    if missing:
+        parser.exit(
+            1,
+            "The pKasso web server dependencies are not installed.\n"
+            f"Missing: {', '.join(sorted(set(missing)))}.\n"
+            "Install them with: pip install 'pkasso[webserver]'\n",
+        )
+
+    import uvicorn
 
     url = f"http://{args.host}:{args.port}"
     print(textwrap.dedent(f"""

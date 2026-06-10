@@ -57,6 +57,7 @@ dev = [
 
 [project.scripts]
 pkasso = "pkasso.cli:run_cli"
+pkasso-web = "pkasso.api.app:main"
 
 [tool.setuptools.package-data]
 "pkasso" = [
