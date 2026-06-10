@@ -11,50 +11,50 @@ from rdkit import Chem
 
 def load_main_module():
     root = Path(__file__).resolve().parents[1]
-    package = types.ModuleType("autoprot")
-    package.__path__ = [str(root / "autoprot")]
+    package = types.ModuleType("pkasso")
+    package.__path__ = [str(root / "pkasso")]
 
-    predict_pka = types.ModuleType("autoprot.predict_pka")
+    predict_pka = types.ModuleType("pkasso.predict_pka")
     predict_pka.Predictor = object
     predict_pka.MolgpkaPredictor = object
 
-    postprocess = types.ModuleType("autoprot.postprocess")
+    postprocess = types.ModuleType("pkasso.postprocess")
     postprocess.Molecule = type("Molecule", (), {})
     postprocess.Scan = type("Scan", (), {"__init__": lambda self, *args, **kwargs: None})
     postprocess.combine_results = lambda *args, **kwargs: None
 
-    transitions = types.ModuleType("autoprot.transitions")
+    transitions = types.ModuleType("pkasso.transitions")
     transitions.calc_freqs_from_states = lambda *args, **kwargs: None
     transitions.calc_state_diffs = lambda *args, **kwargs: None
 
-    coupling = types.ModuleType("autoprot.coupling")
+    coupling = types.ModuleType("pkasso.coupling")
     coupling.compare_pkas = lambda *args, **kwargs: None
     coupling.find_coupled_sites = lambda *args, **kwargs: []
 
     old_modules = {
         name: sys.modules.get(name)
         for name in (
-            "autoprot",
-            "autoprot.coupling",
-            "autoprot.main",
-            "autoprot.predict_pka",
-            "autoprot.postprocess",
-            "autoprot.transitions",
+            "pkasso",
+            "pkasso.coupling",
+            "pkasso.main",
+            "pkasso.predict_pka",
+            "pkasso.postprocess",
+            "pkasso.transitions",
         )
     }
 
-    sys.modules["autoprot"] = package
-    sys.modules["autoprot.coupling"] = coupling
-    sys.modules["autoprot.predict_pka"] = predict_pka
-    sys.modules["autoprot.postprocess"] = postprocess
-    sys.modules["autoprot.transitions"] = transitions
+    sys.modules["pkasso"] = package
+    sys.modules["pkasso.coupling"] = coupling
+    sys.modules["pkasso.predict_pka"] = predict_pka
+    sys.modules["pkasso.postprocess"] = postprocess
+    sys.modules["pkasso.transitions"] = transitions
 
     spec = importlib.util.spec_from_file_location(
-        "autoprot.main",
-        root / "autoprot" / "main.py",
+        "pkasso.main",
+        root / "pkasso" / "main.py",
     )
     module = importlib.util.module_from_spec(spec)
-    sys.modules["autoprot.main"] = module
+    sys.modules["pkasso.main"] = module
     spec.loader.exec_module(module)
 
     for name, old_module in old_modules.items():

@@ -1,4 +1,4 @@
-"""Command-line interface for running AutoProt workflows."""
+"""Command-line interface for running pKasso workflows."""
 
 import os
 import sys
@@ -50,7 +50,7 @@ COMMON_OPTIONS = [
         is_flag=True,
         default=True,
         show_default=True,
-        help='Run tautomer search before Autoprot.'
+        help='Run tautomer search before pKasso.'
     ),
     click.option(
         "--max-tautomers",
@@ -180,7 +180,7 @@ def single(
     '--path-out',
     required=False,
     type=click.Path(path_type=Path),
-    default=Path('autoprot_output'),
+    default=Path('pkasso_output'),
     help='Output folder for sdf files'
 )
 @click.option(

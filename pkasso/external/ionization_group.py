@@ -8,7 +8,7 @@ from pandas import DataFrame
 from rdkit import Chem
 from rdkit.Chem import Mol
 
-pkg_base = resources.files('autoprot')
+pkg_base = resources.files('pkasso')
 root = f'{pkg_base}/data'
 
 SMARTS_FILE = os.path.join(root, "smarts_pattern.tsv")
