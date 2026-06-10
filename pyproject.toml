@@ -77,3 +77,13 @@ line-length = 127
 
 [tool.ruff.lint]
 select = ["E", "F"]
+
+[tool.mypy]
+python_version = "3.10"
+warn_unused_configs = true
+follow_imports_for_stubs = true
+
+[[tool.mypy.overrides]]
+module = ["rdkit", "rdkit.*"]
+follow_imports = "skip"
+ignore_missing_imports = true
