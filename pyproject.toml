@@ -40,7 +40,7 @@ dependencies = [
 
 [project.optional-dependencies]
 webserver = [
-    "fastapi",
+    "fastapi>=0.115,<1",
     "uvicorn[standard]",
     "jinja2",
     "python-multipart",
