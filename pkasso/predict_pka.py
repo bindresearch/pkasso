@@ -23,7 +23,7 @@ from .external.pka import load_model
 from .external.pka import predict_acid as molgpka_predict_acid
 from .external.pka import predict_base as molgpka_predict_base
 
-pkg_base = resources.files('autoprot')
+pkg_base = resources.files('pkasso')
 
 ROOT = Path(f'{pkg_base}/data')
 
@@ -195,7 +195,7 @@ class MolgpkaPredictor(Predictor):
         return get_acid_neighbors(self.mol_h, acid)
 
     def _curate_acid(self, acid: dict[int, float]) -> dict[int, float]:
-        """Apply AutoProt correction rules to raw acid pKa predictions."""
+        """Apply correction rules to raw acid pKa predictions."""
 
         matches_ncS = match_smarts(self.mol, '[n,nH,n+]~[c,C]~[S,s]')
 
@@ -286,7 +286,7 @@ class MolgpkaPredictor(Predictor):
         return convert_base_map_idx(self.mol_h, base_aid)
 
     def _curate_base(self, base: dict[int, float]) -> dict[int, float]:
-        """Apply AutoProt correction rules to raw base pKa predictions."""
+        """Apply pKasso correction rules to raw base pKa predictions."""
 
         base_curated = {} # atom mapping
 

@@ -1,4 +1,4 @@
-"""High-level Python interface for running AutoProt predictions."""
+"""High-level Python interface for running pKasso predictions."""
 
 from typing import Any
 
@@ -8,15 +8,15 @@ from tqdm import tqdm
 from rdkit.Chem import MolToSmiles
 from rdkit.Chem.rdchem import Mol
 
-from .main import Autoprot
+from .main import pKasso
 from .postprocess import Scan
 
 def protonate(inp: str | Mol, pH: float = 7.0, **kwargs: Any) -> tuple[list[str], list[Mol]]:
     """
-    Helper function to run autoprot via:
+    Helper function to run pkasso via:
 
     ```
-    from autoprot import protonate
+    from pkasso import protonate
 
     name = 'mymolecule'
     smiles = r'OC(=O)C(c1ccc(O)cc1)CNCCN'
@@ -32,7 +32,7 @@ def protonate(inp: str | Mol, pH: float = 7.0, **kwargs: Any) -> tuple[list[str]
     else:
         smiles = inp
 
-    ap = Autoprot(
+    ap = pKasso(
         smiles, **kwargs)
     molecule = ap.run_single(pH=pH)
 
@@ -47,7 +47,7 @@ def batch_protonate(
 
     Use:
     ```
-    from autoprot import batch_protonate
+    from pkasso import batch_protonate
 
     batch_input = [
         'C1CNCCN(C1)S(=O)(=O)C2=CC=CC3=C2C=CN=C3',
@@ -63,7 +63,7 @@ def batch_protonate(
     batch_mols: list[list[Mol]] = []
 
     for inp in tqdm(input_list):
-        ap = Autoprot(
+        ap = pKasso(
             inp, **kwargs)
         molecule = ap.run_single(pH=pH)
 
@@ -78,10 +78,10 @@ def scan_pH(
         **kwargs: Any
 ) -> Scan:
     """
-    Run autoprot pH scan
+    Run pkasso pH scan
 
     ```
-    from autoprot import scan_pH
+    from pkasso import scan_pH
 
     smiles = r'OC(=O)C(c1ccc(O)cc1)CNCCN'
     name = 'mymolecule'
@@ -99,6 +99,6 @@ def scan_pH(
 
     pHs_arr: NDArray[np.float64] = np.array(pHs)
 
-    ap = Autoprot(
+    ap = pKasso(
         inp, **kwargs)
     return ap.run_scan(pHs=pHs_arr)

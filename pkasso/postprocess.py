@@ -1,4 +1,4 @@
-"""Postprocessing utilities for AutoProt outputs."""
+"""Postprocessing utilities for pKasso outputs."""
 
 import copy
 import logging
@@ -68,7 +68,7 @@ class Microstate:
 
 @dataclass
 class Molecule:
-    """ Molecule class storing the microstate output from autoprot for output. """
+    """ Molecule class storing the microstate output from pKasso for output. """
 
     name: str
     microstates: list[Microstate]

@@ -1,4 +1,4 @@
-"""Core AutoProt workflow implementation."""
+"""Core pKasso workflow implementation."""
 
 import copy
 import itertools
@@ -689,9 +689,9 @@ def combine_pkas_macro(
 ###########
 
 @dataclass
-class Autoprot:
+class pKasso:
     """
-    Autoprot pipeline for protonation state prediction.
+    pKasso pipeline for protonation state prediction.
 
     Parameters
     ----------
@@ -730,7 +730,7 @@ class Autoprot:
 
     def run_single(self, pH: float = 7.0) -> Molecule:
         """
-        Run the full Autoprot pipeline.
+        Run the full pKasso pipeline.
 
         1. Setup of models and preprocessing.
         2. pH-dependent state enumeration and thermodynamic evaluation.
