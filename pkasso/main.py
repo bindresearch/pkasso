@@ -20,7 +20,7 @@ from .utils import pack_indices, pack_vec, unpack_vec, state_str_to_q
 from .tautomers import best_tautomer_smiles
 
 logger = logging.getLogger(__name__)
-RDLogger.DisableLog("rdApp.*") # type: ignore
+RDLogger.DisableLog("rdApp.*")
 
 def preprocess(
         smiles_raw: str, 
@@ -475,14 +475,14 @@ def smiles2hash(smiles: str | None) -> str | None:
 
     if smiles is None:
         return None
-    return RegistrationHash.GetMolHash(RegistrationHash.GetMolLayers(Chem.MolFromSmiles(smiles)))
+    return str(RegistrationHash.GetMolHash(RegistrationHash.GetMolLayers(Chem.MolFromSmiles(smiles))))
 
 def mol2hash(mol: Mol) -> str:
     """
     Generate a registration hash from an RDKit molecule.
     """
 
-    return RegistrationHash.GetMolHash(RegistrationHash.GetMolLayers(mol))
+    return str(RegistrationHash.GetMolHash(RegistrationHash.GetMolLayers(mol)))
 
 def calc_hashes(state_strs: list[str], mols_lib: dict[str, Mol]) -> list[str]:
     """
@@ -1337,12 +1337,12 @@ class pKasso:
 
             mol_h = Chem.AddHs(mol)
 
-            cid = AllChem.EmbedMolecule(mol_h, randomSeed=1, useRandomCoords=True) # type: ignore
+            cid = AllChem.EmbedMolecule(mol_h, randomSeed=1, useRandomCoords=True)
             if cid != 0:
                 logger.warning(f'Needed to remove chirality for embedding for {state_str}!')
                 for atom in mol_h.GetAtoms():
                     atom.SetChiralTag(Chem.ChiralType.CHI_UNSPECIFIED) 
-            cid = AllChem.EmbedMolecule(mol_h, randomSeed=1, useRandomCoords=True) # type: ignore
+            cid = AllChem.EmbedMolecule(mol_h, randomSeed=1, useRandomCoords=True)
 
             if cid != 0:
                 raise ValueError(f'{state_str} could not be embedded.')
