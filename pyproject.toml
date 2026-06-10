@@ -78,6 +78,10 @@ line-length = 127
 [tool.ruff.lint]
 select = ["E", "F"]
 
+[tool.ruff.lint.per-file-ignores]
+"pkasso/api/render.py" = ["E501"]
+"pkasso/api/web.py" = ["E501"]
+
 [tool.mypy]
 python_version = "3.10"
 warn_unused_configs = true
