@@ -10,7 +10,11 @@ readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.10,<3.14"
 authors = [
-    { name = "Bind Research", email = "soeren.buelow@bindresearch.org" },
+    { name = "Bind Research" },
+]
+maintainers = [
+    { name = "Soeren von Buelow", email = "soeren.buelow@bindresearch.org" },
+    { name = "Thomas Loehr", email = "thomas@bindresearch.org" },
 ]
 classifiers = [
     "Intended Audience :: Science/Research",
@@ -35,6 +39,15 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+webserver = [
+    "fastapi",
+    "uvicorn[standard]",
+    "jinja2",
+    "python-multipart",
+    "itsdangerous",
+]
+
+[dependency-groups]
 dev = [
     "pytest>=7,<9",
     "pytest-cov>=4,<8",
@@ -45,11 +58,20 @@ dev = [
 [project.scripts]
 pkasso = "pkasso.cli:run_cli"
 
-[tool.setuptools.packages.find]
-where = ["."]
-
 [tool.setuptools.package-data]
-"pkasso" = ["data/*.csv", "data/*.pth", "data/*.tsv"]
+"pkasso" = [
+    "data/*.csv",
+    "data/*.pth",
+    "data/*.tsv"]
+"pkasso.api" = [
+    "templates/*.html",
+    "static/*.css",
+    "static/*.js",
+    "static/*.svg",
+    "static/*.ico"]
+
+[tool.setuptools.packages.find]
+include = ["pkasso*"]
 
 [tool.ruff]
 line-length = 127
