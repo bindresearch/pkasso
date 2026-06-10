@@ -1,0 +1,11 @@
+.git
+.mypy_cache
+.pytest_cache
+.ruff_cache
+__pycache__
+*.egg-info
+*.pyc
+.coverage
+tests
+example
+docker/*.tar
