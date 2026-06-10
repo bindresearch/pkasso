@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en" data-theme="pkasso">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>pKasso</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://cdn.jsdelivr.net/npm/daisyui@4.12.24/dist/full.min.css" rel="stylesheet" type="text/css" />
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <link rel="icon" href="/static/favicon.ico" type="image/x-icon" />
+  <link href="/static/app.css" rel="stylesheet" type="text/css" />
+  <link href="/static/styles.css" rel="stylesheet" type="text/css" />
+</head>
+<body class="min-h-screen">
+  <!-- <header class="bind-header">
+    <div class="mx-auto flex max-w-7xl items-center justify-between gap-6 px-4 py-4">
+      <a href="/" class="flex items-center gap-3 text-inherit no-underline">
+        <img src="/static/bind-rounded_nobg.svg" alt="" class="h-10 w-10 object-contain" />
+        <div class="leading-tight">
+          <div class="text-lg font-semibold tracking-tight">Bind</div>
+          <div class="text-xs font-medium text-[color:var(--bind-muted)]">pKasso</div>
+        </div>
+      </a>
+      <div class="hidden text-sm font-medium text-[color:var(--bind-muted)] sm:block">
+        Microstate prediction and pH scan explorer
+      </div>
+    </div>
+  </header> -->
+  <header class="py-6 lg:py-10 bg-ice/50">
+    <div class="grid grid-cols-[1fr_auto] lg:grid-cols-[1fr_auto_1fr] items-center gap-8">
+
+      <!-- Logo -->
+      <div class="px-10 flex text-left">
+        <a href="/" class="text-teal hover:text-yellow mr-auto">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 708.57 281.18" class="w-full max-w-32">
+            <circle cx="242.87" cy="53.53" r="31.74" style="fill:#fbba3b"></circle>
+            <path d="M20.55 97.91c14.06-13.03 25-17.57 25-17.57V10.07C45.55 4.53 41.02 0 35.48 0H10.64C5.1 0 .57 4.53.57 10.07v111.07s7.12-11.31 19.98-23.23M708.19 121.14V10.07c0-5.54-4.53-10.07-10.07-10.07h-24.84c-5.54 0-10.07 4.53-10.07 10.07v70.28s10.94 4.54 25 17.57c12.86 11.92 19.98 23.23 19.98 23.23ZM97.82 85.57c-52.35 0-95.2 41.38-97.59 93.15.94 8.95 5.05 23.35 21.74 23.71 16.42.35 21.56-11.01 23.17-18.38 0-.26-.02-.52-.02-.78 0-29.06 23.64-52.7 52.7-52.7s52.7 23.64 52.7 52.7-23.11 52.15-51.72 52.67h-1.92c-.61-.01-1.22-.02-1.82-.05 0 .02 0 .03-.01.05H10.07C4.53 235.94 0 240.47 0 246.01v24.84c0 5.54 4.53 10.07 10.07 10.07h84.72c1.01.03 2.02.05 3.04.05s1.98-.02 2.96-.05h.67c.38 0 .76-.03 1.13-.07 51.67-2.49 92.93-45.31 92.93-97.58s-43.83-97.7-97.7-97.7M698.5 235.94h-84.98s0-.03-.01-.05c-.6.03-1.21.04-1.82.05h-1.92c-28.61-.53-51.72-23.94-51.72-52.67s23.64-52.7 52.7-52.7 52.7 23.64 52.7 52.7c0 .26-.02.52-.02.78 1.61 7.38 6.75 18.73 23.17 18.38 16.69-.36 20.8-14.76 21.74-23.71-2.38-51.77-45.24-93.15-97.59-93.15s-97.7 43.83-97.7 97.7 41.27 95.09 92.93 97.58c.37.04.75.07 1.13.07h.67c.98.03 1.97.05 2.96.05s2.03-.02 3.04-.05h84.72c5.54 0 10.07-4.53 10.07-10.07v-24.84c0-5.54-4.53-10.07-10.07-10.07M265.42 218.33V109.97c0-5.54-4.53-10.07-10.07-10.07h-24.84c-5.54 0-10.07 4.53-10.07 10.07v114.77c0 .18.02.35.03.52-.02.13-.04.27-.05.4-.87 7.37-5.83 10.34-14.13 10.54-.26 0-.65.08-.91.07-7.38 1.61-18.73 6.75-18.38 23.17.36 16.69 14.76 20.8 23.71 21.74 46.29 0 55.32-24.85 54.71-62.85M514.42 239.77c-3.1-4.16-8.32-4.37-8.32-4.37s-9.77.1-11.45-1.24c-2.23-1.78-5.94-3.87-5.94-9.68 0-2.22-.06-6.04-.12-9.38v-24.28c.14-2.31.22-4.85.22-7.67 0-53.87-43.94-97.7-97.96-97.7S295.39 126.83 293 178.6c.06.56.13 1.15.22 1.75v36.91c-.04 2.69-.08 5.38-.08 7.11 0 5.81-3.43 8.31-5.94 9.68-2.13 1.16-5.23 1.16-5.23 1.16s0 12.77-4.65 24.58-15.1 20.52-15.1 20.52h27.48s24.39 2.52 38.32-16.45c11.28-15.35 10.77-30.19 10.16-35.29v-49.59c2.15-27.1 24.94-48.51 52.66-48.51s51.28 22.12 52.76 49.86v48.71c-.58 5.41-.83 19.92 10.2 34.93 13.94 18.97 38.32 16.45 38.32 16.45h14.35s4.8-.43 8.32-4.35c2.52-2.81 1.88-12.07 1.88-18.94 0-7.55.41-13.75-2.27-17.35Z" fill="var(--bind-green)"></path>
+          </svg>
+        </a>
+      </div>
+
+      <!-- Nav -->
+      <div class="hidden lg:block text-center">
+        <ul class="flex gap-4 xl:gap-8 text-16 xl:text-18">
+          <li><a href="/" class="py-4 relative font-medium after:absolute after:content-[''] after:w-full after:h-0 hover:after:h-0.75 after:bottom-0 after:left-0 after:bg-black after:duration-300">Home</a></li>
+          <!-- <li><a href="/jobs" class="py-4 relative font-medium after:absolute after:content-[''] after:w-full after:h-0 hover:after:h-0.75 after:bottom-0 after:left-0 after:bg-black after:duration-300">Jobs</a></li> -->
+          <!-- <li><a href="/models" class="py-4 relative font-medium after:absolute after:content-[''] after:w-full after:h-0 hover:after:h-0.75 after:bottom-0 after:left-0 after:bg-black after:duration-300">Models</a></li> -->
+          <!-- <li><a href="/api/docs" class="py-4 relative font-medium after:absolute after:content-[''] after:w-full after:h-0 hover:after:h-0.75 after:bottom-0 after:left-0 after:bg-black after:duration-300">API</a></li> -->
+        </ul>
+      </div>
+    </div>
+  </header>
+  <section class="bind-hero-band">
+    <div class="mx-auto grid max-w-7xl grid-cols-1 gap-8 px-4 py-8 lg:grid-cols-[1fr_22rem] lg:py-10">
+      <div class="max-w-4xl">
+        <div class="bind-rule mb-6"></div>
+        <p class="section-kicker">Small-molecule protonation states</p>
+        <h1 class="mt-3 max-w-4xl text-4xl font-semibold leading-[1.04] tracking-tight sm:text-5xl lg:text-6xl">
+          pKasso microstate prediction and pH scan explorer.
+        </h1>
+        <p class="mt-5 max-w-2xl text-base leading-7 text-[color:var(--bind-muted)] sm:text-lg">
+          Generate likely protonation microstates, inspect pH-dependent distributions, and export structures for downstream modelling.
+        </p>
+        <div id="feedback-page-status" class="mt-5 max-w-2xl"></div>
+      </div>
+      <!-- <div class="bind-hero-visual flex min-h-56 flex-col justify-between p-5">
+        <div class="flex items-center justify-between">
+          <span class="section-kicker">Explorer</span>
+          <span class="rounded-lg bg-[color:var(--bind-yellow)] px-2 py-1 text-xs font-semibold">pH 0-14</span>
+        </div>
+        <div class="space-y-3">
+          <div class="h-3 w-11/12 rounded bg-[color:var(--bind-green)]"></div>
+          <div class="h-3 w-8/12 rounded bg-[color:var(--bind-green-2)]"></div>
+          <div class="h-3 w-5/12 rounded bg-[color:var(--bind-yellow)]"></div>
+        </div>
+        <div class="grid grid-cols-3 gap-2">
+          <div class="rounded-lg border border-[color:var(--bind-border)] bg-white p-3 text-center text-xs font-semibold">SMILES</div>
+          <div class="rounded-lg border border-[color:var(--bind-border)] bg-white p-3 text-center text-xs font-semibold">States</div>
+          <div class="rounded-lg border border-[color:var(--bind-border)] bg-white p-3 text-center text-xs font-semibold">Scan</div>
+        </div>
+      </div> -->
+    </div>
+  </section>
+
+  <main class="mx-auto grid max-w-[96rem] grid-cols-1 gap-5 px-4 py-6 lg:grid-cols-[22rem_1fr]">
+    <aside class="tool-panel p-5">
+      <p class="section-kicker mb-3">Input</p>
+      {{ form|safe }}
+    </aside>
+    <div id="results" class="tool-panel min-w-0 p-5">
+      {{ results|safe }}
+    </div>
+  </main>
+  <dialog id="feedback-dialog" class="microstate-modal feedback-modal">
+    <form class="feedback-modal__panel"
+          hx-post="/feedback"
+          hx-target="#feedback-status"
+          hx-swap="innerHTML">
+      <div class="microstate-modal__header">
+        <div class="microstate-modal__title">Feedback</div>
+        <button type="button" class="microstate-modal__close" data-feedback-close aria-label="Close feedback">&times;</button>
+      </div>
+      <div class="feedback-modal__body">
+        <label class="form-control w-full">
+          <div class="label px-0"><span class="label-text text-xs font-semibold uppercase tracking-[0.14em] text-[color:var(--bind-muted)]">SMILES code</span></div>
+          <textarea name="smiles" class="textarea textarea-bordered min-h-24 rounded-lg border-[color:var(--bind-border)] bg-white font-mono text-sm" required maxlength="4000"></textarea>
+        </label>
+        <label class="form-control w-full">
+          <div class="label px-0"><span class="label-text text-xs font-semibold uppercase tracking-[0.14em] text-[color:var(--bind-muted)]">Comment</span></div>
+          <textarea name="comment" class="textarea textarea-bordered min-h-32 rounded-lg border-[color:var(--bind-border)] bg-white text-sm" required maxlength="8000"></textarea>
+        </label>
+        <div id="feedback-status"></div>
+      </div>
+      <div class="feedback-modal__footer">
+        <button type="submit" class="btn btn-secondary btn-sm rounded-lg">
+          <span>Submit feedback</span>
+        </button>
+      </div>
+    </form>
+  </dialog>
+  <script src="/static/app.js"></script>
+</body>
+</html>
+<footer class="">
+    <div class="vertical-padding-sm flex flex-col gap-10 bg-charcoal text-white">
+        <div class="px-10 pt-10">
+            <a href="/" class="footer-link text-cream mr-auto">
+                <svg xmlns="http://www.w3.org/2000/svg" id="Layer_1" viewBox="0 0 708.57 281.18"
+                    class="w-full max-w-32">
+                    <circle cx="242.87" cy="53.53" r="31.74" style="fill:#fbba3b"></circle>
+                    <path
+                        d="M20.55 97.91c14.06-13.03 25-17.57 25-17.57V10.07C45.55 4.53 41.02 0 35.48 0H10.64C5.1 0 .57 4.53.57 10.07v111.07s7.12-11.31 19.98-23.23M708.19 121.14V10.07c0-5.54-4.53-10.07-10.07-10.07h-24.84c-5.54 0-10.07 4.53-10.07 10.07v70.28s10.94 4.54 25 17.57c12.86 11.92 19.98 23.23 19.98 23.23ZM97.82 85.57c-52.35 0-95.2 41.38-97.59 93.15.94 8.95 5.05 23.35 21.74 23.71 16.42.35 21.56-11.01 23.17-18.38 0-.26-.02-.52-.02-.78 0-29.06 23.64-52.7 52.7-52.7s52.7 23.64 52.7 52.7-23.11 52.15-51.72 52.67h-1.92c-.61-.01-1.22-.02-1.82-.05 0 .02 0 .03-.01.05H10.07C4.53 235.94 0 240.47 0 246.01v24.84c0 5.54 4.53 10.07 10.07 10.07h84.72c1.01.03 2.02.05 3.04.05s1.98-.02 2.96-.05h.67c.38 0 .76-.03 1.13-.07 51.67-2.49 92.93-45.31 92.93-97.58s-43.83-97.7-97.7-97.7M698.5 235.94h-84.98s0-.03-.01-.05c-.6.03-1.21.04-1.82.05h-1.92c-28.61-.53-51.72-23.94-51.72-52.67s23.64-52.7 52.7-52.7 52.7 23.64 52.7 52.7c0 .26-.02.52-.02.78 1.61 7.38 6.75 18.73 23.17 18.38 16.69-.36 20.8-14.76 21.74-23.71-2.38-51.77-45.24-93.15-97.59-93.15s-97.7 43.83-97.7 97.7 41.27 95.09 92.93 97.58c.37.04.75.07 1.13.07h.67c.98.03 1.97.05 2.96.05s2.03-.02 3.04-.05h84.72c5.54 0 10.07-4.53 10.07-10.07v-24.84c0-5.54-4.53-10.07-10.07-10.07M265.42 218.33V109.97c0-5.54-4.53-10.07-10.07-10.07h-24.84c-5.54 0-10.07 4.53-10.07 10.07v114.77c0 .18.02.35.03.52-.02.13-.04.27-.05.4-.87 7.37-5.83 10.34-14.13 10.54-.26 0-.65.08-.91.07-7.38 1.61-18.73 6.75-18.38 23.17.36 16.69 14.76 20.8 23.71 21.74 46.29 0 55.32-24.85 54.71-62.85M514.42 239.77c-3.1-4.16-8.32-4.37-8.32-4.37s-9.77.1-11.45-1.24c-2.23-1.78-5.94-3.87-5.94-9.68 0-2.22-.06-6.04-.12-9.38v-24.28c.14-2.31.22-4.85.22-7.67 0-53.87-43.94-97.7-97.96-97.7S295.39 126.83 293 178.6c.06.56.13 1.15.22 1.75v36.91c-.04 2.69-.08 5.38-.08 7.11 0 5.81-3.43 8.31-5.94 9.68-2.13 1.16-5.23 1.16-5.23 1.16s0 12.77-4.65 24.58-15.1 20.52-15.1 20.52h27.48s24.39 2.52 38.32-16.45c11.28-15.35 10.77-30.19 10.16-35.29v-49.59c2.15-27.1 24.94-48.51 52.66-48.51s51.28 22.12 52.76 49.86v48.71c-.58 5.41-.83 19.92 10.2 34.93 13.94 18.97 38.32 16.45 38.32 16.45h14.35s4.8-.43 8.32-4.35c2.52-2.81 1.88-12.07 1.88-18.94 0-7.55.41-13.75-2.27-17.35Z"
+                        fill="currentColor"></path>
+                </svg>
+                <span class="sr-only">
+                    Footer logo for Bind Research
+                </span>
+            </a>
+        </div>
+        <div class="px-10 pb-10 flex flex-col sm:flex-row gap-2 text-16">
+            <p>Bind Research Ltd 2026 All rights reserved </p>
+        </div>
+    </div>
+</footer>
