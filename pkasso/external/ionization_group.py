@@ -8,10 +8,11 @@ from pandas import DataFrame
 from rdkit import Chem
 from rdkit.Chem import Mol
 
-pkg_base = resources.files('pkasso')
-root = f'{pkg_base}/data'
+pkg_base = resources.files("pkasso")
+root = f"{pkg_base}/data"
 
 SMARTS_FILE = os.path.join(root, "smarts_pattern.tsv")
+
 
 def split_acid_base_pattern() -> tuple[DataFrame, DataFrame]:
     """
@@ -22,15 +23,17 @@ def split_acid_base_pattern() -> tuple[DataFrame, DataFrame]:
     df_smarts_base = df_smarts[df_smarts.Acid_or_base == "B"]
     return df_smarts_acid, df_smarts_base
 
+
 def unique_acid_match(matches: list[list[int]]) -> list[list[int]]:
     """
     Remove duplicate single-atom matches and combine with multi-atom matches.
     """
-    single_matches = list(set([m[0] for m in matches if len(m)==1]))
-    double_matches = [m for m in matches if len(m)==2]
+    single_matches = list(set([m[0] for m in matches if len(m) == 1]))
+    double_matches = [m for m in matches if len(m) == 2]
     single_matches_l = [[j] for j in single_matches]
     double_matches.extend(single_matches_l)
     return double_matches
+
 
 def match_acid(df_smarts_acid: DataFrame, mol: Mol) -> list[int]:
     """
@@ -58,6 +61,7 @@ def match_acid(df_smarts_acid: DataFrame, mol: Mol) -> list[int]:
             matches_modify.append(j)
     return matches_modify
 
+
 def match_base(df_smarts_base: DataFrame, mol: Mol) -> list[int]:
     """
     Find base pattern matches in a molecule and return matched atom indices.
@@ -79,6 +83,7 @@ def match_base(df_smarts_base: DataFrame, mol: Mol) -> list[int]:
         for j in i:
             matches_modify.append(j)
     return matches_modify
+
 
 def get_ionization_aid(
     mol: Mol,
@@ -108,7 +113,7 @@ def get_ionization_aid(
     base_matches = match_base(df_smarts_base, mol)
     if acid_or_base == "acid":
         return acid_matches
-    elif acid_or_base == 'base':
+    elif acid_or_base == "base":
         return base_matches
     else:
         raise ValueError

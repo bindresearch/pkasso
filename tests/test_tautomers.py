@@ -102,10 +102,7 @@ def test_hydroxamate_filter_prefers_carbonyl_over_hydroximic_acid():
 def test_hydroxamate_filter_keeps_hydroxamate_motif():
     tautomers = load_tautomers_module()
 
-    smiles = (
-        "CN1C(=O)N(C[C@H](C(=O)NO)[C@@H](CC2CCCC2)"
-        "C(=O)N2CCCCC2)C(=O)C1(C)C"
-    )
+    smiles = "CN1C(=O)N(C[C@H](C(=O)NO)[C@@H](CC2CCCC2)C(=O)N2CCCCC2)C(=O)C1(C)C"
 
     assert "C(=O)NO" in tautomers.best_tautomer_smiles(
         smiles,
@@ -118,11 +115,14 @@ def test_max_tautomers_falls_back_to_input_smiles(capsys):
 
     smiles = "O=C(NC(=O)c1ccccc1)c1ccccc1"
 
-    assert tautomers.best_tautomer_smiles(
-        smiles,
-        max_tautomers=1,
-        num_confs=1,
-    ) == smiles
+    assert (
+        tautomers.best_tautomer_smiles(
+            smiles,
+            max_tautomers=1,
+            num_confs=1,
+        )
+        == smiles
+    )
 
     assert "Exceeding max tautomers" in capsys.readouterr().out
 
@@ -134,10 +134,13 @@ def test_returns_input_smiles_when_conformer_generation_fails(monkeypatch):
 
     smiles = "O=C(NO)C1c2ccccc2Oc2ccccc21"
 
-    assert tautomers.best_tautomer_smiles(
-        smiles,
-        num_confs=1,
-    ) == smiles
+    assert (
+        tautomers.best_tautomer_smiles(
+            smiles,
+            num_confs=1,
+        )
+        == smiles
+    )
 
 
 def test_tautomer_ranking_uses_rdkit_score_before_mmff_energy(monkeypatch):
@@ -154,10 +157,13 @@ def test_tautomer_ranking_uses_rdkit_score_before_mmff_energy(monkeypatch):
         mock_rdkit_tautomer_conformers,
     )
 
-    assert tautomers.best_tautomer_smiles(
-        "NC(=O)c1ccccc1",
-        num_confs=1,
-    ) == "NC(=O)c1ccccc1"
+    assert (
+        tautomers.best_tautomer_smiles(
+            "NC(=O)c1ccccc1",
+            num_confs=1,
+        )
+        == "NC(=O)c1ccccc1"
+    )
 
 
 def test_tautomer_ranking_uses_mmff_energy_as_tiebreaker(monkeypatch):
@@ -182,10 +188,13 @@ def test_tautomer_ranking_uses_mmff_energy_as_tiebreaker(monkeypatch):
         mock_rdkit_tautomer_conformers,
     )
 
-    assert tautomers.best_tautomer_smiles(
-        "NC(=O)c1ccccc1",
-        num_confs=1,
-    ) == "N=C(O)c1ccccc1"
+    assert (
+        tautomers.best_tautomer_smiles(
+            "NC(=O)c1ccccc1",
+            num_confs=1,
+        )
+        == "N=C(O)c1ccccc1"
+    )
 
 
 def test_invalid_smiles_is_returned_unchanged():
