@@ -264,7 +264,7 @@ def scan(
     pHs: NDArray[np.float64] = np.arange(min_ph, max_ph + 0.0001, 0.25, dtype=np.float64)
 
     if not fig_out:
-        fig_out = Path(f"{name}_scan.pdf")
+        fig_out = Path(f"{name}_scan.svg")
     if not sdf_out:
         sdf_out = Path(f"{name}_mols_scan.sdf")
     if not pkas_out:

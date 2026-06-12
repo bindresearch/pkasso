@@ -2,14 +2,11 @@
 
 import copy
 import logging
-import os
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-### import cairosvg before anything in rdkit.Chem.Draw, svgutils breaks otherwise !!
-import cairosvg
 import matplotlib.pyplot as plt
 import numpy as np
 from numpy.typing import NDArray
@@ -292,15 +289,12 @@ class Scan:
         else:
             y = 420 + (N_relevant_states // 4 + 1) * size_y
 
-        with tempfile.NamedTemporaryFile(suffix=".svg", mode="w", delete=True) as f:
-            Figure(
-                "600px",
-                f"{y}px",
-                svg_scan.move(0, 0),
-                svg_mols.move(0, 420),
-            ).save(f.name)
-
-            cairosvg.svg2pdf(url=f.name, write_to=os.fspath(file))
+        Figure(
+            "600px",
+            f"{y}px",
+            svg_scan.move(0, 0),
+            svg_mols.move(0, 420),
+        ).save(str(file))
 
     def save_sdf(self, file: Path) -> None:
         """
