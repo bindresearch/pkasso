@@ -195,7 +195,7 @@ class Scan:
         else:
             style = "-"
 
-        cmap = plt.cm.get_cmap("Spectral_r")
+        cmap = plt.colormaps["Spectral_r"]
 
         px = 1 / plt.rcParams["figure.dpi"]
 
