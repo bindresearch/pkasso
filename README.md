@@ -6,8 +6,17 @@ One protonation microstate describes a unique charge pattern on the protonable s
 
 # Installation
 
+On Linux:
+
 ```
 pip install .
+```
+
+On macOS:
+
+```
+conda env create -f environment.yml
+conda activate pkasso
 ```
 
 # Run pKasso

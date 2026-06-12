@@ -1,0 +1,10 @@
+name: pkasso
+channels:
+  - conda-forge
+dependencies:
+  - "python>=3.10,<3.14"
+  - cairo
+  - cairosvg
+  - pip
+  - pip:
+      - -e .
