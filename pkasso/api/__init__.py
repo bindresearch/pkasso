@@ -1,2 +1,1 @@
 """pKasso web application."""
-

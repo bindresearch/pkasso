@@ -10,10 +10,11 @@ from .gcn_conv import GCNConv
 n_features = 29
 hidden = 1024
 
+
 class GCNNet(nn.Module):
     def __init__(self) -> None:
         super(GCNNet, self).__init__()
-        self.conv1 = GCNConv(n_features, 1024, cached=False) # if you defined cache=True, the shape of batch must be same!
+        self.conv1 = GCNConv(n_features, 1024, cached=False)  # if you defined cache=True, the shape of batch must be same!
         self.bn1 = BatchNorm1d(1024)
         self.conv2 = GCNConv(1024, 512, cached=False)
         self.bn2 = BatchNorm1d(512)

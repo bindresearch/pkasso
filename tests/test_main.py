@@ -89,28 +89,28 @@ main = load_main_module()
 #             assert (at_idx in exclude_base_indices) and (at_idx in exclude_acid_indices)
 #     assert Chem.GetFormalCharge(mol) == net_charge
 
+
 def test_find_candidate_sites():
     base = {
         0: 2.0,
         1: 7.0,
-        2: 12.0,}
-    acid = {
-        0: 4.0,
-        3: 12.0
+        2: 12.0,
     }
+    acid = {0: 4.0, 3: 12.0}
     exclude_base_indices = []
     exclude_acid_indices = []
     charged_indices = []
-    indices, q_options = main.find_candidate_sites(
-        base, acid, exclude_base_indices, exclude_acid_indices, charged_indices)
+    indices, q_options = main.find_candidate_sites(base, acid, exclude_base_indices, exclude_acid_indices, charged_indices)
     expected_indices = [0, 1, 2, 3]
-    expected_q_options = np.array([
-        [1, 1, 1],
-        [0, 1, 1],
-        [0, 1, 1],
-        [1, 1, 0],
-    ])
-    assert (np.allclose(indices,expected_indices)) and (np.allclose(q_options,expected_q_options))
+    expected_q_options = np.array(
+        [
+            [1, 1, 1],
+            [0, 1, 1],
+            [0, 1, 1],
+            [1, 1, 0],
+        ]
+    )
+    assert (np.allclose(indices, expected_indices)) and (np.allclose(q_options, expected_q_options))
 
 
 def test_find_candidate_sites_respects_excluded_and_charged_indices():
@@ -131,36 +131,30 @@ def test_find_candidate_sites_respects_excluded_and_charged_indices():
         charged_indices=[2],
     )
     expected_indices = [0, 1, 3]
-    expected_q_options = np.array([
-        [0, 1, 1],
-        [0, 1, 0],
-        [1, 1, 0],
-    ])
+    expected_q_options = np.array(
+        [
+            [0, 1, 1],
+            [0, 1, 0],
+            [1, 1, 0],
+        ]
+    )
     assert (np.allclose(indices, expected_indices)) and (np.allclose(q_options, expected_q_options))
 
+
 def test_construct_state_vectors():
-    q_options = np.array([
-        [1,0],
-        [1,1],
-        [0,1]
-    ]).T
+    q_options = np.array([[1, 0], [1, 1], [0, 1]]).T
     cutoff_states = 100
     state_vecs = main.construct_state_vectors(q_options, cutoff_states)
     print(state_vecs)
-    assert np.allclose(state_vecs, np.array([
-        [0, 1],
-        [0, 2],
-        [1, 1],
-        [1, 2]
-    ])
-    )
+    assert np.allclose(state_vecs, np.array([[0, 1], [0, 2], [1, 1], [1, 2]]))
     cutoff_states = 2
     state_vecs = main.construct_state_vectors(q_options, cutoff_states)
     assert state_vecs == []
     # assert False
 
+
 @pytest.mark.parametrize(
-    ("smiles_raw",'net_charge'),
+    ("smiles_raw", "net_charge"),
     [
         (r"NCCCCC", 1),
         (r"NCCCCCN", 2),
@@ -170,7 +164,7 @@ def test_construct_state_vectors():
         (r"Nc1ccc(N)cc1", 2),
     ],
 )
-def test_construct_mol(smiles_raw,net_charge):
+def test_construct_mol(smiles_raw, net_charge):
     mol = Chem.MolFromSmiles(smiles_raw)
 
     for atom in mol.GetAtoms():
@@ -182,10 +176,10 @@ def test_construct_mol(smiles_raw,net_charge):
     for atom in mol.GetAtoms():
         s = atom.GetSymbol()
         map_idx = atom.GetAtomMapNum()
-        if s == 'N':
+        if s == "N":
             indices.append(map_idx)
             state_vec.append(2)
-        elif s == 'O':
+        elif s == "O":
             indices.append(map_idx)
             state_vec.append(0)
     state_vec = np.array(state_vec)

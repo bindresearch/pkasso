@@ -177,7 +177,7 @@ def render_scan(state: AppState) -> str:
         grid_cols = "2xl:grid-cols-3" if len(microstates) > 4 else ""
         microstate_html = f"""
         <div class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-2 {grid_cols}">
-          {''.join(microstates)}
+          {"".join(microstates)}
         </div>
         """
 

@@ -11,6 +11,7 @@ from rdkit.Chem.rdchem import Mol
 from .main import pKasso
 from .postprocess import Scan
 
+
 def protonate(inp: str | Mol, pH: float = 7.0, **kwargs: Any) -> tuple[list[str], list[Mol]]:
     """
     Helper function to run pkasso via:
@@ -21,7 +22,7 @@ def protonate(inp: str | Mol, pH: float = 7.0, **kwargs: Any) -> tuple[list[str]
     name = 'mymolecule'
     smiles = r'OC(=O)C(c1ccc(O)cc1)CNCCN'
     pH = 7.0
-    cutoff_export = 0.2 
+    cutoff_export = 0.2
 
     smiles, mols = protonate(smiles, name=name, pH=pH, cutoff_export=cutoff_export)
     ```
@@ -32,16 +33,13 @@ def protonate(inp: str | Mol, pH: float = 7.0, **kwargs: Any) -> tuple[list[str]
     else:
         smiles = inp
 
-    ap = pKasso(
-        smiles, **kwargs)
+    ap = pKasso(smiles, **kwargs)
     molecule = ap.run_single(pH=pH)
 
     return molecule.smiles, molecule.mols
 
-def batch_protonate(
-        input_list: list[str | Mol],
-        pH: float = 7.0,
-        **kwargs: Any) -> tuple[list[list[str]], list[list[Mol]]]:
+
+def batch_protonate(input_list: list[str | Mol], pH: float = 7.0, **kwargs: Any) -> tuple[list[list[str]], list[list[Mol]]]:
     """
     Batch process a list of smiles or a list of rdkit Mol objects.
 
@@ -63,8 +61,7 @@ def batch_protonate(
     batch_mols: list[list[Mol]] = []
 
     for inp in tqdm(input_list):
-        ap = pKasso(
-            inp, **kwargs)
+        ap = pKasso(inp, **kwargs)
         molecule = ap.run_single(pH=pH)
 
         batch_smiles.append(molecule.smiles)
@@ -72,10 +69,9 @@ def batch_protonate(
 
     return batch_smiles, batch_mols
 
+
 def scan_pH(
-        inp: str | Mol,
-        pHs: NDArray[np.float64] | list[float] = np.arange(0, 14.1, 0.25, dtype=np.float64), 
-        **kwargs: Any
+    inp: str | Mol, pHs: NDArray[np.float64] | list[float] = np.arange(0, 14.1, 0.25, dtype=np.float64), **kwargs: Any
 ) -> Scan:
     """
     Run pkasso pH scan
@@ -99,6 +95,5 @@ def scan_pH(
 
     pHs_arr: NDArray[np.float64] = np.array(pHs)
 
-    ap = pKasso(
-        inp, **kwargs)
+    ap = pKasso(inp, **kwargs)
     return ap.run_scan(pHs=pHs_arr)
