@@ -1,4 +1,4 @@
-""" molgpka pka calculations with custom rules"""
+"""molgpka pka calculations with custom rules"""
 # mypy: disable-error-code=no-untyped-call
 
 from pathlib import Path
@@ -10,16 +10,18 @@ from .descriptor import mol2vec
 from .ionization_group import get_ionization_aid
 from .net import GCNNet
 
-def load_model(model_file: Path, device: str = "cpu") -> GCNNet:
-    """ Load molgpka ML torch model. """
 
-    model= GCNNet().to(device)
+def load_model(model_file: Path, device: str = "cpu") -> GCNNet:
+    """Load molgpka ML torch model."""
+
+    model = GCNNet().to(device)
     model.load_state_dict(torch.load(model_file, map_location=device, weights_only=True))
     model.eval()
     return model
 
+
 def model_pred(mol: Mol, atom_idx: int, model: GCNNet, device: str = "cpu") -> float:
-    """ Predict pKa with molgpka model. """
+    """Predict pKa with molgpka model."""
 
     data = mol2vec(mol, atom_idx)
     with torch.no_grad():
@@ -29,24 +31,24 @@ def model_pred(mol: Mol, atom_idx: int, model: GCNNet, device: str = "cpu") -> f
         pka: float = pKa[0][0]
     return pka
 
-def predict_acid(mol_h: Mol, model_acid: GCNNet, device: str = "cpu"
-) -> dict[int, float]:
-    """ Predict acid pKas with molgpka model. """
+
+def predict_acid(mol_h: Mol, model_acid: GCNNet, device: str = "cpu") -> dict[int, float]:
+    """Predict acid pKas with molgpka model."""
 
     acid_idxs = get_ionization_aid(mol_h, "acid")
     acid_res = {}
     for aid in acid_idxs:
         apka = model_pred(mol_h, aid, model_acid, device=device)
-        acid_res.update({aid:apka})
+        acid_res.update({aid: apka})
     return acid_res
 
-def predict_base(mol_h: Mol, model_base: GCNNet, device: str = "cpu"
-) -> dict[int, float]:
-    """ Predict base pKas with molgpka model. """
-  
+
+def predict_base(mol_h: Mol, model_base: GCNNet, device: str = "cpu") -> dict[int, float]:
+    """Predict base pKas with molgpka model."""
+
     base_idxs = get_ionization_aid(mol_h, "base")
     base_res = {}
     for aid in base_idxs:
         bpka = model_pred(mol_h, aid, model_base, device=device)
-        base_res.update({aid:bpka})
+        base_res.update({aid: bpka})
     return base_res

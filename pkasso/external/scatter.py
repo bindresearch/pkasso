@@ -14,9 +14,10 @@ def broadcast(src: Tensor, other: Tensor, dim: int) -> Tensor:
     src = src.expand(other.size())
     return src
 
-def scatter_sum(src: Tensor, index: Tensor, dim: int = -1,
-                out: Optional[Tensor] = None,
-                dim_size: Optional[int] = None) -> Tensor:
+
+def scatter_sum(
+    src: Tensor, index: Tensor, dim: int = -1, out: Optional[Tensor] = None, dim_size: Optional[int] = None
+) -> Tensor:
     index = broadcast(index, src, dim)
     if out is None:
         size = list(src.size())
@@ -31,7 +32,8 @@ def scatter_sum(src: Tensor, index: Tensor, dim: int = -1,
     else:
         return out.scatter_add_(dim, index, src)
 
-def scatter_add(src: Tensor, index: Tensor, dim: int = -1,
-                out: Optional[Tensor] = None,
-                dim_size: Optional[int] = None) -> Tensor:
+
+def scatter_add(
+    src: Tensor, index: Tensor, dim: int = -1, out: Optional[Tensor] = None, dim_size: Optional[int] = None
+) -> Tensor:
     return scatter_sum(src, index, dim, out, dim_size)

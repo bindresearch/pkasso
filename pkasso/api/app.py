@@ -21,9 +21,7 @@ def main() -> None:
     args = parser.parse_args()
 
     missing = [
-        package_name
-        for module_name, package_name in WEB_DEPENDENCIES.items()
-        if importlib.util.find_spec(module_name) is None
+        package_name for module_name, package_name in WEB_DEPENDENCIES.items() if importlib.util.find_spec(module_name) is None
     ]
     if missing:
         parser.exit(
@@ -36,10 +34,12 @@ def main() -> None:
     import uvicorn
 
     url = f"http://{args.host}:{args.port}"
-    print(textwrap.dedent(f"""
+    print(
+        textwrap.dedent(f"""
     pKasso GUI is running at {url}
     Press Ctrl+C to stop.
-    """).strip())
+    """).strip()
+    )
     uvicorn.run("pkasso.api.web:app", host=args.host, port=args.port, reload=args.reload)
 
 

@@ -22,13 +22,14 @@ from .tautomers import best_tautomer_smiles
 logger = logging.getLogger(__name__)
 RDLogger.DisableLog("rdApp.*")
 
+
 def preprocess(
-        smiles_raw: str, 
-        tautomer_search: bool = False,
-        max_tautomers: int = 100,
-        num_confs: int = 10,
-    ) -> tuple[Mol,  str]:
-    """ 
+    smiles_raw: str,
+    tautomer_search: bool = False,
+    max_tautomers: int = 100,
+    num_confs: int = 10,
+) -> tuple[Mol, str]:
+    """
     Construct and standardize an RDKit molecule from a SMILES string.
     Charges that cannot be neutralized (e.g., quaternary ammonium) are preserved.
     Atom map numbers are assigned to preserve mapping when the molecule gets changed
@@ -49,12 +50,12 @@ def preprocess(
         Canonical SMILES representation of the processed molecule.
     """
 
-    logger.debug('Raw:')
+    logger.debug("Raw:")
     logger.debug(smiles_raw)
     mol = Chem.MolFromSmiles(smiles_raw, sanitize=True)
-    smiles = Chem.MolToSmiles(mol,canonical=True)
+    smiles = Chem.MolToSmiles(mol, canonical=True)
 
-    logger.debug('Canonical')
+    logger.debug("Canonical")
     logger.debug(smiles)
 
     if tautomer_search:
@@ -65,7 +66,7 @@ def preprocess(
         )
     mol = Chem.MolFromSmiles(smiles, sanitize=True)
 
-    logger.debug('Formal charges before cleanup')
+    logger.debug("Formal charges before cleanup")
     charges = [at.GetFormalCharge() for at in mol.GetAtoms()]
     logger.debug(charges)
 
@@ -74,30 +75,31 @@ def preprocess(
 
     # load/save cycles to clean up the mol atom ordering
     mol = uncharger.uncharge(mol)
-    smiles = Chem.MolToSmiles(mol,canonical=True)
+    smiles = Chem.MolToSmiles(mol, canonical=True)
     mol = Chem.MolFromSmiles(smiles, sanitize=True)
-    smiles = Chem.MolToSmiles(mol,canonical=True)
+    smiles = Chem.MolToSmiles(mol, canonical=True)
 
     mol = Chem.MolFromSmiles(smiles, sanitize=True)
-    smiles = Chem.MolToSmiles(mol,canonical=True)
+    smiles = Chem.MolToSmiles(mol, canonical=True)
 
     # print(f'smiles after clean-up: {smiles}')
 
     for atom in mol.GetAtoms():
         atom.SetAtomMapNum(atom.GetIdx() + 1)
 
-    logger.debug('Formal charges after cleanup')
+    logger.debug("Formal charges after cleanup")
     symbols = [at.GetFormalCharge() for at in mol.GetAtoms()]
     logger.debug(symbols)
 
     return mol, smiles
 
+
 def find_candidate_sites(
-        base: dict[int, float],
-        acid: dict[int, float],
-        exclude_base_indices: list[int],
-        exclude_acid_indices: list[int],
-        charged_indices: list[int],
+    base: dict[int, float],
+    acid: dict[int, float],
+    exclude_base_indices: list[int],
+    exclude_acid_indices: list[int],
+    charged_indices: list[int],
 ) -> tuple[list[int], NDArray[np.int64]]:
     """
     Determine possible protonation and deprotonation sites for a molecule.
@@ -129,36 +131,37 @@ def find_candidate_sites(
         [deprotonated, unchanged, protonated].
     """
 
-    prot_candidates = list(base.keys()) # should be map idx
+    prot_candidates = list(base.keys())  # should be map idx
     deprot_candidates = list(acid.keys())
 
     indices_raw = list(sorted(set(prot_candidates + deprot_candidates)))
     indices: list[int] = []
 
-    logger.debug(f'relevant indices: {indices_raw}')
-    
+    logger.debug(f"relevant indices: {indices_raw}")
+
     # Remove indices for atoms that could not be neutralized
     for map_idx in indices_raw:
         if map_idx not in charged_indices:
             indices.append(map_idx)
 
-    logger.debug(f'relevant indices (after charged removal): {indices}')
+    logger.debug(f"relevant indices (after charged removal): {indices}")
 
-    q_options = np.zeros((len(indices),3),dtype=np.int64) # deprot=0, stay=1, prot=2
+    q_options = np.zeros((len(indices), 3), dtype=np.int64)  # deprot=0, stay=1, prot=2
     for rel_idx, map_idx in enumerate(indices):
-        q_options[rel_idx,1] = 1 # always allow stay
+        q_options[rel_idx, 1] = 1  # always allow stay
         if map_idx in prot_candidates:
             if map_idx not in exclude_base_indices:
-                q_options[rel_idx,2] = 1 # allow protonation
+                q_options[rel_idx, 2] = 1  # allow protonation
         if map_idx in deprot_candidates:
             if map_idx not in exclude_acid_indices:
-                q_options[rel_idx,0] = 1 # allow deprotonation
+                q_options[rel_idx, 0] = 1  # allow deprotonation
 
     ps = np.argsort(indices)
     indices = [indices[p] for p in ps]
     q_options = q_options[ps]
 
     return indices, q_options
+
 
 def construct_state_vectors(
     q_options: NDArray[np.int64],
@@ -192,11 +195,11 @@ def construct_state_vectors(
     for rel_idx, qs in enumerate(q_options):
         q_col = []
         for q_idx, q in enumerate(qs):
-            if q == 1.:
+            if q == 1.0:
                 q_col.append(q_idx)
-        if len(q_col) > 0.:
+        if len(q_col) > 0.0:
             q_options_nonzero.append(q_col)
-    
+
     N_trial_vecs = np.prod([len(qs) for qs in q_options_nonzero])
     if N_trial_vecs > cutoff_states:
         return []
@@ -204,8 +207,10 @@ def construct_state_vectors(
         state_vecs = [np.array(x) for x in list(itertools.product(*q_options_nonzero))]
         return state_vecs
 
+
 #########################################
 # rdkit mol object construction
+
 
 def construct_mol(mol0: Mol, indices: list[int], state_vec: NDArray[np.int64]) -> Mol:
     """
@@ -237,10 +242,10 @@ def construct_mol(mol0: Mol, indices: list[int], state_vec: NDArray[np.int64]) -
     mol_cand = copy.deepcopy(mol0)
 
     qs = state_vec - 1
-    
+
     rw = Chem.RWMol(Chem.AddHs(mol_cand))
 
-    for map_idx, q in zip(indices,qs):
+    for map_idx, q in zip(indices, qs):
         atom = utils.get_atom_with_map_idx(rw, map_idx)
         if atom is None:
             raise ValueError(f"Could not find atom with map index {map_idx}.")
@@ -259,6 +264,7 @@ def construct_mol(mol0: Mol, indices: list[int], state_vec: NDArray[np.int64]) -
 
 #############################################################################################
 # Cluster tests and operations
+
 
 @dataclass
 class ProtonationIndexSpace:
@@ -326,8 +332,7 @@ class MicrostateDistribution:
         """Merge symmetry-equivalent states and keep state fields aligned."""
 
         state_freqs_by_state = {
-            state_str: float(state_freq)
-            for state_str, state_freq in zip(self.state_strs, self.state_freqs)
+            state_str: float(state_freq) for state_str, state_freq in zip(self.state_strs, self.state_freqs)
         }
         self.state_strs, self.state_freqs = calc_symmetry(
             self.state_strs,
@@ -370,7 +375,6 @@ def combine_cluster_distributions(
     sfreq_cutoff_individual: float = 0.01,
     sfreq_cutoff_combined: float = 0.001,
 ) -> MicrostateDistribution:
-
     """
     Combine microstate probabilities from independent pKa clusters.
 
@@ -407,10 +411,7 @@ def combine_cluster_distributions(
     """
 
     state_strs_clusters = [dist.state_strs for dist in cluster_dists]
-    state_freqs_clusters = [
-        np.asarray(dist.state_freqs, dtype=np.float64)
-        for dist in cluster_dists
-    ]
+    state_freqs_clusters = [np.asarray(dist.state_freqs, dtype=np.float64) for dist in cluster_dists]
     indices_clusters = [dist.indices for dist in cluster_dists]
 
     # Cull the state_strs per cluster a bit before combining.
@@ -428,32 +429,32 @@ def combine_cluster_distributions(
                 cluster_state_ids[-1].append(s_idx)
 
     combinations = list(itertools.product(*cluster_state_ids))
-    logger.debug(f'N microstate combinations from clusters: {len(combinations)}')
+    logger.debug(f"N microstate combinations from clusters: {len(combinations)}")
 
     state_strs = []
     state_freqs_list = []
     indices = []
     for indices_cluster in indices_clusters:
-        indices.extend(indices_cluster) # This requires non-overlapping clusters!
+        indices.extend(indices_cluster)  # This requires non-overlapping clusters!
 
     ps = np.argsort(indices)
     indices = [indices[p] for p in ps]
     indices_str = pack_indices(indices)
     if indices_str != index_space.indices_str:
         raise ValueError(f"indices_str {indices_str} not equal to full indices list {index_space.indices_str}")
-    
+
     for s_idxs in combinations:
-        state_str = ''
-        state_freq = 1.
+        state_str = ""
+        state_freq = 1.0
         for c_idx, s_idx in enumerate(s_idxs):
             state_str += state_strs_clusters[c_idx][s_idx]
             state_freq *= state_freqs_clusters[c_idx][s_idx]
-        state_str = utils.sort_string(state_str,ps) # match sorted indices                 
+        state_str = utils.sort_string(state_str, ps)  # match sorted indices
         if state_freq >= sfreq_cutoff_combined:
             state_strs.append(state_str)
             state_freqs_list.append(state_freq)
-        
-    logger.debug(f'N chosen microstate combinations: {len(state_strs)}')
+
+    logger.debug(f"N chosen microstate combinations: {len(state_strs)}")
     # Correct freqs for removal of very unlikely states
     state_freqs = np.array(state_freqs_list)
     state_freqs /= np.sum(state_freqs)
@@ -466,6 +467,7 @@ def combine_cluster_distributions(
         state_freqs=state_freqs,
     )
 
+
 def smiles2hash(smiles: str | None) -> str | None:
     """
     Generate a registration hash from a SMILES string.
@@ -477,12 +479,14 @@ def smiles2hash(smiles: str | None) -> str | None:
         return None
     return str(RegistrationHash.GetMolHash(RegistrationHash.GetMolLayers(Chem.MolFromSmiles(smiles))))
 
+
 def mol2hash(mol: Mol) -> str:
     """
     Generate a registration hash from an RDKit molecule.
     """
 
     return str(RegistrationHash.GetMolHash(RegistrationHash.GetMolLayers(mol)))
+
 
 def calc_hashes(state_strs: list[str], mols_lib: dict[str, Mol]) -> list[str]:
     """
@@ -508,6 +512,7 @@ def calc_hashes(state_strs: list[str], mols_lib: dict[str, Mol]) -> list[str]:
         hash = mol2hash(mol)
         hashes.append(hash)
     return hashes
+
 
 def calc_symmetry(
     state_strs: list[str],
@@ -538,10 +543,10 @@ def calc_symmetry(
         Corresponding combined frequencies.
     """
 
-    state_hashes = calc_hashes(state_strs,mols_lib)
+    state_hashes = calc_hashes(state_strs, mols_lib)
     state_dict: dict[str, list[str]] = {}
 
-    for state_str, state_hash in zip(state_strs,state_hashes):
+    for state_str, state_hash in zip(state_strs, state_hashes):
         if state_hash in state_dict:
             state_dict[state_hash].append(state_str)
         else:
@@ -555,12 +560,13 @@ def calc_symmetry(
     for state_hash, state_strs_per_hash in state_dict.items():
         state_strs_sorted = sorted(state_strs_per_hash)
         state_strs_symm.append(state_strs_sorted[0])
-        state_freq = 0.
+        state_freq = 0.0
         for state_str in state_strs_per_hash:
             state_freq += state_freqs_lib[state_str]
         state_freqs_symm.append(state_freq)
 
     return state_strs_symm, state_freqs_symm
+
 
 def calc_state_qs(
     state_strs: list[str],
@@ -586,6 +592,7 @@ def calc_state_qs(
     for state_str in state_strs:
         state_qs[state_str] = Chem.GetFormalCharge(mols_lib[state_str])
     return state_qs
+
 
 def calc_macro_props(
     state_strs: list[str],
@@ -617,7 +624,7 @@ def calc_macro_props(
     """
 
     freqs_macro: dict[int, float] = {}
-    net_charge = 0.
+    net_charge = 0.0
     for state_str, state_freq in zip(state_strs, state_freqs):
         state_q = state_qs[state_str]
         if state_q in freqs_macro:
@@ -627,7 +634,9 @@ def calc_macro_props(
         net_charge += state_q * state_freq
     return net_charge, freqs_macro
 
+
 ###########
+
 
 def combine_pkas_macro(
     pHs: NDArray[np.float64],
@@ -663,14 +672,14 @@ def combine_pkas_macro(
     pkas_macro: dict[int, list[float]] = {}
     pkas_weights: dict[int, list[float]] = {}
 
-    for pH, freqs_macro in zip(pHs,freqs_macro_all):
+    for pH, freqs_macro in zip(pHs, freqs_macro_all):
         qs_sorted = sorted(freqs_macro.keys())
         for q in qs_sorted:
-            if q+1 in qs_sorted:
+            if q + 1 in qs_sorted:
                 freq1 = freqs_macro[q]
-                freq2 = freqs_macro[q+1]
-                pka_macro = np.log10(freq2/freq1) + pH
-                pka_weight = 1./(freq1**2 + freq2**2)
+                freq2 = freqs_macro[q + 1]
+                pka_macro = np.log10(freq2 / freq1) + pH
+                pka_weight = 1.0 / (freq1**2 + freq2**2)
                 if q in pkas_macro:
                     pkas_macro[q].append(pka_macro)
                     pkas_weights[q].append(pka_weight)
@@ -682,11 +691,13 @@ def combine_pkas_macro(
 
     for q, pkas in pkas_macro.items():
         ws = pkas_weights[q]
-        pka_comb = float(np.average(pkas,weights=ws))
+        pka_comb = float(np.average(pkas, weights=ws))
         pkas_combined[q] = pka_comb
     return pkas_combined
 
+
 ###########
+
 
 @dataclass
 class pKasso:
@@ -709,15 +720,15 @@ class pKasso:
     """
 
     smiles: str
-    name: str = 'molecule'
-    
+    name: str = "molecule"
+
     # Internal options
     cutoff_states: int = 1000
     sfreq_cutoff_individual: float = 0.01
     sfreq_cutoff_combined: float = 0.001
     cutoff_export: float = 1.0
-    matrix_def: str = 'dG'
-    device: str = 'cpu' # fixed!
+    matrix_def: str = "dG"
+    device: str = "cpu"  # fixed!
     pka_predictor_cls: type[Predictor] = MolgpkaPredictor
     tautomer_search: bool = True
     max_tautomers: int = 20
@@ -744,8 +755,8 @@ class pKasso:
         return molecule
 
     def run_scan(
-            self, 
-            pHs: NDArray[np.float64] = np.arange(0, 14.1, 0.5, dtype=np.float64),
+        self,
+        pHs: NDArray[np.float64] = np.arange(0, 14.1, 0.5, dtype=np.float64),
     ) -> Scan:
         """
         Run pH scan
@@ -786,20 +797,16 @@ class pKasso:
         pka_predictor = self.pka_predictor(self.mol0)
         self.exclude_base_indices, self.exclude_acid_indices = pka_predictor.exclude_sites()
 
-        logger.debug('Processed:')
+        logger.debug("Processed:")
         logger.debug(self.smiles0)
-        logger.debug(f'Exclude base indices: {self.exclude_base_indices}')
-        logger.debug(f'Exclude acid indices: {self.exclude_acid_indices}')
-       
-        self.acid0 = pka_predictor.pred_acid() # returns pkas for map indices
-        self.base0 = pka_predictor.pred_base() # returns pkas for map indices
+        logger.debug(f"Exclude base indices: {self.exclude_base_indices}")
+        logger.debug(f"Exclude acid indices: {self.exclude_acid_indices}")
+
+        self.acid0 = pka_predictor.pred_acid()  # returns pkas for map indices
+        self.base0 = pka_predictor.pred_base()  # returns pkas for map indices
 
         self.indices0, self.q_options0 = find_candidate_sites(
-            self.base0,
-            self.acid0,
-            self.exclude_base_indices,
-            self.exclude_acid_indices,
-            self.charged_indices
+            self.base0, self.acid0, self.exclude_base_indices, self.exclude_acid_indices, self.charged_indices
         )
 
         self.indices0_str = pack_indices(self.indices0)
@@ -814,15 +821,15 @@ class pKasso:
             )
             for cluster in self.clusters
         ]
-        logger.debug(f'Clusters: {self.clusters}')
+        logger.debug(f"Clusters: {self.clusters}")
 
     def _calc_microstates(self, pH: float) -> MicrostateDistribution:
-        """ Calc microstate frequencies given a pH value """
+        """Calc microstate frequencies given a pH value"""
 
         # indices0_curated, q_options0 = self.calc_curated_indices(pH)
-    
+
         cluster_dists: list[MicrostateDistribution] = []
-        
+
         for cluster_space in self.cluster_spaces:
             cluster_dists.append(self.process_cluster(cluster_space, pH))
 
@@ -934,13 +941,13 @@ class pKasso:
         self,
         state_freqs_all: dict[str, NDArray[np.float64]],
         max_states: int = 18,
-        ) -> tuple[
-            list[str],
-            list[NDArray[np.float64]],
-            list[Mol],
-            list[NDArray[np.float64]],
-        ]:
-        """ Reduce number of states to max_states for plotting. """
+    ) -> tuple[
+        list[str],
+        list[NDArray[np.float64]],
+        list[Mol],
+        list[NDArray[np.float64]],
+    ]:
+        """Reduce number of states to max_states for plotting."""
 
         cutoff = 0.01
 
@@ -972,12 +979,12 @@ class pKasso:
             cutoff += 0.02
 
         # for state_str, mol in zip(state_strs_relevant, mols_relevant):
-            # mol.SetProp("_Name", state_str)
+        # mol.SetProp("_Name", state_str)
         # print(mols_relevant[0].GetProp("_Name"))
         # Sort by pH value of max freq.
         ps: list[int] = [int(p) for p in np.argsort(pH_argmaxs)]
 
-        logger.debug(f'Final N relevant states: {N_relevant_states} with cutoff {cutoff}')
+        logger.debug(f"Final N relevant states: {N_relevant_states} with cutoff {cutoff}")
         return (
             [state_strs_relevant[p] for p in ps],
             [sfreqs_relevant[p] for p in ps],
@@ -999,7 +1006,7 @@ class pKasso:
         space: ProtonationIndexSpace,
         pH: float,
     ) -> MicrostateDistribution:
-        """ 
+        """
         Generate and evaluate microstates for a single protonation cluster at a given pH value.
 
         Parameters
@@ -1023,10 +1030,9 @@ class pKasso:
         self.run_acid_base_calcs(space, state_strs, state_vecs)
 
         ps_all = calc_state_diffs(
-            state_strs, state_vecs, space.indices,
-            space.base_lib, space.acid_lib,
-            pH=pH, matrix_def=self.matrix_def)
-        
+            state_strs, state_vecs, space.indices, space.base_lib, space.acid_lib, pH=pH, matrix_def=self.matrix_def
+        )
+
         state_strs, state_freqs = calc_freqs_from_states(
             state_strs,
             state_vecs,
@@ -1083,17 +1089,17 @@ class pKasso:
         self.construct_mols(space, state_strs, state_vecs)
         self.run_acid_base_calcs(space, state_strs, state_vecs)
 
-        state_str0 = state_strs[0] # Neutral state
+        state_str0 = state_strs[0]  # Neutral state
         base_pka_diffs = {}
         acid_pka_diffs = {}
         for state_str1 in state_strs[1:]:
             base_pka_diffs[state_str1], acid_pka_diffs[state_str1] = coupling.compare_pkas(
-                    indices, q_options, state_str0, state_str1, 
-                    space.base_lib, space.acid_lib)
-        
+                indices, q_options, state_str0, state_str1, space.base_lib, space.acid_lib
+            )
+
         coupling_matrix = coupling.construct_coupling_matrix(
-                indices, state_strs, state_vecs, base_pka_diffs, acid_pka_diffs, 
-                coupling_cutoff)
+            indices, state_strs, state_vecs, base_pka_diffs, acid_pka_diffs, coupling_cutoff
+        )
         clusters = coupling.cluster_coupling_matrix(coupling_matrix)
         return clusters
 
@@ -1125,22 +1131,22 @@ class pKasso:
 
         coupling_cutoff = 0.0
         while True:
-            logger.debug(f'coupling cutoff: {coupling_cutoff}')
+            logger.debug(f"coupling cutoff: {coupling_cutoff}")
             accept_clusters = True
             clusters = self.coupling_assay(indices0, q_options0, coupling_cutoff)
             for c_idx, cluster in enumerate(clusters):
                 q_options = q_options0[cluster]
                 state_vecs = construct_state_vectors(q_options, self.cutoff_states)
                 N_states = len(state_vecs)
-                if N_states > self.cutoff_states: # Construct_state_vectors should return an empty list
+                if N_states > self.cutoff_states:  # Construct_state_vectors should return an empty list
                     raise
-                if (N_states == 0):
+                if N_states == 0:
                     accept_clusters = False
                     coupling_cutoff += 0.2
                     break
             if accept_clusters:
                 if coupling_cutoff > 1.5:
-                    logger.info(f'Coupling cutoff high: {coupling_cutoff}')
+                    logger.info(f"Coupling cutoff high: {coupling_cutoff}")
                 return clusters
 
     def construct_mols(
@@ -1175,7 +1181,7 @@ class pKasso:
         for state_str, state_vec in zip(state_strs, state_vecs):
             if state_str not in space.mols_lib:
                 mol_cand = construct_mol(self.mol0, space.indices, state_vec)
-                mol_cand.SetProp("_Name",state_str)
+                mol_cand.SetProp("_Name", state_str)
                 space.mols_lib[state_str] = mol_cand
 
     ###################################
@@ -1209,13 +1215,13 @@ class pKasso:
             Fixed protonation site space that owns the pKa caches.
         """
 
-        for state_str, state_vec in zip(state_strs,state_vecs):
+        for state_str, state_vec in zip(state_strs, state_vecs):
             if state_str in space.base_lib:
                 continue
 
             logger.debug(state_str)
 
-            state_vec_base = np.maximum(state_vec,1) # disregard de-protonations of other sites to assess base probability
+            state_vec_base = np.maximum(state_vec, 1)  # disregard de-protonations of other sites to assess base probability
 
             state_str_base = pack_vec(state_vec_base)
 
@@ -1227,22 +1233,26 @@ class pKasso:
                 if map_idx not in space.indices:
                     continue
                 rel_idx = space.indices.index(map_idx)
-                if state_vec[rel_idx] == 1: # Only consider predicted protonation/de-protonation predictions from neutral state
+                if (
+                    state_vec[rel_idx] == 1
+                ):  # Only consider predicted protonation/de-protonation predictions from neutral state
                     base[map_idx] = b
 
-            state_vec_acid = np.minimum(state_vec,1) # disregard protonations of other sites to assess acid probability
+            state_vec_acid = np.minimum(state_vec, 1)  # disregard protonations of other sites to assess acid probability
             state_str_acid = pack_vec(state_vec_acid)
 
             mol_acid = space.mols_lib[state_str_acid]
 
             acid_tmp = self.pka_predictor(mol_acid).pred_acid()
-            
+
             acid = {}
             for map_idx, a in acid_tmp.items():
                 if map_idx not in space.indices:
                     continue
                 rel_idx = space.indices.index(map_idx)
-                if state_vec[rel_idx] == 1: # Only consider predicted protonation/de-protonation predictions from neutral state
+                if (
+                    state_vec[rel_idx] == 1
+                ):  # Only consider predicted protonation/de-protonation predictions from neutral state
                     acid[map_idx] = a
 
             space.base_lib[state_str] = base
@@ -1255,8 +1265,8 @@ class pKasso:
         """
         Generate microstate output for the selected pH value.
 
-        This method exports the most relevant protonation states for 
-        `pH`. States are selected based on their probability 
+        This method exports the most relevant protonation states for
+        `pH`. States are selected based on their probability
         relative to the most populated state.
 
         The procedure includes:
@@ -1282,12 +1292,12 @@ class pKasso:
         state_freqs_export: list[float] = []
 
         for state_str, state_freq in zip(distribution.state_strs, distribution.state_freqs):
-            if state_freq >= self.cutoff_export * state_freq_max: # Include all high prob states
+            if state_freq >= self.cutoff_export * state_freq_max:  # Include all high prob states
                 state_strs_export.append(state_str)
                 state_freqs_export.append(state_freq)
 
         state_freqs_arr: NDArray[np.float64] = np.array(state_freqs_export)
-        ps = np.argsort(state_freqs_arr)[::-1] # Sort by highest probability
+        ps = np.argsort(state_freqs_arr)[::-1]  # Sort by highest probability
 
         state_freqs_export = [state_freqs_export[p] for p in ps]
         state_strs_export = [state_strs_export[p] for p in ps]
@@ -1295,7 +1305,7 @@ class pKasso:
         self.check_chiral_consistency(distribution.state_strs, distribution.indices)
         space = self.index_spaces.get(distribution.indices)
 
-        logger.debug(f'Export at pH {self.pH}:')
+        logger.debug(f"Export at pH {self.pH}:")
         for e_idx, (state_str, sfreq) in enumerate(zip(state_strs_export, state_freqs_export)):
             logger.debug(e_idx, state_str, sfreq)
 
@@ -1339,14 +1349,14 @@ class pKasso:
 
             cid = AllChem.EmbedMolecule(mol_h, randomSeed=1, useRandomCoords=True)
             if cid != 0:
-                logger.warning(f'Needed to remove chirality for embedding for {state_str}!')
+                logger.warning(f"Needed to remove chirality for embedding for {state_str}!")
                 for atom in mol_h.GetAtoms():
-                    atom.SetChiralTag(Chem.ChiralType.CHI_UNSPECIFIED) 
+                    atom.SetChiralTag(Chem.ChiralType.CHI_UNSPECIFIED)
             cid = AllChem.EmbedMolecule(mol_h, randomSeed=1, useRandomCoords=True)
 
             if cid != 0:
-                raise ValueError(f'{state_str} could not be embedded.')
+                raise ValueError(f"{state_str} could not be embedded.")
             for atom in mol.GetAtoms():
                 atom.SetChiralTag(Chem.ChiralType.CHI_UNSPECIFIED)
-            
+
             space.mols_lib[state_str] = mol

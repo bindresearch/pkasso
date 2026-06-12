@@ -9,7 +9,6 @@ WORKDIR /app
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         ca-certificates \
-        libcairo2 \
         libfontconfig1 \
         libfreetype6 \
         libglib2.0-0 \

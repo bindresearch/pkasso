@@ -31,16 +31,17 @@ def construct_state_vectors_single(indices: list[int], q_options: NDArray[np.int
     """
 
     state_vecs = []
-    state_vec = np.ones((len(indices)),dtype=int)
-    state_vecs.append(state_vec) # Add neutral state
+    state_vec = np.ones((len(indices)), dtype=int)
+    state_vecs.append(state_vec)  # Add neutral state
 
     for rel_idx, map_idx in enumerate(indices):
-        for q in [0,2]:
+        for q in [0, 2]:
             if q_options[rel_idx][q] == 1:
-                state_vec = np.ones((len(indices)),dtype=int)
+                state_vec = np.ones((len(indices)), dtype=int)
                 state_vec[rel_idx] = q
                 state_vecs.append(state_vec)
     return state_vecs
+
 
 def compare_pkas(
     indices: list[int],
@@ -49,7 +50,7 @@ def compare_pkas(
     state_str1: str,
     base_lib: dict[str, dict[int, float]],
     acid_lib: dict[str, dict[int, float]],
-    ) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
     """
     Compute pKa differences between two protonation states.
 
@@ -84,17 +85,18 @@ def compare_pkas(
     base_pka_diff = np.zeros(len(indices))
     acid_pka_diff = np.zeros(len(indices))
     for rel_idx, map_idx in enumerate(indices):
-        if (q_options[rel_idx][2] == 1): # allowed for base
+        if q_options[rel_idx][2] == 1:  # allowed for base
             if (map_idx in base_lib[state_str0]) and (map_idx in base_lib[state_str1]):
                 base_pka_diff[rel_idx] = abs(base_lib[state_str1][map_idx] - base_lib[state_str0][map_idx])
             else:
-                base_pka_diff[rel_idx] = 10. # one disappeared
-        if (q_options[rel_idx][0] == 1): # allowed for acid
+                base_pka_diff[rel_idx] = 10.0  # one disappeared
+        if q_options[rel_idx][0] == 1:  # allowed for acid
             if (map_idx in acid_lib[state_str0]) and (map_idx in acid_lib[state_str1]):
                 acid_pka_diff[rel_idx] = abs(acid_lib[state_str1][map_idx] - acid_lib[state_str0][map_idx])
             else:
-                acid_pka_diff[rel_idx] = 10. # one disappeared
+                acid_pka_diff[rel_idx] = 10.0  # one disappeared
     return base_pka_diff, acid_pka_diff
+
 
 def construct_coupling_matrix(
     indices: list[int],
@@ -102,8 +104,8 @@ def construct_coupling_matrix(
     state_vecs: list[NDArray[np.int64]],
     base_pka_diffs: dict[str, NDArray[np.float64]],
     acid_pka_diffs: dict[str, NDArray[np.float64]],
-    coupling_cutoff: float
-    ) -> NDArray[np.int64]:
+    coupling_cutoff: float,
+) -> NDArray[np.int64]:
     """
     Build a site-site coupling matrix from pKa perturbations.
 
@@ -134,13 +136,14 @@ def construct_coupling_matrix(
         Square matrix indicating pairwise coupling strength between sites.
     """
 
-    coupling_matrix: NDArray[np.int64] = np.zeros((len(indices),len(indices)), dtype=np.int64)
+    coupling_matrix: NDArray[np.int64] = np.zeros((len(indices), len(indices)), dtype=np.int64)
 
     for state_str, state_vec in zip(state_strs[1:], state_vecs[1:]):
         changed_rel_idx = np.where(state_vec != 1)[0][0]
         coupling_matrix[changed_rel_idx] += np.where(base_pka_diffs[state_str] >= coupling_cutoff, 1, 0)
         coupling_matrix[changed_rel_idx] += np.where(acid_pka_diffs[state_str] >= coupling_cutoff, 1, 0)
     return coupling_matrix
+
 
 def cluster_coupling_matrix(M: NDArray[np.int64]) -> list[list[int]]:
     """
