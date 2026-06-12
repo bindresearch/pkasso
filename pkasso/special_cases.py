@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 def match_smarts(mol: Mol, smarts: str) -> tuple[tuple[int, ...], ...]:
-    """ Match smarts pattern in rdkit molecule.
+    """Match smarts pattern in rdkit molecule.
 
     Parameters:
     -----------
@@ -53,7 +53,7 @@ def find_charged(mol: Mol) -> list[int]:
         map_idx = atom.GetAtomMapNum()
 
         if q != 0:
-            logger.info(f'Input molecule is charged at idx {at_idx}, map_idx {map_idx}!')
+            logger.info(f"Input molecule is charged at idx {at_idx}, map_idx {map_idx}!")
             charged_indices.append(map_idx)
 
     return charged_indices
@@ -162,7 +162,7 @@ def short_alkyl(n_atom: Atom, mol: Mol) -> bool:
 
 
 def has_invalid_amine(mol: Mol) -> int:
-    """ Special case amine with only ethyl or methyl or isopropyl (or no) substituents
+    """Special case amine with only ethyl or methyl or isopropyl (or no) substituents
     e.g.
     CCNCC
     NCC
@@ -200,9 +200,7 @@ def oh_ring_sulfonate(mol: Mol) -> list[int]:
     assert sulfo_pat is not None
 
     aromatic_rings: list[set[int]] = [
-        set(ring)
-        for ring in mol.GetRingInfo().AtomRings()
-        if all(mol.GetAtomWithIdx(i).GetIsAromatic() for i in ring)
+        set(ring) for ring in mol.GetRingInfo().AtomRings() if all(mol.GetAtomWithIdx(i).GetIsAromatic() for i in ring)
     ]
 
     # Merge fused aromatic rings into aromatic ring systems
@@ -237,10 +235,7 @@ def oh_ring_sulfonate(mol: Mol) -> list[int]:
         for mat in mol.GetSubstructMatches(phenol_pat)
     ]
 
-    sulfo_ring_atoms = {
-        mat[0]
-        for mat in mol.GetSubstructMatches(sulfo_pat)
-    }
+    sulfo_ring_atoms = {mat[0] for mat in mol.GetSubstructMatches(sulfo_pat)}
 
     matching_oxygen_indices: set[int] = set()
 

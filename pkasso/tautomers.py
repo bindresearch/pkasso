@@ -7,18 +7,10 @@ from rdkit.Chem import AllChem
 from rdkit.Chem.MolStandardize import rdMolStandardize
 
 
-IMIDIC_ACID_PATTERN = Chem.MolFromSmarts(
-    "[NX2;!$([N+])]=[CX3]([OX2H1])"
-)
-THIOIMIDIC_ACID_PATTERN = Chem.MolFromSmarts(
-    "[NX2;!$([N+])]=[CX3]([SX2H1])"
-)
-HYDROXAMATE_PATTERN = Chem.MolFromSmarts(
-    "[CX3](=[OX1])-[NX3]-[OX2H1]"
-)
-HYDROXIMIC_ACID_PATTERN = Chem.MolFromSmarts(
-    "[CX3]([OX2H1])=[NX2]-[OX2H1]"
-)
+IMIDIC_ACID_PATTERN = Chem.MolFromSmarts("[NX2;!$([N+])]=[CX3]([OX2H1])")
+THIOIMIDIC_ACID_PATTERN = Chem.MolFromSmarts("[NX2;!$([N+])]=[CX3]([SX2H1])")
+HYDROXAMATE_PATTERN = Chem.MolFromSmarts("[CX3](=[OX1])-[NX3]-[OX2H1]")
+HYDROXIMIC_ACID_PATTERN = Chem.MolFromSmarts("[CX3]([OX2H1])=[NX2]-[OX2H1]")
 
 
 ConformerEnergy = tuple[int, float]
@@ -38,10 +30,7 @@ class TautomerEntry(TypedDict):
 def has_imidic_acid_amide_tautomer(mol: Chem.Mol) -> bool:
     """Return whether a molecule matches an imidic or thioimidic acid pattern."""
 
-    return bool(
-        mol.HasSubstructMatch(IMIDIC_ACID_PATTERN)
-        or mol.HasSubstructMatch(THIOIMIDIC_ACID_PATTERN)
-    )
+    return bool(mol.HasSubstructMatch(IMIDIC_ACID_PATTERN) or mol.HasSubstructMatch(THIOIMIDIC_ACID_PATTERN))
 
 
 def has_hydroxamate_tautomer(mol: Chem.Mol) -> bool:
@@ -129,9 +118,7 @@ def best_tautomer_smiles(
     ranked: list[TautomerEntry] = []
 
     for i, taut in enumerate(tautomers):
-
         try:
-
             Chem.AssignStereochemistry(
                 taut,
                 force=True,
@@ -171,11 +158,7 @@ def best_tautomer_smiles(
     # ---------------------------------------------------------
 
     if any(has_hydroxamate_tautomer(entry["taut"]) for entry in ranked):
-        ranked = [
-            entry
-            for entry in ranked
-            if not has_hydroximic_acid_tautomer(entry["taut"])
-        ]
+        ranked = [entry for entry in ranked if not has_hydroximic_acid_tautomer(entry["taut"])]
 
     if len(ranked) == 0:
         return smiles
@@ -185,10 +168,7 @@ def best_tautomer_smiles(
     ranked = [
         entry
         for entry in ranked
-        if (
-            entry["rdkit_score"] == best_rdkit_score
-            or not has_imidic_acid_amide_tautomer(entry["taut"])
-        )
+        if (entry["rdkit_score"] == best_rdkit_score or not has_imidic_acid_amide_tautomer(entry["taut"]))
     ]
 
     ranked.sort(key=lambda x: (-x["rdkit_score"], x["mmff_energy"]))

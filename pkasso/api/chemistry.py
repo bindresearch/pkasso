@@ -16,6 +16,7 @@ from ..postprocess import draw_mols
 
 os.environ.setdefault("MPLCONFIGDIR", "/tmp/matplotlib-pkasso")
 
+
 def _pyplot() -> Any:
     import matplotlib
 
@@ -24,10 +25,12 @@ def _pyplot() -> Any:
 
     return plt
 
+
 def render_svg_image(svg: str | bytes) -> str:
     if isinstance(svg, bytes):
         return svg.decode("utf-8")
     return svg
+
 
 def figure_to_svg(fig: Any) -> str:
     plt = _pyplot()

@@ -22,51 +22,52 @@ COMMON_OPTIONS = [
         type=click.Choice(["dG", "msm"]),
         default="dG",
         show_default=True,
-        help='Use free energy differences or Markov state model to determine microstate probabilities',
+        help="Use free energy differences or Markov state model to determine microstate probabilities",
     ),
     click.option(
         "--cutoff-states",
         type=int,
         default=4000,
         show_default=True,
-        help='Max. number of microstates per coupled cluster of protonation sites',
+        help="Max. number of microstates per coupled cluster of protonation sites",
     ),
     click.option(
         "--sfreq-cutoff-individual",
         type=float,
         default=0.01,
         show_default=True,
-        help='Min. probability of protonation site cluster to be included in final microstate combination',
+        help="Min. probability of protonation site cluster to be included in final microstate combination",
     ),
     click.option(
         "--sfreq-cutoff-combined",
         type=float,
         default=0.001,
         show_default=True,
-        help='Min. probability of combined microstate (from independent clusters) to be considered',
+        help="Min. probability of combined microstate (from independent clusters) to be considered",
     ),
     click.option(
         "--tautomer-search/--no-tautomer-search",
         is_flag=True,
         default=True,
         show_default=True,
-        help='Run tautomer search before pKasso.'
+        help="Run tautomer search before pKasso.",
     ),
     click.option(
         "--max-tautomers",
         type=int,
         default=20,
         show_default=True,
-        help='Max. number of tautomers to enumerate',
+        help="Max. number of tautomers to enumerate",
     ),
     click.option(
         "--num-confs",
         type=int,
         default=10,
         show_default=True,
-        help='Number of conformations per tautomer',
+        help="Number of conformations per tautomer",
     ),
 ]
+
 
 def common_options(command: Callable[..., Any]) -> Callable[..., Any]:
     """Apply the Click options shared by all commands."""
@@ -77,39 +78,43 @@ def common_options(command: Callable[..., Any]) -> Callable[..., Any]:
         decorated_command = option(decorated_command)
     return decorated_command
 
+
 def run_cli() -> None:
-    """ Main entry point of cli. """
+    """Main entry point of cli."""
 
     argv = sys.argv[1:]
 
     if not argv:
-        cmd = '--help'
+        cmd = "--help"
     else:
         cmd = argv[0]
 
-    if (cmd not in ['--help', '-h']) and (cmd not in COMMANDS):
+    if (cmd not in ["--help", "-h"]) and (cmd not in COMMANDS):
         # Insert default command
         argv = ["single"] + argv
     cli(argv)
+
 
 @click.group()
 def cli() -> None:
     pass
 
+
 ### Single molecule ###
 
+
 @cli.command()
-@click.option('--name', required=False, type=str, default='molecule', help='Molecule name')
-@click.option('--smiles', required=True, type=str, help='SMILES string')
-@click.option('--ph', required=False, type=float, default=7., help='pH value (for sdf and csv output)')
-@click.option('--sdf-out', required=False, type=click.Path(path_type=Path), help='sdf output file name')
+@click.option("--name", required=False, type=str, default="molecule", help="Molecule name")
+@click.option("--smiles", required=True, type=str, help="SMILES string")
+@click.option("--ph", required=False, type=float, default=7.0, help="pH value (for sdf and csv output)")
+@click.option("--sdf-out", required=False, type=click.Path(path_type=Path), help="sdf output file name")
 @click.option(
     "--cutoff-export",
     required=False,
     type=float,
     default=1.0,
     show_default=True,
-    help='Min. probability of microstate w.r.t. highest probable microstate to be included for export',
+    help="Min. probability of microstate w.r.t. highest probable microstate to be included for export",
 )
 @common_options
 def single(
@@ -126,7 +131,7 @@ def single(
     max_tautomers: int,
     num_confs: int,
 ) -> None:
-    """ Run single protonation state prediction given a smiles string and pH values. """
+    """Run single protonation state prediction given a smiles string and pH values."""
 
     # click.echo(f"Single: {name}")
 
@@ -142,46 +147,32 @@ def single(
         max_tautomers=max_tautomers,
         num_confs=num_confs,
     )
-    print(f'{name} | pH: {ph}')
-    print('Microstate SMILES Probability Net_Charge')
-    print('----------------------------------------')
+    print(f"{name} | pH: {ph}")
+    print("Microstate SMILES Probability Net_Charge")
+    print("----------------------------------------")
     for sm, mol in zip(smiles_out, mols_out):
-        name_state = mol.GetProp('_Name')
-        probability = float(mol.GetProp('Probability'))
-        net_charge = float(mol.GetProp('net_charge'))
-        print(name_state, sm, f'{probability:.5f}', net_charge)
-    
+        name_state = mol.GetProp("_Name")
+        probability = float(mol.GetProp("Probability"))
+        net_charge = float(mol.GetProp("net_charge"))
+        print(name_state, sm, f"{probability:.5f}", net_charge)
+
     if sdf_out:
         save_sdf(mols_out, sdf_out)
 
+
 ### Batch processing ###
 
+
 @cli.command()
+@click.option("--smi", required=True, type=click.Path(path_type=Path), help="Input .smi for batch processing")
+@click.option("--ph", required=False, type=float, default=7.0, help="pH value (for sdf and csv output)")
+@click.option("--overwrite/--no-overwrite", is_flag=True, default=True, help="Overwrite sdf file if exists")
 @click.option(
-    '--smi',
-    required=True,
-    type=click.Path(path_type=Path),
-    help='Input .smi for batch processing'
-)
-@click.option(
-    '--ph',
-    required=False,
-    type=float,
-    default=7.,
-    help='pH value (for sdf and csv output)'
-)
-@click.option(
-    '--overwrite/--no-overwrite',
-    is_flag=True,
-    default=True,
-    help='Overwrite sdf file if exists'
-)
-@click.option(
-    '--path-out',
+    "--path-out",
     required=False,
     type=click.Path(path_type=Path),
-    default=Path('pkasso_output'),
-    help='Output folder for sdf files'
+    default=Path("pkasso_output"),
+    help="Output folder for sdf files",
 )
 @click.option(
     "--cutoff-export",
@@ -189,7 +180,7 @@ def single(
     type=float,
     default=1.0,
     show_default=True,
-    help='Min. probability of microstate w.r.t. highest probable microstate to be included for export',
+    help="Min. probability of microstate w.r.t. highest probable microstate to be included for export",
 )
 @common_options
 def batch(
@@ -206,7 +197,7 @@ def batch(
     max_tautomers: int,
     num_confs: int,
 ) -> None:
-    """ Batch process an input .smi file and write output microstates to csv 
+    """Batch process an input .smi file and write output microstates to csv
     (optionally write sdf files of individual molecules)"""
 
     # click.echo("Batch")
@@ -232,21 +223,23 @@ def batch(
         # Save sdf files
         if path_out:
             os.makedirs(path_out, exist_ok=True)
-            filename = path_out / f'{name}.sdf'
+            filename = path_out / f"{name}.sdf"
             if (not overwrite) and (os.path.isfile(filename)):
-                raise FileExistsError('File {file_name} exists and overwrite == False!')
+                raise FileExistsError("File {file_name} exists and overwrite == False!")
             save_sdf(mols_out, filename)
+
 
 ### pH scan ###
 
+
 @cli.command()
-@click.option('--name', required=False, type=str, default='molecule', help='Molecule name')
-@click.option('--smiles', required=True, type=str, help='SMILES string')
-@click.option('--min-ph', required=False, type=float, default=0., help='Minimum pH value')
-@click.option('--max-ph', required=False, type=float, default=14., help='Maximum pH value')
-@click.option('--fig-out', required=False, type=click.Path(path_type=Path), help='Figure of scan')
-@click.option('--sdf-out', required=False, type=click.Path(path_type=Path), help='File name for sdf output')
-@click.option('--pkas-out', required=False, type=click.Path(path_type=Path), help='File for macro pkas')
+@click.option("--name", required=False, type=str, default="molecule", help="Molecule name")
+@click.option("--smiles", required=True, type=str, help="SMILES string")
+@click.option("--min-ph", required=False, type=float, default=0.0, help="Minimum pH value")
+@click.option("--max-ph", required=False, type=float, default=14.0, help="Maximum pH value")
+@click.option("--fig-out", required=False, type=click.Path(path_type=Path), help="Figure of scan")
+@click.option("--sdf-out", required=False, type=click.Path(path_type=Path), help="File name for sdf output")
+@click.option("--pkas-out", required=False, type=click.Path(path_type=Path), help="File for macro pkas")
 @common_options
 def scan(
     name: str,
@@ -264,22 +257,22 @@ def scan(
     max_tautomers: int,
     num_confs: int,
 ) -> None:
-    """ Scan pH values, output plot of microstate distributions and macro pKa values """
+    """Scan pH values, output plot of microstate distributions and macro pKa values"""
 
     click.echo("Scan pH")
 
-    pHs: NDArray[np.float64] = np.arange(min_ph, max_ph+0.0001, 0.25, dtype=np.float64)
+    pHs: NDArray[np.float64] = np.arange(min_ph, max_ph + 0.0001, 0.25, dtype=np.float64)
 
     if not fig_out:
-        fig_out = Path(f'{name}_scan.pdf')
+        fig_out = Path(f"{name}_scan.pdf")
     if not sdf_out:
-        sdf_out = Path(f'{name}_mols_scan.sdf')
+        sdf_out = Path(f"{name}_mols_scan.sdf")
     if not pkas_out:
-        pkas_out = Path(f'{name}_macro_pkas.out')
+        pkas_out = Path(f"{name}_macro_pkas.out")
 
     scan = scan_pH(
         smiles,
-        pHs = pHs,
+        pHs=pHs,
         matrix_def=matrix_def,
         cutoff_states=cutoff_states,
         sfreq_cutoff_individual=sfreq_cutoff_individual,
@@ -288,7 +281,7 @@ def scan(
         max_tautomers=max_tautomers,
         num_confs=num_confs,
     )
-    
+
     scan.export_macro_pkas(file=pkas_out)
     scan.print_macro_pkas()
 
@@ -296,7 +289,7 @@ def scan(
     size_y = 120
 
     fig_scan = scan.plot_scan()
-    fig_mols = scan.plot_mols(size_x = size_x, size_y=size_y)
+    fig_mols = scan.plot_mols(size_x=size_x, size_y=size_y)
 
     scan.export_scan(fig_out, fig_scan, fig_mols)
     scan.save_sdf(sdf_out)
