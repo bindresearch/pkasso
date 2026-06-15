@@ -15,6 +15,7 @@ from .utils import read_smi
 from .postprocess import save_sdf
 
 COMMANDS = {"single", "batch", "scan"}
+MAX_SFREQ_CUTOFF = 0.02
 
 
 def _common_option_conflicts(ctx: click.Context) -> None:
@@ -38,6 +39,15 @@ def _common_option_conflicts(ctx: click.Context) -> None:
         and ctx.params["tautomer_search"] is False
     ):
         raise click.UsageError("--num-confs cannot be used with --no-tautomer-search.")
+
+    if ctx.params["sfreq_cutoff_individual"] > MAX_SFREQ_CUTOFF:
+        raise click.UsageError(f"--sfreq-cutoff-individual must be <= {MAX_SFREQ_CUTOFF}.")
+
+    if ctx.params["sfreq_cutoff_combined"] > MAX_SFREQ_CUTOFF:
+        raise click.UsageError(f"--sfreq-cutoff-combined must be <= {MAX_SFREQ_CUTOFF}.")
+
+    if ctx.params["cutoff_states"] < 1:
+        raise click.UsageError("--cutoff-states must be >= 1.")
 
 
 COMMON_OPTIONS = [
