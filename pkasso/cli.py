@@ -16,6 +16,30 @@ from .postprocess import save_sdf
 
 COMMANDS = {"single", "batch", "scan"}
 
+
+def _common_option_conflicts(ctx: click.Context) -> None:
+    """Raise a Click error for explicitly incompatible shared CLI options."""
+
+    commandline = click.core.ParameterSource.COMMANDLINE
+    max_tautomers_source = ctx.get_parameter_source("max_tautomers")
+    tautomer_search_source = ctx.get_parameter_source("tautomer_search")
+    num_confs_source = ctx.get_parameter_source("num_confs")
+
+    if (
+        max_tautomers_source == commandline
+        and tautomer_search_source == commandline
+        and ctx.params["tautomer_search"] is False
+    ):
+        raise click.UsageError("--max-tautomers cannot be used with --no-tautomer-search.")
+
+    if (
+        num_confs_source == commandline
+        and tautomer_search_source == commandline
+        and ctx.params["tautomer_search"] is False
+    ):
+        raise click.UsageError("--num-confs cannot be used with --no-tautomer-search.")
+
+
 COMMON_OPTIONS = [
     click.option(
         "--matrix-def",
@@ -27,7 +51,7 @@ COMMON_OPTIONS = [
     click.option(
         "--cutoff-states",
         type=int,
-        default=4000,
+        default=1000,
         show_default=True,
         help="Max. number of microstates per coupled cluster of protonation sites",
     ),
@@ -133,6 +157,8 @@ def single(
 ) -> None:
     """Run single protonation state prediction given a smiles string and pH values."""
 
+    _common_option_conflicts(click.get_current_context())
+
     # click.echo(f"Single: {name}")
 
     smiles_out, mols_out = protonate(
@@ -200,7 +226,7 @@ def batch(
     """Batch process an input .smi file and write output microstates to csv
     (optionally write sdf files of individual molecules)"""
 
-    # click.echo("Batch")
+    _common_option_conflicts(click.get_current_context())
 
     batch_input = read_smi(smi)
 
@@ -258,6 +284,8 @@ def scan(
     num_confs: int,
 ) -> None:
     """Scan pH values, output plot of microstate distributions and macro pKa values"""
+
+    _common_option_conflicts(click.get_current_context())
 
     click.echo("Scan pH")
 
