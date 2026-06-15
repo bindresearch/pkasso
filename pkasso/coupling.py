@@ -2,10 +2,27 @@
 
 import logging
 
+import networkx as nx
 import numpy as np
 from numpy.typing import NDArray
 
 logger = logging.getLogger(__name__)
+
+
+def bridge_cutoff_for_coupling_cutoff(coupling_cutoff: float, bridge_cutoff_step: float = 0.4) -> int:
+    """
+    Derive bridge-splitting aggressiveness from the pKa coupling cutoff.
+
+    The default schedule keeps ordinary connected components below 0.4 pKa
+    units, then increases the bridge cutoff at 0.4, 0.8, 1.2, etc.
+    """
+
+    if bridge_cutoff_step <= 0:
+        raise ValueError("bridge_cutoff_step must be positive.")
+    if coupling_cutoff < 0:
+        raise ValueError("coupling_cutoff must be non-negative.")
+
+    return int((coupling_cutoff + 1e-9) // bridge_cutoff_step)
 
 
 def construct_state_vectors_single(indices: list[int], q_options: NDArray[np.int64]) -> list[NDArray[np.int64]]:
@@ -145,17 +162,48 @@ def construct_coupling_matrix(
     return coupling_matrix
 
 
-def cluster_coupling_matrix(M: NDArray[np.int64]) -> list[list[int]]:
+def coupling_matrix_to_graph(M: NDArray[np.int64]) -> nx.Graph:
+    """
+    Convert a directed coupling matrix into an undirected site graph.
+
+    Any nonzero sensitivity in either direction is treated as one site-site
+    connection. This preserves the previous connected-component semantics while
+    allowing NetworkX to perform more nuanced graph partitioning.
+    """
+
+    M = np.asarray(M)
+    if M.ndim != 2 or M.shape[0] != M.shape[1]:
+        raise ValueError("Coupling matrix must be square.")
+
+    n = M.shape[0]
+    graph = nx.Graph()
+    graph.add_nodes_from(range(n))
+
+    for i in range(n):
+        for j in range(i + 1, n):
+            if M[i, j] != 0 or M[j, i] != 0:
+                graph.add_edge(i, j)
+
+    return graph
+
+
+def cluster_coupling_matrix(M: NDArray[np.int64], bridge_cutoff: int = 0) -> list[list[int]]:
     """
     Partition sites into clusters based on coupling connectivity.
 
-    Identify connected components in the coupling matrix, grouping
-    sites that influence each other into clusters.
+    Identify coupled site clusters in the coupling matrix. With
+    ``bridge_cutoff=0`` this is ordinary connected-component clustering, which
+    matches the previous behavior. Higher values split components across graph
+    bottlenecks held together by at most that many inter-component edges.
 
     Parameters
     ----------
     coupling_matrix
         Square matrix indicating pairwise coupling strength between sites.
+    bridge_cutoff
+        Maximum number of graph-edge connections allowed to hold two clusters
+        together. For example, ``1`` splits one-edge bridges, ``2`` splits
+        two-edge bottlenecks, and so on.
 
     Returns
     -------
@@ -163,22 +211,10 @@ def cluster_coupling_matrix(M: NDArray[np.int64]) -> list[list[int]]:
         Lists of site indices belonging to each coupling cluster.
     """
 
-    n = M.shape[0]
-    visited = set()
-    clusters = []
+    if bridge_cutoff < 0:
+        raise ValueError("bridge_cutoff must be non-negative.")
 
-    def dfs(i: int, cluster: set[int]) -> None:
-        for j in range(n):
-            if j not in visited and (M[i, j] != 0 or M[j, i] != 0):
-                visited.add(j)
-                cluster.add(j)
-                dfs(j, cluster)
-
-    for i in range(n):
-        if i not in visited:
-            visited.add(i)
-            cluster = {i}
-            dfs(i, cluster)
-            clusters.append(cluster)
-    clusters_out = [list(c) for c in clusters]
-    return clusters_out
+    graph = coupling_matrix_to_graph(M)
+    edge_connectivity = bridge_cutoff + 1
+    clusters = [sorted(c) for c in nx.k_edge_components(graph, k=edge_connectivity)]
+    return sorted(clusters, key=lambda c: c[0])
