@@ -54,6 +54,8 @@ def preprocess(
     logger.debug("Raw:")
     logger.debug(smiles_raw)
     mol = Chem.MolFromSmiles(smiles_raw, sanitize=True)
+    if mol is None:
+        raise ValueError(f"Invalid SMILES: {smiles_raw}")
     smiles = Chem.MolToSmiles(mol, canonical=True)
 
     logger.debug("Canonical")
@@ -82,8 +84,6 @@ def preprocess(
 
     mol = Chem.MolFromSmiles(smiles, sanitize=True)
     smiles = Chem.MolToSmiles(mol, canonical=True)
-
-    # print(f'smiles after clean-up: {smiles}')
 
     for atom in mol.GetAtoms():
         atom.SetAtomMapNum(atom.GetIdx() + 1)
@@ -380,9 +380,7 @@ def combine_cluster_distributions(
     cluster_dists: list[MicrostateDistribution],
     index_space: ProtonationIndexSpace,
     pH: float,
-    # sfreq_cutoff_individual: float = 0.01,
     sfreq_cutoff_combined: float = 0.01,
-    # max_states_individual: int = 100,
     max_states_combined: int = 100,
 ) -> MicrostateDistribution:
     """
@@ -426,31 +424,13 @@ def combine_cluster_distributions(
     state_freqs_clusters = [np.asarray(dist.state_freqs, dtype=np.float64) for dist in cluster_dists]
     indices_clusters = [dist.indices for dist in cluster_dists]
 
-    print(state_freqs_clusters)
-
-    # Cull the state_strs per cluster a bit before combining.
-    # This is quite conservative (everything with at least 1% freq in that cluster)
-
-    cluster_state_ids: list[list[int]] = []
-
     logger.debug(state_strs_clusters)
     logger.debug(state_freqs_clusters)
 
-    for state_freqs_cl in state_freqs_clusters:
-        # state_freqs_cl_rel = state_freqs_cl / np.max(state_freqs_cl)
-        cluster_state_ids.append([])
+    cluster_state_ids = [range(len(state_freqs_cl)) for state_freqs_cl in state_freqs_clusters]
+    n_combinations = int(np.prod([len(state_ids) for state_ids in cluster_state_ids]))
+    logger.debug(f"N microstate combinations from clusters: {n_combinations}")
 
-        for s_idx, s_freq in enumerate(state_freqs_cl):
-            # if s_freq >= sfreq_cutoff_individual: # X% rel. to max state
-            cluster_state_ids[-1].append(s_idx)
-
-    print(cluster_state_ids)
-
-    combinations = list(itertools.product(*cluster_state_ids))
-    logger.debug(f"N microstate combinations from clusters: {len(combinations)}")
-   
-    state_strs_raw = []
-    state_freqs_raw = []
     indices = []
     for indices_cluster in indices_clusters:
         indices.extend(indices_cluster)  # This requires non-overlapping clusters!
@@ -461,26 +441,25 @@ def combine_cluster_distributions(
     if indices_str != index_space.indices_str:
         raise ValueError(f"indices_str {indices_str} not equal to full indices list {index_space.indices_str}")
 
-    for s_idxs in combinations:
-        state_str = ""
-        state_freq = 1.0
-        for c_idx, s_idx in enumerate(s_idxs):
-            state_str += state_strs_clusters[c_idx][s_idx]
-            state_freq *= state_freqs_clusters[c_idx][s_idx]
-        state_str = utils.sort_string(state_str, ps)  # match sorted indices
-        # if state_freq >= sfreq_cutoff_combined:
-            # state_strs.append(state_str)
-            # state_freqs_list.append(state_freq)
-        state_strs_raw.append(state_str)
-        state_freqs_raw.append(state_freq)
-
-    state_freq_max = np.max(state_freqs_raw)
+    state_freq_max = float(np.prod([np.max(state_freqs_cl) for state_freqs_cl in state_freqs_clusters]))
+    state_freq_cutoff = sfreq_cutoff_combined * state_freq_max
+    sort_state_str = not np.array_equal(ps, np.arange(len(ps)))
 
     state_strs = []
     state_freqs_list = []
 
-    for state_str, state_freq in zip(state_strs_raw, state_freqs_raw):
-        if state_freq >= sfreq_cutoff_combined * state_freq_max:
+    combinations = itertools.product(*cluster_state_ids)
+    for s_idxs in combinations:
+        state_freq = 1.0
+        state_str_parts = []
+        for c_idx, s_idx in enumerate(s_idxs):
+            state_str_parts.append(state_strs_clusters[c_idx][s_idx])
+            state_freq *= float(state_freqs_clusters[c_idx][s_idx])
+
+        if state_freq >= state_freq_cutoff:
+            state_str = "".join(state_str_parts)
+            if sort_state_str:
+                state_str = utils.sort_string(state_str, ps)  # match sorted indices
             state_strs.append(state_str)
             state_freqs_list.append(state_freq)
 
@@ -493,7 +472,6 @@ def combine_cluster_distributions(
 
     logger.debug(f"N chosen microstate combinations: {len(state_strs)}")
     # Correct freqs for removal of very unlikely states
-    # state_freqs = np.array(state_freqs_list)
     state_freqs /= np.sum(state_freqs)
 
     return MicrostateDistribution(
@@ -760,11 +738,11 @@ class pKasso:
     name: str = "molecule"
 
     # Internal options
-    cutoff_states: int = 1000
+    cutoff_states: int = 200
     sfreq_cutoff_individual: float = 0.01
-    max_states_individual: int = 100
-    sfreq_cutoff_combined: float = 0.001
-    max_states_combined: int = 100
+    max_states_individual: int = 20
+    sfreq_cutoff_combined: float = 0.01
+    max_states_combined: int = 20
     cutoff_export: float = 1.0
     matrix_def: str = "dG"
     device: str = "cpu"  # fixed!
@@ -772,6 +750,7 @@ class pKasso:
     tautomer_search: bool = True
     max_tautomers: int = 20
     num_confs: int = 10
+    total_max_sites: int = 25
 
     def pka_predictor(self, mol: Mol) -> Predictor:
         """Create the configured molecule-specific pKa predictor."""
@@ -844,19 +823,18 @@ class pKasso:
         self.acid0 = pka_predictor.pred_acid()  # returns pkas for map indices
         self.base0 = pka_predictor.pred_base()  # returns pkas for map indices
 
+        if len(self.acid0) + len(self.base0) > self.total_max_sites:
+            raise ValueError(f'Molecule must contain <={self.total_max_sites} protonation sites.')
+
         self.indices0, self.q_options0 = find_candidate_sites(
             self.base0, self.acid0, self.exclude_base_indices, self.exclude_acid_indices, self.charged_indices
         )
-
-        # print(self.indices0)
-        # print(self.q_options0)
 
         self.indices0_str = pack_indices(self.indices0)
         self.index_space0 = self.index_spaces.get_or_create(self.indices0, self.q_options0)
 
         # Screen coupling between residues, now pH independent
         self.clusters = self.screen_clusters(self.indices0, self.q_options0)
-        print(self.clusters)
         self.cluster_spaces = [
             self.index_spaces.get_or_create(
                 [self.indices0[c] for c in cluster],
@@ -868,8 +846,6 @@ class pKasso:
 
     def _calc_microstates(self, pH: float) -> MicrostateDistribution:
         """Calc microstate frequencies given a pH value"""
-
-        print(f'pH : {pH}')
 
         # indices0_curated, q_options0 = self.calc_curated_indices(pH)
 
@@ -888,8 +864,6 @@ class pKasso:
             sfreq_cutoff_combined=self.sfreq_cutoff_combined,
             max_states_combined=self.max_states_combined,
         )
-
-        print(len(dist.state_strs))
 
         self.construct_mols(dist.index_space, dist.state_strs, dist.state_vecs)
 
@@ -1027,10 +1001,6 @@ class pKasso:
 
             cutoff += 0.02
 
-        # for state_str, mol in zip(state_strs_relevant, mols_relevant):
-        # mol.SetProp("_Name", state_str)
-        # print(mols_relevant[0].GetProp("_Name"))
-        # Sort by pH value of max freq.
         ps: list[int] = [int(p) for p in np.argsort(pH_argmaxs)]
 
         logger.debug(f"Final N relevant states: {N_relevant_states} with cutoff {cutoff}")
