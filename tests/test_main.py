@@ -153,6 +153,17 @@ def test_construct_state_vectors():
     # assert False
 
 
+def test_count_state_combinations():
+    q_options = np.array(
+        [
+            [0, 1, 1],
+            [1, 1, 1],
+            [0, 1, 0],
+        ]
+    )
+    assert main.count_state_combinations(q_options) == 6
+
+
 @pytest.mark.parametrize(
     ("smiles_raw", "net_charge"),
     [

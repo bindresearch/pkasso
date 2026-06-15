@@ -5,6 +5,7 @@ import itertools
 import logging
 from dataclasses import dataclass, field
 
+import networkx as nx
 import numpy as np
 from numpy.typing import NDArray
 from rdkit import Chem, RDLogger
@@ -206,6 +207,13 @@ def construct_state_vectors(
     else:
         state_vecs = [np.array(x) for x in list(itertools.product(*q_options_nonzero))]
         return state_vecs
+
+
+def count_state_combinations(q_options: NDArray[np.int64]) -> int:
+    """Count valid protonation-state combinations without enumerating them."""
+
+    q_counts = np.count_nonzero(q_options, axis=1)
+    return int(np.prod(q_counts))
 
 
 #########################################
@@ -1054,14 +1062,13 @@ class pKasso:
 
     #########################
 
-    def coupling_assay_matrix(
+    def coupling_assay_weights(
         self,
         indices: list[int],
         q_options: NDArray[np.int64],
-        coupling_cutoff: float,
-    ) -> NDArray[np.int64]:
+    ) -> NDArray[np.float64]:
         """
-        Perform pairwise pKa sensitivity analysis and return a coupling matrix.
+        Perform pairwise pKa sensitivity analysis and return raw coupling weights.
 
         This method evaluates whether protonation of one site affects the
         predicted pKa values of other sites within the provided index set.
@@ -1070,7 +1077,7 @@ class pKasso:
         - Enumerate all single-site protonation states
         - Construct molecular representations for each state
         - Compare pKa values between reference and perturbed states
-        - Build a coupling matrix based on pKa differences
+        - Build a pKa-difference weight matrix
 
         Parameters
         ----------
@@ -1078,14 +1085,11 @@ class pKasso:
             Absolute atom map indices of the protonable sites being analyzed.
         q_options
             Array encoding allowed protonation states for each site.
-        coupling_cutoff
-            Threshold used to determine whether two sites are considered
-            coupled based on their pKa differences.
 
         Returns
         -------
-        coupling_matrix
-            Square matrix indicating pairwise coupling strength between sites.
+        coupling_weights
+            Square matrix containing max acid/base pKa differences between sites.
         """
 
         space = self.index_spaces.get_or_create(indices, q_options)
@@ -1107,24 +1111,103 @@ class pKasso:
                 indices, q_options, state_str0, state_str1, space.base_lib, space.acid_lib
             )
 
-        return coupling.construct_coupling_matrix(
-            indices, state_strs, state_vecs, base_pka_diffs, acid_pka_diffs, coupling_cutoff
+        return coupling.construct_coupling_weight_matrix(
+            indices, state_strs, state_vecs, base_pka_diffs, acid_pka_diffs
+        )
+
+    def coupling_assay_matrix(
+        self,
+        indices: list[int],
+        q_options: NDArray[np.int64],
+        coupling_cutoff: float,
+    ) -> NDArray[np.int64]:
+        """
+        Perform pairwise pKa sensitivity analysis and return a coupling matrix.
+
+        This compatibility wrapper thresholds the raw pKa-difference weights at
+        ``coupling_cutoff``.
+        """
+
+        coupling_weights = self.coupling_assay_weights(indices, q_options)
+        return coupling.threshold_coupling_weights(coupling_weights, coupling_cutoff)
+
+    def split_cluster_by_coupling_penalty(
+        self,
+        cluster: list[int],
+        q_options0: NDArray[np.int64],
+        coupling_weights: NDArray[np.float64],
+        coupling_cutoff: float,
+    ) -> list[list[int]]:
+        """
+        Recursively split an oversized cluster by local penalty-limited cuts.
+
+        The cutoff is raised only for the subcluster currently being split. At
+        each local cutoff, acceptable cuts sever at most two graph edges and
+        have total pKa penalty no larger than 1.5 times the local cutoff.
+        """
+
+        graph = coupling.coupling_weights_to_graph(coupling_weights, coupling_cutoff, nodes=cluster)
+        components = [sorted(component) for component in nx.connected_components(graph)]
+        components = sorted(components, key=lambda c: c[0])
+
+        if len(components) > 1:
+            split_clusters = []
+            for component in components:
+                split_clusters.extend(
+                    self.split_cluster_by_coupling_penalty(component, q_options0, coupling_weights, coupling_cutoff)
+                )
+            return split_clusters
+
+        cluster = components[0] if components else sorted(cluster)
+        if count_state_combinations(q_options0[cluster]) <= self.cutoff_states:
+            return [cluster]
+
+        child_clusters = coupling.find_best_penalty_limited_split(
+            graph,
+            coupling_weights,
+            lambda child_cluster: count_state_combinations(q_options0[child_cluster]),
+            max_cut_edges=2,
+            coupling_cutoff=coupling_cutoff,
+        )
+        if child_clusters is not None:
+            split_clusters = []
+            for child_cluster in child_clusters:
+                split_clusters.extend(
+                    self.split_cluster_by_coupling_penalty(
+                        child_cluster,
+                        q_options0,
+                        coupling_weights,
+                        coupling_cutoff,
+                    )
+                )
+            return split_clusters
+
+        next_coupling_cutoff = round(coupling_cutoff + 0.1, 10)
+        if next_coupling_cutoff > 1.5:
+            logger.info(f"Local coupling cutoff high: {next_coupling_cutoff}")
+        return self.split_cluster_by_coupling_penalty(
+            cluster,
+            q_options0,
+            coupling_weights,
+            next_coupling_cutoff,
         )
 
     def screen_clusters(self, indices0: list[int], q_options0: NDArray[np.int64]) -> list[list[int]]:
         """
         Determine stable pKa coupling clusters using adaptive thresholding.
 
-        This method partitions protonable sites into independent clusters by
-        repeatedly performing a coupling assay and adjusting both the pKa
-        coupling threshold and the bridge-splitting threshold until all
-        clusters are computationally stable.
+        This method partitions protonable sites into independent clusters using
+        an initial pKa coupling threshold. Oversized clusters are split
+        recursively by applying the cheapest acceptable graph cut, with cutoff
+        increases applied only to the subcluster currently being split.
 
         Stability criterion:
         A cluster is rejected if state enumeration exceeds the allowed
-        cutoff, which indicates excessive coupling. In that case, the coupling
-        threshold is increased and, at fixed pKa intervals, increasingly narrow
-        graph bottlenecks are allowed to split oversized chain-like clusters.
+        cutoff, which indicates excessive coupling. In that case, candidate
+        cutsets of one or two graph edges are considered. A cut is acceptable
+        when the total severed pKa penalty is no larger than 1.5 times the
+        local coupling cutoff. Among acceptable cuts, the split minimizing the
+        summed child-cluster state count is selected.
 
         Parameters
         ----------
@@ -1140,28 +1223,16 @@ class pKasso:
         """
 
         coupling_cutoff = 0.1
-        while True:
-            bridge_cutoff = coupling.bridge_cutoff_for_coupling_cutoff(coupling_cutoff)
-            logger.debug(f"coupling cutoff: {coupling_cutoff}, bridge cutoff: {bridge_cutoff}")
-            accept_clusters = True
-            coupling_matrix = self.coupling_assay_matrix(indices0, q_options0, coupling_cutoff)
-            clusters = coupling.cluster_coupling_matrix(coupling_matrix, bridge_cutoff=bridge_cutoff)
-            for cluster in clusters:
-                q_options = q_options0[cluster]
-                state_vecs = construct_state_vectors(q_options, self.cutoff_states)
-                N_states = len(state_vecs)
-                if N_states > self.cutoff_states:  # Construct_state_vectors should return an empty list
-                    raise
-                if N_states == 0:
-                    accept_clusters = False
-                    coupling_cutoff = round(coupling_cutoff + 0.1, 10)
-                    break
-            if accept_clusters:
-                print(f'Final coupling_cutoff: {coupling_cutoff}')
-                print(f'Final bridge_cutoff: {bridge_cutoff}')
-                if coupling_cutoff > 1.5:
-                    logger.info(f"Coupling cutoff high: {coupling_cutoff}")
-                return clusters
+        coupling_weights = self.coupling_assay_weights(indices0, q_options0)
+        graph = coupling.coupling_weights_to_graph(coupling_weights, coupling_cutoff)
+        clusters = [sorted(component) for component in nx.connected_components(graph)]
+
+        split_clusters = []
+        for cluster in sorted(clusters, key=lambda c: c[0]):
+            split_clusters.extend(
+                self.split_cluster_by_coupling_penalty(cluster, q_options0, coupling_weights, coupling_cutoff)
+            )
+        return split_clusters
 
     def construct_mols(
         self,
