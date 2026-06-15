@@ -809,11 +809,15 @@ class pKasso:
             self.base0, self.acid0, self.exclude_base_indices, self.exclude_acid_indices, self.charged_indices
         )
 
+        print(self.indices0)
+        print(self.q_options0)
+
         self.indices0_str = pack_indices(self.indices0)
         self.index_space0 = self.index_spaces.get_or_create(self.indices0, self.q_options0)
 
         # Screen coupling between residues, now pH independent
         self.clusters = self.screen_clusters(self.indices0, self.q_options0)
+        print(self.clusters)
         self.cluster_spaces = [
             self.index_spaces.get_or_create(
                 [self.indices0[c] for c in cluster],
@@ -1050,9 +1054,14 @@ class pKasso:
 
     #########################
 
-    def coupling_assay(self, indices: list[int], q_options: NDArray[np.int64], coupling_cutoff: float) -> list[list[int]]:
+    def coupling_assay_matrix(
+        self,
+        indices: list[int],
+        q_options: NDArray[np.int64],
+        coupling_cutoff: float,
+    ) -> NDArray[np.int64]:
         """
-        Perform pairwise pKa sensitivity analysis and cluster coupled sites.
+        Perform pairwise pKa sensitivity analysis and return a coupling matrix.
 
         This method evaluates whether protonation of one site affects the
         predicted pKa values of other sites within the provided index set.
@@ -1062,7 +1071,6 @@ class pKasso:
         - Construct molecular representations for each state
         - Compare pKa values between reference and perturbed states
         - Build a coupling matrix based on pKa differences
-        - Cluster sites according to the coupling threshold
 
         Parameters
         ----------
@@ -1076,9 +1084,8 @@ class pKasso:
 
         Returns
         -------
-        clusters
-            List of clusters, where each cluster contains (relative) indices of
-            mutually coupled sites.
+        coupling_matrix
+            Square matrix indicating pairwise coupling strength between sites.
         """
 
         space = self.index_spaces.get_or_create(indices, q_options)
@@ -1089,6 +1096,9 @@ class pKasso:
         self.construct_mols(space, state_strs, state_vecs)
         self.run_acid_base_calcs(space, state_strs, state_vecs)
 
+        for key, val in space.base_lib.items():
+            logger.debug(f"{key}: {val}")
+
         state_str0 = state_strs[0]  # Neutral state
         base_pka_diffs = {}
         acid_pka_diffs = {}
@@ -1097,24 +1107,24 @@ class pKasso:
                 indices, q_options, state_str0, state_str1, space.base_lib, space.acid_lib
             )
 
-        coupling_matrix = coupling.construct_coupling_matrix(
+        return coupling.construct_coupling_matrix(
             indices, state_strs, state_vecs, base_pka_diffs, acid_pka_diffs, coupling_cutoff
         )
-        clusters = coupling.cluster_coupling_matrix(coupling_matrix)
-        return clusters
 
     def screen_clusters(self, indices0: list[int], q_options0: NDArray[np.int64]) -> list[list[int]]:
         """
         Determine stable pKa coupling clusters using adaptive thresholding.
 
-        This method partitions protonable sites into independent clusters
-        by repeatedly performing a coupling assay and adjusting the
-        coupling threshold until all clusters are computationally stable.
+        This method partitions protonable sites into independent clusters by
+        repeatedly performing a coupling assay and adjusting both the pKa
+        coupling threshold and the bridge-splitting threshold until all
+        clusters are computationally stable.
 
         Stability criterion:
         A cluster is rejected if state enumeration exceeds the allowed
-        cutoff, which indicates excessive coupling. In that case,
-        the coupling threshold is increased and the clustering is repeated.
+        cutoff, which indicates excessive coupling. In that case, the coupling
+        threshold is increased and, at fixed pKa intervals, increasingly narrow
+        graph bottlenecks are allowed to split oversized chain-like clusters.
 
         Parameters
         ----------
@@ -1129,12 +1139,14 @@ class pKasso:
             Final set of stable coupling clusters.
         """
 
-        coupling_cutoff = 0.0
+        coupling_cutoff = 0.1
         while True:
-            logger.debug(f"coupling cutoff: {coupling_cutoff}")
+            bridge_cutoff = coupling.bridge_cutoff_for_coupling_cutoff(coupling_cutoff)
+            logger.debug(f"coupling cutoff: {coupling_cutoff}, bridge cutoff: {bridge_cutoff}")
             accept_clusters = True
-            clusters = self.coupling_assay(indices0, q_options0, coupling_cutoff)
-            for c_idx, cluster in enumerate(clusters):
+            coupling_matrix = self.coupling_assay_matrix(indices0, q_options0, coupling_cutoff)
+            clusters = coupling.cluster_coupling_matrix(coupling_matrix, bridge_cutoff=bridge_cutoff)
+            for cluster in clusters:
                 q_options = q_options0[cluster]
                 state_vecs = construct_state_vectors(q_options, self.cutoff_states)
                 N_states = len(state_vecs)
@@ -1142,9 +1154,11 @@ class pKasso:
                     raise
                 if N_states == 0:
                     accept_clusters = False
-                    coupling_cutoff += 0.2
+                    coupling_cutoff = round(coupling_cutoff + 0.1, 10)
                     break
             if accept_clusters:
+                print(f'Final coupling_cutoff: {coupling_cutoff}')
+                print(f'Final bridge_cutoff: {bridge_cutoff}')
                 if coupling_cutoff > 1.5:
                     logger.info(f"Coupling cutoff high: {coupling_cutoff}")
                 return clusters
