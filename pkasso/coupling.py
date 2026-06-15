@@ -4,6 +4,7 @@ import logging
 import itertools
 import math
 from collections.abc import Callable
+from typing import cast
 
 import networkx as nx
 import numpy as np
@@ -185,10 +186,10 @@ def threshold_coupling_weights(M: NDArray[np.float64], coupling_cutoff: float) -
 def validate_coupling_matrix(M: NDArray[np.float64] | NDArray[np.int64]) -> NDArray[np.float64] | NDArray[np.int64]:
     """Validate and return a square coupling matrix."""
 
-    M = np.asarray(M)
-    if M.ndim != 2 or M.shape[0] != M.shape[1]:
+    matrix = cast(NDArray[np.float64] | NDArray[np.int64], np.asarray(M))
+    if matrix.ndim != 2 or matrix.shape[0] != matrix.shape[1]:
         raise ValueError("Coupling matrix must be square.")
-    return M
+    return matrix
 
 
 def coupling_matrix_to_graph(M: NDArray[np.float64] | NDArray[np.int64]) -> nx.Graph:
@@ -200,7 +201,7 @@ def coupling_matrix_to_graph(M: NDArray[np.float64] | NDArray[np.int64]) -> nx.G
     allowing NetworkX to perform more nuanced graph partitioning.
     """
 
-    M = validate_coupling_matrix(M)
+    validate_coupling_matrix(M)
     n = M.shape[0]
     graph = nx.Graph()
     graph.add_nodes_from(range(n))
@@ -228,7 +229,7 @@ def coupling_weights_to_graph(
     if coupling_cutoff < 0:
         raise ValueError("coupling_cutoff must be non-negative.")
 
-    M = validate_coupling_matrix(M)
+    validate_coupling_matrix(M)
     if nodes is None:
         nodes = list(range(M.shape[0]))
 
@@ -270,7 +271,7 @@ def cluster_coupling_matrix(M: NDArray[np.int64]) -> list[list[int]]:
 def cutset_penalty(M: NDArray[np.float64], cutset: tuple[tuple[int, int], ...]) -> float:
     """Sum undirected pKa penalties for severing a set of graph edges."""
 
-    M = validate_coupling_matrix(M)
+    validate_coupling_matrix(M)
     return float(sum(max(M[i, j], M[j, i]) for i, j in cutset))
 
 
