@@ -49,6 +49,10 @@ def _match_tuples(mol: Mol, query_one: Mol, query_two: Mol) -> set[tuple[int, ..
     return matches
 
 
+def _match_atom_indices(mol: Mol, query_one: Mol, query_two: Mol) -> set[int]:
+    return {atom_idx for match in _match_tuples(mol, query_one, query_two) for atom_idx in match}
+
+
 class MolVectorizer:
     """Cache molecule-level descriptors for repeated target-atom evaluations."""
 
@@ -61,8 +65,8 @@ class MolVectorizer:
         self.edge_index = torch.tensor(get_bond_pair(mol), dtype=torch.long)
         self.batch = torch.zeros(self.n_atoms, dtype=torch.long)
         self.ring = mol.GetRingInfo()
-        self.hydrogen_donor_matches = _match_tuples(mol, HYDROGEN_DONOR_ONE, HYDROGEN_DONOR_TWO)
-        self.hydrogen_acceptor_matches = _match_tuples(mol, HYDROGEN_ACCEPTOR_ONE, HYDROGEN_ACCEPTOR_TWO)
+        self.hydrogen_donor_matches = _match_atom_indices(mol, HYDROGEN_DONOR_ONE, HYDROGEN_DONOR_TWO)
+        self.hydrogen_acceptor_matches = _match_atom_indices(mol, HYDROGEN_ACCEPTOR_ONE, HYDROGEN_ACCEPTOR_TWO)
         self.base_node_features = self._calc_base_node_features()
         self.shortest_path_lengths_by_aid: dict[int, NDArray[np.int64]] = {}
 
@@ -142,8 +146,8 @@ def get_atom_features(mol: Mol, aid: int) -> list[list[Any]]:
     AllChem.ComputeGasteigerCharges(mol)
     Chem.AssignStereochemistry(mol)
 
-    hydrogen_donor_matches = _match_tuples(mol, HYDROGEN_DONOR_ONE, HYDROGEN_DONOR_TWO)
-    hydrogen_acceptor_matches = _match_tuples(mol, HYDROGEN_ACCEPTOR_ONE, HYDROGEN_ACCEPTOR_TWO)
+    hydrogen_donor_matches = _match_atom_indices(mol, HYDROGEN_DONOR_ONE, HYDROGEN_DONOR_TWO)
+    hydrogen_acceptor_matches = _match_atom_indices(mol, HYDROGEN_ACCEPTOR_ONE, HYDROGEN_ACCEPTOR_TWO)
 
     ring = mol.GetRingInfo()
 
