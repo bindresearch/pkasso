@@ -105,8 +105,14 @@ def read_smi(smi: Path) -> dict[str, str]:
 
     batch_dict: dict[str, str] = {}
 
+    ct = 0
+
     with open(smi, "r") as f:
         for line in f.readlines():
             spl = line.split()
-            batch_dict[spl[1]] = spl[0]
+            if len(spl) > 1:
+                batch_dict[spl[1]] = spl[0]
+            else:
+                batch_dict[f'molecule{ct}'] = spl[0]
+                ct += 1
     return batch_dict
