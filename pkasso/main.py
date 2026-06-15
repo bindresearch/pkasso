@@ -380,8 +380,10 @@ def combine_cluster_distributions(
     cluster_dists: list[MicrostateDistribution],
     index_space: ProtonationIndexSpace,
     pH: float,
-    sfreq_cutoff_individual: float = 0.01,
-    sfreq_cutoff_combined: float = 0.001,
+    # sfreq_cutoff_individual: float = 0.01,
+    sfreq_cutoff_combined: float = 0.01,
+    # max_states_individual: int = 100,
+    max_states_combined: int = 100,
 ) -> MicrostateDistribution:
     """
     Combine microstate probabilities from independent pKa clusters.
@@ -406,11 +408,13 @@ def combine_cluster_distributions(
     pH
         Current pH value.
     sfreq_cutoff_individual
-        Minimum frequency required for a state to be considered during
+        Minimum relative frequency required for a state to be considered during
         cluster-wise filtering. Default is 0.01.
     sfreq_cutoff_combined
-        Minimum frequency required for a combined microstate to be kept.
+        Minimum relative frequency required for a combined microstate to be kept.
         Default is 0.001.
+    max_states_combined
+        Max. number of microstates at given pH value
 
     Returns
     -------
@@ -422,6 +426,8 @@ def combine_cluster_distributions(
     state_freqs_clusters = [np.asarray(dist.state_freqs, dtype=np.float64) for dist in cluster_dists]
     indices_clusters = [dist.indices for dist in cluster_dists]
 
+    print(state_freqs_clusters)
+
     # Cull the state_strs per cluster a bit before combining.
     # This is quite conservative (everything with at least 1% freq in that cluster)
 
@@ -430,17 +436,21 @@ def combine_cluster_distributions(
     logger.debug(state_strs_clusters)
     logger.debug(state_freqs_clusters)
 
-    for state_freqs in state_freqs_clusters:
+    for state_freqs_cl in state_freqs_clusters:
+        # state_freqs_cl_rel = state_freqs_cl / np.max(state_freqs_cl)
         cluster_state_ids.append([])
-        for s_idx, s_freq in enumerate(state_freqs):
-            if s_freq >= sfreq_cutoff_individual:
-                cluster_state_ids[-1].append(s_idx)
+
+        for s_idx, s_freq in enumerate(state_freqs_cl):
+            # if s_freq >= sfreq_cutoff_individual: # X% rel. to max state
+            cluster_state_ids[-1].append(s_idx)
+
+    print(cluster_state_ids)
 
     combinations = list(itertools.product(*cluster_state_ids))
     logger.debug(f"N microstate combinations from clusters: {len(combinations)}")
-
-    state_strs = []
-    state_freqs_list = []
+   
+    state_strs_raw = []
+    state_freqs_raw = []
     indices = []
     for indices_cluster in indices_clusters:
         indices.extend(indices_cluster)  # This requires non-overlapping clusters!
@@ -458,13 +468,32 @@ def combine_cluster_distributions(
             state_str += state_strs_clusters[c_idx][s_idx]
             state_freq *= state_freqs_clusters[c_idx][s_idx]
         state_str = utils.sort_string(state_str, ps)  # match sorted indices
-        if state_freq >= sfreq_cutoff_combined:
+        # if state_freq >= sfreq_cutoff_combined:
+            # state_strs.append(state_str)
+            # state_freqs_list.append(state_freq)
+        state_strs_raw.append(state_str)
+        state_freqs_raw.append(state_freq)
+
+    state_freq_max = np.max(state_freqs_raw)
+
+    state_strs = []
+    state_freqs_list = []
+
+    for state_str, state_freq in zip(state_strs_raw, state_freqs_raw):
+        if state_freq >= sfreq_cutoff_combined * state_freq_max:
             state_strs.append(state_str)
             state_freqs_list.append(state_freq)
 
+    state_freqs = np.array(state_freqs_list)
+
+    if len(state_strs) > max_states_combined:
+        ps_state_strs = np.argsort(state_freqs)[::-1] # descending freq
+        state_strs = [state_strs[p] for p in ps_state_strs][:max_states_combined]
+        state_freqs = state_freqs[ps_state_strs][:max_states_combined]
+
     logger.debug(f"N chosen microstate combinations: {len(state_strs)}")
     # Correct freqs for removal of very unlikely states
-    state_freqs = np.array(state_freqs_list)
+    # state_freqs = np.array(state_freqs_list)
     state_freqs /= np.sum(state_freqs)
 
     return MicrostateDistribution(
@@ -733,7 +762,9 @@ class pKasso:
     # Internal options
     cutoff_states: int = 1000
     sfreq_cutoff_individual: float = 0.01
+    max_states_individual: int = 100
     sfreq_cutoff_combined: float = 0.001
+    max_states_combined: int = 100
     cutoff_export: float = 1.0
     matrix_def: str = "dG"
     device: str = "cpu"  # fixed!
@@ -817,8 +848,8 @@ class pKasso:
             self.base0, self.acid0, self.exclude_base_indices, self.exclude_acid_indices, self.charged_indices
         )
 
-        print(self.indices0)
-        print(self.q_options0)
+        # print(self.indices0)
+        # print(self.q_options0)
 
         self.indices0_str = pack_indices(self.indices0)
         self.index_space0 = self.index_spaces.get_or_create(self.indices0, self.q_options0)
@@ -838,21 +869,27 @@ class pKasso:
     def _calc_microstates(self, pH: float) -> MicrostateDistribution:
         """Calc microstate frequencies given a pH value"""
 
+        print(f'pH : {pH}')
+
         # indices0_curated, q_options0 = self.calc_curated_indices(pH)
 
         cluster_dists: list[MicrostateDistribution] = []
 
         for cluster_space in self.cluster_spaces:
-            cluster_dists.append(self.process_cluster(cluster_space, pH))
+            cluster_dists.append(self.process_cluster(cluster_space, pH, 
+                                                      sfreq_cutoff_individual=self.sfreq_cutoff_individual,
+                                                      max_states_individual=self.max_states_individual))
 
         # Combine clusters and their frequencies
         dist = combine_cluster_distributions(
             cluster_dists,
             self.index_space0,
             pH,
-            sfreq_cutoff_individual=self.sfreq_cutoff_individual,
             sfreq_cutoff_combined=self.sfreq_cutoff_combined,
+            max_states_combined=self.max_states_combined,
         )
+
+        print(len(dist.state_strs))
 
         self.construct_mols(dist.index_space, dist.state_strs, dist.state_vecs)
 
@@ -1017,6 +1054,9 @@ class pKasso:
         self,
         space: ProtonationIndexSpace,
         pH: float,
+        sfreq_cutoff_individual: float = 0.01,
+        max_states_individual: int = 100,
+
     ) -> MicrostateDistribution:
         """
         Generate and evaluate microstates for a single protonation cluster at a given pH value.
@@ -1042,7 +1082,13 @@ class pKasso:
         self.run_acid_base_calcs(space, state_strs, state_vecs)
 
         ps_all = calc_state_diffs(
-            state_strs, state_vecs, space.indices, space.base_lib, space.acid_lib, pH=pH, matrix_def=self.matrix_def
+            state_strs,
+            state_vecs,
+            space.indices,
+            space.base_lib,
+            space.acid_lib,
+            pH=pH,
+            matrix_def=self.matrix_def,
         )
 
         state_strs, state_freqs = calc_freqs_from_states(
@@ -1051,6 +1097,26 @@ class pKasso:
             ps_all,
             self.matrix_def,
         )
+
+        # Cull
+
+        ps = np.argsort(state_freqs)[::-1]
+        state_strs = [state_strs[p] for p in ps][:max_states_individual]
+        state_freqs = state_freqs[ps][:max_states_individual]
+
+        max_state_freqs = np.max(state_freqs)
+
+        state_strs_list = []
+        state_freqs_list = []
+
+        for state_str, state_freq in zip(state_strs, state_freqs):
+            if (state_freq / max_state_freqs) >= sfreq_cutoff_individual:
+                state_strs_list.append(state_str)
+                state_freqs_list.append(state_freq)
+
+        state_strs = state_strs_list
+        state_freqs = np.array(state_freqs_list)
+
         state_vecs = [unpack_vec(state_str) for state_str in state_strs]
         return MicrostateDistribution(
             index_space=space,
@@ -1115,21 +1181,21 @@ class pKasso:
             indices, state_strs, state_vecs, base_pka_diffs, acid_pka_diffs
         )
 
-    def coupling_assay_matrix(
-        self,
-        indices: list[int],
-        q_options: NDArray[np.int64],
-        coupling_cutoff: float,
-    ) -> NDArray[np.int64]:
-        """
-        Perform pairwise pKa sensitivity analysis and return a coupling matrix.
+    # def coupling_assay_matrix(
+    #     self,
+    #     indices: list[int],
+    #     q_options: NDArray[np.int64],
+    #     coupling_cutoff: float,
+    # ) -> NDArray[np.int64]:
+    #     """
+    #     Perform pairwise pKa sensitivity analysis and return a coupling matrix.
 
-        This compatibility wrapper thresholds the raw pKa-difference weights at
-        ``coupling_cutoff``.
-        """
+    #     This compatibility wrapper thresholds the raw pKa-difference weights at
+    #     ``coupling_cutoff``.
+    #     """
 
-        coupling_weights = self.coupling_assay_weights(indices, q_options)
-        return coupling.threshold_coupling_weights(coupling_weights, coupling_cutoff)
+    #     coupling_weights = self.coupling_assay_weights(indices, q_options)
+    #     return coupling.threshold_coupling_weights(coupling_weights, coupling_cutoff)
 
     def split_cluster_by_coupling_penalty(
         self,
