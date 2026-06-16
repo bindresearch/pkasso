@@ -9,7 +9,7 @@ import networkx as nx
 import numpy as np
 from numpy.typing import NDArray
 from rdkit import Chem, RDLogger
-from rdkit.Chem import AllChem, RegistrationHash
+from rdkit.Chem import AllChem, Descriptors, RegistrationHash
 from rdkit.Chem.MolStandardize import rdMolStandardize
 from rdkit.Chem.rdchem import Mol
 
@@ -23,12 +23,35 @@ from .tautomers import best_tautomer_smiles
 logger = logging.getLogger(__name__)
 RDLogger.DisableLog("rdApp.*")
 
+def sizeable_organic_fragments(mol, min_heavy_atoms=6):
+    frags = Chem.GetMolFrags(mol, asMols=True, sanitizeFrags=True)
+
+    sizeable = []
+    for frag in frags:
+        heavy_atoms = frag.GetNumHeavyAtoms()
+        carbon_atoms = sum(1 for atom in frag.GetAtoms() if atom.GetAtomicNum() == 6)
+        formal_charge = Chem.GetFormalCharge(frag)
+        smiles = Chem.MolToSmiles(frag, canonical=True)
+
+        if carbon_atoms > 0 and heavy_atoms >= min_heavy_atoms:
+            sizeable.append(
+                {
+                    "smiles": smiles,
+                    "heavy_atoms": heavy_atoms,
+                    "carbon_atoms": carbon_atoms,
+                    "formal_charge": formal_charge,
+                    "mol_weight": Descriptors.ExactMolWt(frag),
+                }
+            )
+
+    return sizeable
 
 def preprocess(
     smiles_raw: str,
     tautomer_search: bool = False,
     max_tautomers: int = 100,
     num_confs: int = 10,
+    strip_fragments: bool = True,
 ) -> tuple[Mol, str]:
     """
     Construct and standardize an RDKit molecule from a SMILES string.
@@ -56,6 +79,18 @@ def preprocess(
     mol = Chem.MolFromSmiles(smiles_raw, sanitize=True)
     if mol is None:
         raise ValueError(f"Invalid SMILES: {smiles_raw}")
+    
+    if strip_fragments:
+        sizeable = sizeable_organic_fragments(mol)
+        if len(sizeable) > 1:
+            raise ValueError(
+                "Input SMILES contains multiple sizeable organic fragments:",
+                sizeable
+            )
+        # Remove ions and covalent fragments
+        chooser = rdMolStandardize.LargestFragmentChooser()
+        mol = chooser.choose(mol)
+
     smiles = Chem.MolToSmiles(mol, canonical=True)
 
     logger.debug("Canonical")
@@ -738,6 +773,7 @@ class pKasso:
     max_tautomers: int = 20
     num_confs: int = 10
     total_max_sites: int = 25
+    strip_fragments: bool = True
 
     def pka_predictor(self, mol: Mol) -> Predictor:
         """Create the configured molecule-specific pKa predictor."""
@@ -796,6 +832,7 @@ class pKasso:
             tautomer_search=self.tautomer_search,
             max_tautomers=self.max_tautomers,
             num_confs=self.num_confs,
+            strip_fragments=self.strip_fragments,
         )
 
         self.charged_indices = special_cases.find_charged(self.mol0)
