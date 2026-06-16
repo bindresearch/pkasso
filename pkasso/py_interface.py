@@ -39,7 +39,11 @@ def protonate(inp: str | Mol, pH: float = 7.0, **kwargs: Any) -> tuple[tuple[str
     return molecule.smiles, molecule.mols
 
 
-def batch_protonate(input_list: list[str | Mol], pH: float = 7.0, **kwargs: Any) -> tuple[list[tuple[str, ...]], list[tuple[Mol, ...]]]:
+def batch_protonate(
+        input_list: list[str | Mol],
+        pH: float = 7.0,
+        **kwargs: Any
+) -> tuple[list[tuple[str, ...]], list[tuple[Mol, ...]]]:
     """
     Batch process a list of smiles or a list of rdkit Mol objects.
 
