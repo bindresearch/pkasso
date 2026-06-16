@@ -3,7 +3,7 @@
 import copy
 import logging
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 
 def draw_mols(
-    mols: list[Mol], subImgSize: tuple[int, int] = (250, 200), max_cols: int = 4, show_probability: bool = True
+    mols: list[Mol] | tuple[Mol], subImgSize: tuple[int, int] = (250, 200), max_cols: int = 4, show_probability: bool = True
 ) -> Any:
     opts = MolDrawOptions()
     opts.backgroundColour = (1, 1, 1, 1)
@@ -45,7 +45,7 @@ def draw_mols(
     return img
 
 
-def save_sdf(mols: list[Mol], file: Path) -> None:
+def save_sdf(mols: tuple[Mol], file: Path) -> None:
     """Save embedded and optimized mols to sdf"""
     with Chem.SDWriter(file) as f:
         for mol in mols:
@@ -70,21 +70,21 @@ class Microstate:
     q: int
 
 
-@dataclass
+@dataclass(frozen=True)
 class Molecule:
-    """Molecule class storing the microstate output from pKasso for output."""
-
     name: str
-    microstates: list[Microstate]
+    microstates: tuple[Microstate, ...]
+
+    smiles: tuple[str, ...] = field(init=False)
+    mols: tuple[Mol, ...] = field(init=False)
+    freqs: tuple[float, ...] = field(init=False)
+    qs: tuple[int, ...] = field(init=False)
 
     def __post_init__(self) -> None:
-        """Add attributes to list properties of all microstates of a molecule."""
-
-        self.smiles: list[str] = [m.smiles for m in self.microstates]
-        self.mols: list[Mol] = [m.mol for m in self.microstates]
-        self.freqs: list[float] = [m.freq for m in self.microstates]
-        self.qs: list[int] = [m.q for m in self.microstates]
-
+        object.__setattr__(self, "smiles", tuple(m.smiles for m in self.microstates))
+        object.__setattr__(self, "mols", tuple(m.mol for m in self.microstates))
+        object.__setattr__(self, "freqs", tuple(m.freq for m in self.microstates))
+        object.__setattr__(self, "qs", tuple(m.q for m in self.microstates))
 
 def combine_results(
     name: str,
@@ -115,7 +115,7 @@ def combine_results(
         res = Microstate(name, name_state, mol, smiles, float(sfreq_out), q)
         microstates.append(res)
 
-    molecule = Molecule(name, microstates)
+    molecule = Molecule(name, tuple(microstates))
     return molecule
 
 
