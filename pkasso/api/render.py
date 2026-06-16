@@ -3,10 +3,7 @@ from __future__ import annotations
 import html
 from typing import Any
 
-from jinja2 import Environment, FileSystemLoader, select_autoescape
-
 from .chemistry import draw_molecule_grid, draw_single_molecule, scan_figure_svg
-from .config import TEMPLATE_DIR
 from .state import AppState
 
 
