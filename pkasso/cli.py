@@ -16,6 +16,36 @@ from .postprocess import save_sdf
 
 COMMANDS = {"single", "batch", "scan"}
 
+def _common_option_conflicts(ctx: click.Context) -> None:
+    """Raise a Click error for explicitly incompatible shared CLI options."""
+
+    commandline = click.core.ParameterSource.COMMANDLINE
+    max_tautomers_source = ctx.get_parameter_source("max_tautomers")
+    tautomer_search_source = ctx.get_parameter_source("tautomer_search")
+    num_confs_source = ctx.get_parameter_source("num_confs")
+
+    if (
+        max_tautomers_source == commandline
+        and tautomer_search_source == commandline
+        and ctx.params["tautomer_search"] is False
+    ):
+        raise click.UsageError("--max-tautomers cannot be used with --no-tautomer-search.")
+
+    if (
+        num_confs_source == commandline
+        and tautomer_search_source == commandline
+        and ctx.params["tautomer_search"] is False
+    ):
+        raise click.UsageError("--num-confs cannot be used with --no-tautomer-search.")
+
+    if ctx.params["cutoff_states"] < 1:
+        raise click.UsageError("--cutoff-states must be >= 1.")
+
+    if (ctx.params["cutoff_export"] < 0) or (ctx.params["cutoff_export"] > 1):
+        raise click.UsageError("--cutoff-export must be >= 0 and <= 1.")
+
+
+
 COMMON_OPTIONS = [
     click.option(
         "--matrix-def",
@@ -27,23 +57,9 @@ COMMON_OPTIONS = [
     click.option(
         "--cutoff-states",
         type=int,
-        default=4000,
+        default=1000,
         show_default=True,
         help="Max. number of microstates per coupled cluster of protonation sites",
-    ),
-    click.option(
-        "--sfreq-cutoff-individual",
-        type=float,
-        default=0.01,
-        show_default=True,
-        help="Min. probability of protonation site cluster to be included in final microstate combination",
-    ),
-    click.option(
-        "--sfreq-cutoff-combined",
-        type=float,
-        default=0.001,
-        show_default=True,
-        help="Min. probability of combined microstate (from independent clusters) to be considered",
     ),
     click.option(
         "--tautomer-search/--no-tautomer-search",
@@ -102,7 +118,6 @@ def cli() -> None:
 
 ### Single molecule ###
 
-
 @cli.command()
 @click.option("--name", required=False, type=str, default="molecule", help="Molecule name")
 @click.option("--smiles", required=True, type=str, help="SMILES string")
@@ -125,13 +140,13 @@ def single(
     cutoff_export: float,
     matrix_def: str,
     cutoff_states: int,
-    sfreq_cutoff_individual: float,
-    sfreq_cutoff_combined: float,
     tautomer_search: bool,
     max_tautomers: int,
     num_confs: int,
 ) -> None:
     """Run single protonation state prediction given a smiles string and pH values."""
+
+    _common_option_conflicts(click.get_current_context())
 
     # click.echo(f"Single: {name}")
 
@@ -140,8 +155,6 @@ def single(
         pH=ph,
         matrix_def=matrix_def,
         cutoff_states=cutoff_states,
-        sfreq_cutoff_individual=sfreq_cutoff_individual,
-        sfreq_cutoff_combined=sfreq_cutoff_combined,
         cutoff_export=cutoff_export,
         tautomer_search=tautomer_search,
         max_tautomers=max_tautomers,
@@ -191,8 +204,6 @@ def batch(
     cutoff_export: float,
     matrix_def: str,
     cutoff_states: int,
-    sfreq_cutoff_individual: float,
-    sfreq_cutoff_combined: float,
     tautomer_search: bool,
     max_tautomers: int,
     num_confs: int,
@@ -200,7 +211,7 @@ def batch(
     """Batch process an input .smi file and write output microstates to csv
     (optionally write sdf files of individual molecules)"""
 
-    # click.echo("Batch")
+    _common_option_conflicts(click.get_current_context())
 
     batch_input = read_smi(smi)
 
@@ -211,8 +222,6 @@ def batch(
             pH=ph,
             matrix_def=matrix_def,
             cutoff_states=cutoff_states,
-            sfreq_cutoff_individual=sfreq_cutoff_individual,
-            sfreq_cutoff_combined=sfreq_cutoff_combined,
             cutoff_export=cutoff_export,
             tautomer_search=tautomer_search,
             max_tautomers=max_tautomers,
@@ -251,13 +260,13 @@ def scan(
     pkas_out: Path,
     matrix_def: str,
     cutoff_states: int,
-    sfreq_cutoff_individual: float,
-    sfreq_cutoff_combined: float,
     tautomer_search: bool,
     max_tautomers: int,
     num_confs: int,
 ) -> None:
     """Scan pH values, output plot of microstate distributions and macro pKa values"""
+
+    _common_option_conflicts(click.get_current_context())
 
     click.echo("Scan pH")
 
@@ -275,8 +284,6 @@ def scan(
         pHs=pHs,
         matrix_def=matrix_def,
         cutoff_states=cutoff_states,
-        sfreq_cutoff_individual=sfreq_cutoff_individual,
-        sfreq_cutoff_combined=sfreq_cutoff_combined,
         tautomer_search=tautomer_search,
         max_tautomers=max_tautomers,
         num_confs=num_confs,
