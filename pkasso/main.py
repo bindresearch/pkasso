@@ -5,6 +5,7 @@ import itertools
 import logging
 from dataclasses import dataclass, field
 
+import networkx as nx
 import numpy as np
 from numpy.typing import NDArray
 from rdkit import Chem, RDLogger
@@ -53,6 +54,8 @@ def preprocess(
     logger.debug("Raw:")
     logger.debug(smiles_raw)
     mol = Chem.MolFromSmiles(smiles_raw, sanitize=True)
+    if mol is None:
+        raise ValueError(f"Invalid SMILES: {smiles_raw}")
     smiles = Chem.MolToSmiles(mol, canonical=True)
 
     logger.debug("Canonical")
@@ -81,8 +84,6 @@ def preprocess(
 
     mol = Chem.MolFromSmiles(smiles, sanitize=True)
     smiles = Chem.MolToSmiles(mol, canonical=True)
-
-    # print(f'smiles after clean-up: {smiles}')
 
     for atom in mol.GetAtoms():
         atom.SetAtomMapNum(atom.GetIdx() + 1)
@@ -206,6 +207,13 @@ def construct_state_vectors(
     else:
         state_vecs = [np.array(x) for x in list(itertools.product(*q_options_nonzero))]
         return state_vecs
+
+
+def count_state_combinations(q_options: NDArray[np.int64]) -> int:
+    """Count valid protonation-state combinations without enumerating them."""
+
+    q_counts = np.count_nonzero(q_options, axis=1)
+    return int(np.prod(q_counts))
 
 
 #########################################
@@ -372,8 +380,8 @@ def combine_cluster_distributions(
     cluster_dists: list[MicrostateDistribution],
     index_space: ProtonationIndexSpace,
     pH: float,
-    sfreq_cutoff_individual: float = 0.01,
-    sfreq_cutoff_combined: float = 0.001,
+    sfreq_cutoff_combined: float = 0.01,
+    max_states_combined: int = 100,
 ) -> MicrostateDistribution:
     """
     Combine microstate probabilities from independent pKa clusters.
@@ -398,11 +406,13 @@ def combine_cluster_distributions(
     pH
         Current pH value.
     sfreq_cutoff_individual
-        Minimum frequency required for a state to be considered during
+        Minimum relative frequency required for a state to be considered during
         cluster-wise filtering. Default is 0.01.
     sfreq_cutoff_combined
-        Minimum frequency required for a combined microstate to be kept.
+        Minimum relative frequency required for a combined microstate to be kept.
         Default is 0.001.
+    max_states_combined
+        Max. number of microstates at given pH value
 
     Returns
     -------
@@ -414,25 +424,13 @@ def combine_cluster_distributions(
     state_freqs_clusters = [np.asarray(dist.state_freqs, dtype=np.float64) for dist in cluster_dists]
     indices_clusters = [dist.indices for dist in cluster_dists]
 
-    # Cull the state_strs per cluster a bit before combining.
-    # This is quite conservative (everything with at least 1% freq in that cluster)
-
-    cluster_state_ids: list[list[int]] = []
-
     logger.debug(state_strs_clusters)
     logger.debug(state_freqs_clusters)
 
-    for state_freqs in state_freqs_clusters:
-        cluster_state_ids.append([])
-        for s_idx, s_freq in enumerate(state_freqs):
-            if s_freq >= sfreq_cutoff_individual:
-                cluster_state_ids[-1].append(s_idx)
+    cluster_state_ids = [range(len(state_freqs_cl)) for state_freqs_cl in state_freqs_clusters]
+    n_combinations = int(np.prod([len(state_ids) for state_ids in cluster_state_ids]))
+    logger.debug(f"N microstate combinations from clusters: {n_combinations}")
 
-    combinations = list(itertools.product(*cluster_state_ids))
-    logger.debug(f"N microstate combinations from clusters: {len(combinations)}")
-
-    state_strs = []
-    state_freqs_list = []
     indices = []
     for indices_cluster in indices_clusters:
         indices.extend(indices_cluster)  # This requires non-overlapping clusters!
@@ -443,20 +441,37 @@ def combine_cluster_distributions(
     if indices_str != index_space.indices_str:
         raise ValueError(f"indices_str {indices_str} not equal to full indices list {index_space.indices_str}")
 
+    state_freq_max = float(np.prod([np.max(state_freqs_cl) for state_freqs_cl in state_freqs_clusters]))
+    state_freq_cutoff = sfreq_cutoff_combined * state_freq_max
+    sort_state_str = not np.array_equal(ps, np.arange(len(ps)))
+
+    state_strs = []
+    state_freqs_list = []
+
+    combinations = itertools.product(*cluster_state_ids)
     for s_idxs in combinations:
-        state_str = ""
         state_freq = 1.0
+        state_str_parts = []
         for c_idx, s_idx in enumerate(s_idxs):
-            state_str += state_strs_clusters[c_idx][s_idx]
-            state_freq *= state_freqs_clusters[c_idx][s_idx]
-        state_str = utils.sort_string(state_str, ps)  # match sorted indices
-        if state_freq >= sfreq_cutoff_combined:
+            state_str_parts.append(state_strs_clusters[c_idx][s_idx])
+            state_freq *= float(state_freqs_clusters[c_idx][s_idx])
+
+        if state_freq >= state_freq_cutoff:
+            state_str = "".join(state_str_parts)
+            if sort_state_str:
+                state_str = utils.sort_string(state_str, ps)  # match sorted indices
             state_strs.append(state_str)
             state_freqs_list.append(state_freq)
 
+    state_freqs = np.array(state_freqs_list)
+
+    if len(state_strs) > max_states_combined:
+        ps_state_strs = np.argsort(state_freqs)[::-1] # descending freq
+        state_strs = [state_strs[p] for p in ps_state_strs][:max_states_combined]
+        state_freqs = state_freqs[ps_state_strs][:max_states_combined]
+
     logger.debug(f"N chosen microstate combinations: {len(state_strs)}")
     # Correct freqs for removal of very unlikely states
-    state_freqs = np.array(state_freqs_list)
     state_freqs /= np.sum(state_freqs)
 
     return MicrostateDistribution(
@@ -466,19 +481,6 @@ def combine_cluster_distributions(
         state_vecs=[unpack_vec(state_str) for state_str in state_strs],
         state_freqs=state_freqs,
     )
-
-
-def smiles2hash(smiles: str | None) -> str | None:
-    """
-    Generate a registration hash from a SMILES string.
-
-    Returns None if the input is None.
-    """
-
-    if smiles is None:
-        return None
-    return str(RegistrationHash.GetMolHash(RegistrationHash.GetMolLayers(Chem.MolFromSmiles(smiles))))
-
 
 def mol2hash(mol: Mol) -> str:
     """
@@ -723,9 +725,11 @@ class pKasso:
     name: str = "molecule"
 
     # Internal options
-    cutoff_states: int = 1000
+    cutoff_states: int = 200
     sfreq_cutoff_individual: float = 0.01
-    sfreq_cutoff_combined: float = 0.001
+    max_states_individual: int = 20
+    sfreq_cutoff_combined: float = 0.01
+    max_states_combined: int = 20
     cutoff_export: float = 1.0
     matrix_def: str = "dG"
     device: str = "cpu"  # fixed!
@@ -733,6 +737,7 @@ class pKasso:
     tautomer_search: bool = True
     max_tautomers: int = 20
     num_confs: int = 10
+    total_max_sites: int = 25
 
     def pka_predictor(self, mol: Mol) -> Predictor:
         """Create the configured molecule-specific pKa predictor."""
@@ -805,6 +810,9 @@ class pKasso:
         self.acid0 = pka_predictor.pred_acid()  # returns pkas for map indices
         self.base0 = pka_predictor.pred_base()  # returns pkas for map indices
 
+        if len(self.acid0) + len(self.base0) > self.total_max_sites:
+            raise ValueError(f'Molecule must contain <={self.total_max_sites} protonation sites.')
+
         self.indices0, self.q_options0 = find_candidate_sites(
             self.base0, self.acid0, self.exclude_base_indices, self.exclude_acid_indices, self.charged_indices
         )
@@ -831,15 +839,17 @@ class pKasso:
         cluster_dists: list[MicrostateDistribution] = []
 
         for cluster_space in self.cluster_spaces:
-            cluster_dists.append(self.process_cluster(cluster_space, pH))
+            cluster_dists.append(self.process_cluster(cluster_space, pH, 
+                                                      sfreq_cutoff_individual=self.sfreq_cutoff_individual,
+                                                      max_states_individual=self.max_states_individual))
 
         # Combine clusters and their frequencies
         dist = combine_cluster_distributions(
             cluster_dists,
             self.index_space0,
             pH,
-            sfreq_cutoff_individual=self.sfreq_cutoff_individual,
             sfreq_cutoff_combined=self.sfreq_cutoff_combined,
+            max_states_combined=self.max_states_combined,
         )
 
         self.construct_mols(dist.index_space, dist.state_strs, dist.state_vecs)
@@ -978,10 +988,6 @@ class pKasso:
 
             cutoff += 0.02
 
-        # for state_str, mol in zip(state_strs_relevant, mols_relevant):
-        # mol.SetProp("_Name", state_str)
-        # print(mols_relevant[0].GetProp("_Name"))
-        # Sort by pH value of max freq.
         ps: list[int] = [int(p) for p in np.argsort(pH_argmaxs)]
 
         logger.debug(f"Final N relevant states: {N_relevant_states} with cutoff {cutoff}")
@@ -1005,6 +1011,9 @@ class pKasso:
         self,
         space: ProtonationIndexSpace,
         pH: float,
+        sfreq_cutoff_individual: float = 0.01,
+        max_states_individual: int = 100,
+
     ) -> MicrostateDistribution:
         """
         Generate and evaluate microstates for a single protonation cluster at a given pH value.
@@ -1030,7 +1039,13 @@ class pKasso:
         self.run_acid_base_calcs(space, state_strs, state_vecs)
 
         ps_all = calc_state_diffs(
-            state_strs, state_vecs, space.indices, space.base_lib, space.acid_lib, pH=pH, matrix_def=self.matrix_def
+            state_strs,
+            state_vecs,
+            space.indices,
+            space.base_lib,
+            space.acid_lib,
+            pH=pH,
+            matrix_def=self.matrix_def,
         )
 
         state_strs, state_freqs = calc_freqs_from_states(
@@ -1039,6 +1054,26 @@ class pKasso:
             ps_all,
             self.matrix_def,
         )
+
+        # Cull
+
+        ps = np.argsort(state_freqs)[::-1]
+        state_strs = [state_strs[p] for p in ps][:max_states_individual]
+        state_freqs = state_freqs[ps][:max_states_individual]
+
+        max_state_freqs = np.max(state_freqs)
+
+        state_strs_list = []
+        state_freqs_list = []
+
+        for state_str, state_freq in zip(state_strs, state_freqs):
+            if (state_freq / max_state_freqs) >= sfreq_cutoff_individual:
+                state_strs_list.append(state_str)
+                state_freqs_list.append(state_freq)
+
+        state_strs = state_strs_list
+        state_freqs = np.array(state_freqs_list)
+
         state_vecs = [unpack_vec(state_str) for state_str in state_strs]
         return MicrostateDistribution(
             index_space=space,
@@ -1050,9 +1085,13 @@ class pKasso:
 
     #########################
 
-    def coupling_assay(self, indices: list[int], q_options: NDArray[np.int64], coupling_cutoff: float) -> list[list[int]]:
+    def coupling_assay_weights(
+        self,
+        indices: list[int],
+        q_options: NDArray[np.int64],
+    ) -> NDArray[np.float64]:
         """
-        Perform pairwise pKa sensitivity analysis and cluster coupled sites.
+        Perform pairwise pKa sensitivity analysis and return raw coupling weights.
 
         This method evaluates whether protonation of one site affects the
         predicted pKa values of other sites within the provided index set.
@@ -1061,8 +1100,7 @@ class pKasso:
         - Enumerate all single-site protonation states
         - Construct molecular representations for each state
         - Compare pKa values between reference and perturbed states
-        - Build a coupling matrix based on pKa differences
-        - Cluster sites according to the coupling threshold
+        - Build a pKa-difference weight matrix
 
         Parameters
         ----------
@@ -1070,15 +1108,11 @@ class pKasso:
             Absolute atom map indices of the protonable sites being analyzed.
         q_options
             Array encoding allowed protonation states for each site.
-        coupling_cutoff
-            Threshold used to determine whether two sites are considered
-            coupled based on their pKa differences.
 
         Returns
         -------
-        clusters
-            List of clusters, where each cluster contains (relative) indices of
-            mutually coupled sites.
+        coupling_weights
+            Square matrix containing max acid/base pKa differences between sites.
         """
 
         space = self.index_spaces.get_or_create(indices, q_options)
@@ -1089,6 +1123,9 @@ class pKasso:
         self.construct_mols(space, state_strs, state_vecs)
         self.run_acid_base_calcs(space, state_strs, state_vecs)
 
+        for key, val in space.base_lib.items():
+            logger.debug(f"{key}: {val}")
+
         state_str0 = state_strs[0]  # Neutral state
         base_pka_diffs = {}
         acid_pka_diffs = {}
@@ -1097,24 +1134,103 @@ class pKasso:
                 indices, q_options, state_str0, state_str1, space.base_lib, space.acid_lib
             )
 
-        coupling_matrix = coupling.construct_coupling_matrix(
-            indices, state_strs, state_vecs, base_pka_diffs, acid_pka_diffs, coupling_cutoff
+        return coupling.construct_coupling_weight_matrix(
+            indices, state_strs, state_vecs, base_pka_diffs, acid_pka_diffs
         )
-        clusters = coupling.cluster_coupling_matrix(coupling_matrix)
-        return clusters
+
+    # def coupling_assay_matrix(
+    #     self,
+    #     indices: list[int],
+    #     q_options: NDArray[np.int64],
+    #     coupling_cutoff: float,
+    # ) -> NDArray[np.int64]:
+    #     """
+    #     Perform pairwise pKa sensitivity analysis and return a coupling matrix.
+
+    #     This compatibility wrapper thresholds the raw pKa-difference weights at
+    #     ``coupling_cutoff``.
+    #     """
+
+    #     coupling_weights = self.coupling_assay_weights(indices, q_options)
+    #     return coupling.threshold_coupling_weights(coupling_weights, coupling_cutoff)
+
+    def split_cluster_by_coupling_penalty(
+        self,
+        cluster: list[int],
+        q_options0: NDArray[np.int64],
+        coupling_weights: NDArray[np.float64],
+        coupling_cutoff: float,
+    ) -> list[list[int]]:
+        """
+        Recursively split an oversized cluster by local penalty-limited cuts.
+
+        The cutoff is raised only for the subcluster currently being split. At
+        each local cutoff, acceptable cuts sever at most two graph edges and
+        have total pKa penalty no larger than 1.5 times the local cutoff.
+        """
+
+        graph = coupling.coupling_weights_to_graph(coupling_weights, coupling_cutoff, nodes=cluster)
+        components = [sorted(component) for component in nx.connected_components(graph)]
+        components = sorted(components, key=lambda c: c[0])
+
+        if len(components) > 1:
+            split_clusters = []
+            for component in components:
+                split_clusters.extend(
+                    self.split_cluster_by_coupling_penalty(component, q_options0, coupling_weights, coupling_cutoff)
+                )
+            return split_clusters
+
+        cluster = components[0] if components else sorted(cluster)
+        if count_state_combinations(q_options0[cluster]) <= self.cutoff_states:
+            return [cluster]
+
+        child_clusters = coupling.find_best_penalty_limited_split(
+            graph,
+            coupling_weights,
+            lambda child_cluster: count_state_combinations(q_options0[child_cluster]),
+            max_cut_edges=2,
+            coupling_cutoff=coupling_cutoff,
+        )
+        if child_clusters is not None:
+            split_clusters = []
+            for child_cluster in child_clusters:
+                split_clusters.extend(
+                    self.split_cluster_by_coupling_penalty(
+                        child_cluster,
+                        q_options0,
+                        coupling_weights,
+                        coupling_cutoff,
+                    )
+                )
+            return split_clusters
+
+        next_coupling_cutoff = round(coupling_cutoff + 0.1, 10)
+        if next_coupling_cutoff > 1.5:
+            logger.info(f"Local coupling cutoff high: {next_coupling_cutoff}")
+        return self.split_cluster_by_coupling_penalty(
+            cluster,
+            q_options0,
+            coupling_weights,
+            next_coupling_cutoff,
+        )
 
     def screen_clusters(self, indices0: list[int], q_options0: NDArray[np.int64]) -> list[list[int]]:
         """
         Determine stable pKa coupling clusters using adaptive thresholding.
 
-        This method partitions protonable sites into independent clusters
-        by repeatedly performing a coupling assay and adjusting the
-        coupling threshold until all clusters are computationally stable.
+        This method partitions protonable sites into independent clusters using
+        an initial pKa coupling threshold. Oversized clusters are split
+        recursively by applying the cheapest acceptable graph cut, with cutoff
+        increases applied only to the subcluster currently being split.
 
         Stability criterion:
         A cluster is rejected if state enumeration exceeds the allowed
-        cutoff, which indicates excessive coupling. In that case,
-        the coupling threshold is increased and the clustering is repeated.
+        cutoff, which indicates excessive coupling. In that case, candidate
+        cutsets of one or two graph edges are considered. A cut is acceptable
+        when the total severed pKa penalty is no larger than 1.5 times the
+        local coupling cutoff. Among acceptable cuts, the split minimizing the
+        summed child-cluster state count is selected.
 
         Parameters
         ----------
@@ -1129,25 +1245,17 @@ class pKasso:
             Final set of stable coupling clusters.
         """
 
-        coupling_cutoff = 0.0
-        while True:
-            logger.debug(f"coupling cutoff: {coupling_cutoff}")
-            accept_clusters = True
-            clusters = self.coupling_assay(indices0, q_options0, coupling_cutoff)
-            for c_idx, cluster in enumerate(clusters):
-                q_options = q_options0[cluster]
-                state_vecs = construct_state_vectors(q_options, self.cutoff_states)
-                N_states = len(state_vecs)
-                if N_states > self.cutoff_states:  # Construct_state_vectors should return an empty list
-                    raise
-                if N_states == 0:
-                    accept_clusters = False
-                    coupling_cutoff += 0.2
-                    break
-            if accept_clusters:
-                if coupling_cutoff > 1.5:
-                    logger.info(f"Coupling cutoff high: {coupling_cutoff}")
-                return clusters
+        coupling_cutoff = 0.1
+        coupling_weights = self.coupling_assay_weights(indices0, q_options0)
+        graph = coupling.coupling_weights_to_graph(coupling_weights, coupling_cutoff)
+        clusters = [sorted(component) for component in nx.connected_components(graph)]
+
+        split_clusters = []
+        for cluster in sorted(clusters, key=lambda c: c[0]):
+            split_clusters.extend(
+                self.split_cluster_by_coupling_penalty(cluster, q_options0, coupling_weights, coupling_cutoff)
+            )
+        return split_clusters
 
     def construct_mols(
         self,

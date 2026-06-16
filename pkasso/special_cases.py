@@ -121,7 +121,7 @@ def has_phosphate(mol: Mol) -> tuple[bool, dict[int, list[int]]]:
     return found, phosphate_groups
 
 
-def short_alkyl(n_atom: Atom, mol: Mol) -> bool:
+def short_alkyl(n_atom: Atom) -> bool:
     n_idx = n_atom.GetIdx()
 
     visited: set[int] = {n_idx}
@@ -182,7 +182,7 @@ def has_invalid_amine(mol: Mol) -> int:
             if nbr.GetAtomicNum() != 6:
                 return 0
 
-            if not short_alkyl(atom, mol):
+            if not short_alkyl(atom):
                 return 0
         return map_idx
     return 0
