@@ -6,6 +6,7 @@ import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+import warnings
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -15,16 +16,15 @@ from matplotlib.figure import Figure as Figure_plt
 from rdkit import Chem
 from rdkit.Chem import AllChem, Mol
 from rdkit.Chem.Draw import MolsToGridImage, MolDrawOptions
-import warnings
+from .utils import is_jupyter, state_str_to_q
 
 warnings.filterwarnings(
     "ignore",
     category=SyntaxWarning,
     module=r"svgutils(\.|$)",
 )
-from svgutils.compose import SVG, Figure
+from svgutils.compose import SVG, Figure # noqa: E402
 
-from .utils import is_jupyter, state_str_to_q
 
 logger = logging.getLogger(__name__)
 
