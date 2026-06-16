@@ -3,7 +3,7 @@
 import copy
 import logging
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -70,21 +70,25 @@ class Microstate:
     q: int
 
 
-@dataclass
+@dataclass(frozen=True)
 class Molecule:
     """Molecule class storing the microstate output from pKasso for output."""
 
     name: str
     microstates: list[Microstate]
 
+    smiles: list[str] = field(init=False)
+    mols: list[Mol] = field(init=False)
+    freqs: list[float] = field(init=False)
+    qs: list[int] = field(init=False)
+
     def __post_init__(self) -> None:
         """Add attributes to list properties of all microstates of a molecule."""
 
-        self.smiles: list[str] = [m.smiles for m in self.microstates]
-        self.mols: list[Mol] = [m.mol for m in self.microstates]
-        self.freqs: list[float] = [m.freq for m in self.microstates]
-        self.qs: list[int] = [m.q for m in self.microstates]
-
+        object.__setattr__(self, "smiles", [m.smiles for m in self.microstates])
+        object.__setattr__(self, "mols", [m.mol for m in self.microstates])
+        object.__setattr__(self, "freqs", [m.freq for m in self.microstates])
+        object.__setattr__(self, "qs", [m.q for m in self.microstates])
 
 def combine_results(
     name: str,
