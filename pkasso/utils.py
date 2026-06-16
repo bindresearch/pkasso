@@ -31,17 +31,6 @@ def calc_state_strs(state_vecs: list[NDArray[np.int64]]) -> list[str]:
         state_strs.append(state_str)
     return state_strs
 
-
-def calc_qs_all(state_vecs: list[NDArray[np.int64]]) -> list[NDArray[np.int64]]:
-    """Convert state vectors into a vector of charges."""
-
-    qs_all = []
-    for state_vec in state_vecs:
-        qs = state_vec - 1
-        qs_all.append(qs)
-    return qs_all
-
-
 def get_atom_with_map_idx(mol: Mol, map_idx: int) -> Atom | None:
     """Find atom of rdkit Mol object with specific map index."""
 

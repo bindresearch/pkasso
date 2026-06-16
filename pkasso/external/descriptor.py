@@ -5,7 +5,27 @@ import torch
 from rdkit import Chem
 from rdkit.Chem import AllChem
 from rdkit.Chem.rdchem import Mol
+from numpy.typing import NDArray
 from torch_geometric.data import Data
+
+ACCEPTOR_SMARTS_ONE = "[!$([#1,#6,F,Cl,Br,I,o,s,nX3,#7v5,#15v5,#16v4,#16v6,*+1,*+2,*+3])]"
+ACCEPTOR_SMARTS_TWO = "[$([O,S;H1;v2;!$(*-*=[O,N,P,S])]),$([O,S;H0;v2]),$([O,S;-]),$([N;v3;!$(N-*=[O,N,P,S])]),n&H0&+0,$([o,s;+0;!$([o,s]:n);!$([o,s]:c:n)])]"  # noqa: E501
+DONOR_SMARTS_ONE = "[$([N;!H0;v3,v4&+1]),$([O,S;H1;+0]),n&H1&+0]"
+DONOR_SMARTS_TWO = "[!$([#6,H0,-,-2,-3]),$([!H0;#7,#8,#9])]"
+
+HYDROGEN_DONOR_ONE = Chem.MolFromSmarts(DONOR_SMARTS_ONE)
+HYDROGEN_DONOR_TWO = Chem.MolFromSmarts(DONOR_SMARTS_TWO)
+HYDROGEN_ACCEPTOR_ONE = Chem.MolFromSmarts(ACCEPTOR_SMARTS_ONE)
+HYDROGEN_ACCEPTOR_TWO = Chem.MolFromSmarts(ACCEPTOR_SMARTS_TWO)
+
+ATOM_SYMBOLS = ["C", "H", "O", "N", "S", "Cl", "F", "Br", "P", "I"]
+HYBRIDIZATIONS = [
+    Chem.rdchem.HybridizationType.SP,
+    Chem.rdchem.HybridizationType.SP2,
+    Chem.rdchem.HybridizationType.SP3,
+    Chem.rdchem.HybridizationType.SP3D,
+    Chem.rdchem.HybridizationType.SP3D2,
+]
 
 
 def one_hot(x: Any, allowable_set: list[Any]) -> list[bool]:
@@ -23,33 +43,109 @@ def get_bond_pair(mol: Mol) -> list[list[int]]:
     return res
 
 
-def get_atom_features(mol: Mol, aid: int) -> list[Any]:
+def _match_tuples(mol: Mol, query_one: Mol, query_two: Mol) -> set[tuple[int, ...]]:
+    matches = set(mol.GetSubstructMatches(query_one))
+    matches.update(mol.GetSubstructMatches(query_two))
+    return matches
+
+
+def _match_atom_indices(mol: Mol, query_one: Mol, query_two: Mol) -> set[int]:
+    return {atom_idx for match in _match_tuples(mol, query_one, query_two) for atom_idx in match}
+
+
+class MolVectorizer:
+    """Cache molecule-level descriptors for repeated target-atom evaluations."""
+
+    def __init__(self, mol: Mol) -> None:
+        self.mol = mol
+        AllChem.ComputeGasteigerCharges(mol)
+        Chem.AssignStereochemistry(mol)
+
+        self.n_atoms = mol.GetNumAtoms()
+        self.edge_index = torch.tensor(get_bond_pair(mol), dtype=torch.long)
+        self.batch = torch.zeros(self.n_atoms, dtype=torch.long)
+        self.ring = mol.GetRingInfo()
+        self.base_node_features = self._calc_base_node_features()
+        self.shortest_path_lengths_by_aid: dict[int, NDArray[np.int64]] = {}
+
+    def _calc_base_node_features(self) -> list[list[Any]]:
+        features = []
+        for atom_idx in range(self.n_atoms):
+            atom = self.mol.GetAtomWithIdx(atom_idx)
+
+            atom_features: list[Any] = []
+            atom_features += one_hot(atom.GetSymbol(), ATOM_SYMBOLS)
+            atom_features += [atom.GetDegree()]
+            atom_features += one_hot(atom.GetHybridization(), HYBRIDIZATIONS)
+            atom_features += [atom.GetValence(Chem.ValenceType.IMPLICIT)]
+            atom_features += [atom.GetIsAromatic()]
+            atom_features += [
+                self.ring.IsAtomInRingOfSize(atom_idx, 3),
+                self.ring.IsAtomInRingOfSize(atom_idx, 4),
+                self.ring.IsAtomInRingOfSize(atom_idx, 5),
+                self.ring.IsAtomInRingOfSize(atom_idx, 6),
+                self.ring.IsAtomInRingOfSize(atom_idx, 7),
+                self.ring.IsAtomInRingOfSize(atom_idx, 8),
+            ]
+            # Preserve MolGpKa's original descriptor bug: the trained weights saw
+            # donor/acceptor flags as always false because tuple matches were
+            # compared directly with integer atom indices.
+            atom_features += [False]
+            atom_features += [False]
+            atom_features += [atom.GetFormalCharge()]
+            features.append(atom_features)
+        return features
+
+    def _get_shortest_path_lengths(self, aid: int) -> NDArray[np.int64]:
+        if aid in self.shortest_path_lengths_by_aid:
+            return self.shortest_path_lengths_by_aid[aid]
+
+        lengths = np.zeros(self.n_atoms, dtype=np.int64)
+        for atom_idx in range(self.n_atoms):
+            if atom_idx != aid:
+                lengths[atom_idx] = len(Chem.rdmolops.GetShortestPath(self.mol, atom_idx, aid))
+        self.shortest_path_lengths_by_aid[aid] = lengths
+        return lengths
+
+    def get_atom_features(self, aid: int) -> list[list[Any]]:
+        shortest_path_lengths = self._get_shortest_path_lengths(aid)
+        features = []
+        for atom_idx, base_features in enumerate(self.base_node_features):
+            features.append(
+                [
+                    *base_features,
+                    int(shortest_path_lengths[atom_idx]),
+                    atom_idx == aid,
+                ]
+            )
+        return features
+
+    def mol2vec(
+        self,
+        atom_idx: int,
+        evaluation: bool = True,
+        pka: float | None = None,
+    ) -> Data:
+        node_f = self.get_atom_features(atom_idx)
+        x = torch.tensor(node_f, dtype=torch.float32)
+        if evaluation:
+            data = Data(
+                x=x,
+                edge_index=self.edge_index,
+                batch=self.batch,
+            )
+        else:
+            data = Data(
+                x=x,
+                edge_index=self.edge_index,
+                pka=torch.tensor([[pka]], dtype=torch.float),
+            )
+        return data
+
+
+def get_atom_features(mol: Mol, aid: int) -> list[list[Any]]:
     AllChem.ComputeGasteigerCharges(mol)
     Chem.AssignStereochemistry(mol)
-
-    acceptor_smarts_one = "[!$([#1,#6,F,Cl,Br,I,o,s,nX3,#7v5,#15v5,#16v4,#16v6,*+1,*+2,*+3])]"
-    acceptor_smarts_two = "[$([O,S;H1;v2;!$(*-*=[O,N,P,S])]),$([O,S;H0;v2]),$([O,S;-]),$([N;v3;!$(N-*=[O,N,P,S])]),n&H0&+0,$([o,s;+0;!$([o,s]:n);!$([o,s]:c:n)])]"  # noqa: E501
-    donor_smarts_one = "[$([N;!H0;v3,v4&+1]),$([O,S;H1;+0]),n&H1&+0]"
-    donor_smarts_two = "[!$([#6,H0,-,-2,-3]),$([!H0;#7,#8,#9])]"
-
-    hydrogen_donor_one = Chem.MolFromSmarts(donor_smarts_one)
-    hydrogen_donor_two = Chem.MolFromSmarts(donor_smarts_two)
-    hydrogen_acceptor_one = Chem.MolFromSmarts(acceptor_smarts_one)
-    hydrogen_acceptor_two = Chem.MolFromSmarts(acceptor_smarts_two)
-
-    hydrogen_donor_match_one = mol.GetSubstructMatches(hydrogen_donor_one)
-    hydrogen_donor_match_two = mol.GetSubstructMatches(hydrogen_donor_two)
-    hydrogen_donor_match = []
-    hydrogen_donor_match.extend(hydrogen_donor_match_one)
-    hydrogen_donor_match.extend(hydrogen_donor_match_two)
-    hydrogen_donor_match = list(set(hydrogen_donor_match))
-
-    hydrogen_acceptor_match_one = mol.GetSubstructMatches(hydrogen_acceptor_one)
-    hydrogen_acceptor_match_two = mol.GetSubstructMatches(hydrogen_acceptor_two)
-    hydrogen_acceptor_match = []
-    hydrogen_acceptor_match.extend(hydrogen_acceptor_match_one)
-    hydrogen_acceptor_match.extend(hydrogen_acceptor_match_two)
-    hydrogen_acceptor_match = list(set(hydrogen_acceptor_match))
 
     ring = mol.GetRingInfo()
 
@@ -58,18 +154,9 @@ def get_atom_features(mol: Mol, aid: int) -> list[Any]:
         atom = mol.GetAtomWithIdx(atom_idx)
 
         o: list[Any] = []
-        o += one_hot(atom.GetSymbol(), ["C", "H", "O", "N", "S", "Cl", "F", "Br", "P", "I"])
+        o += one_hot(atom.GetSymbol(), ATOM_SYMBOLS)
         o += [atom.GetDegree()]
-        o += one_hot(
-            atom.GetHybridization(),
-            [
-                Chem.rdchem.HybridizationType.SP,
-                Chem.rdchem.HybridizationType.SP2,
-                Chem.rdchem.HybridizationType.SP3,
-                Chem.rdchem.HybridizationType.SP3D,
-                Chem.rdchem.HybridizationType.SP3D2,
-            ],
-        )
+        o += one_hot(atom.GetHybridization(), HYBRIDIZATIONS)
         o += [atom.GetValence(Chem.ValenceType.IMPLICIT)]
         o += [atom.GetIsAromatic()]
         o += [
@@ -81,8 +168,9 @@ def get_atom_features(mol: Mol, aid: int) -> list[Any]:
             ring.IsAtomInRingOfSize(atom_idx, 8),
         ]
 
-        o += [atom_idx in hydrogen_donor_match]
-        o += [atom_idx in hydrogen_acceptor_match]
+        # Preserve MolGpKa's original descriptor bug; see MolVectorizer above.
+        o += [False]
+        o += [False]
         o += [atom.GetFormalCharge()]
         if atom_idx == aid:
             o += [0]
@@ -103,21 +191,4 @@ def mol2vec(
     evaluation: bool = True,
     pka: float | None = None,
 ) -> Data:
-    node_f = get_atom_features(mol, atom_idx)
-    edge_index = get_bond_pair(mol)
-    if evaluation:
-        batch = np.zeros(
-            len(node_f),
-        )
-        data = Data(
-            x=torch.tensor(node_f, dtype=torch.float32),
-            edge_index=torch.tensor(edge_index, dtype=torch.long),
-            batch=torch.tensor(batch, dtype=torch.long),
-        )
-    else:
-        data = Data(
-            x=torch.tensor(node_f, dtype=torch.float32),
-            edge_index=torch.tensor(edge_index, dtype=torch.long),
-            pka=torch.tensor([[pka]], dtype=torch.float),
-        )
-    return data
+    return MolVectorizer(mol).mol2vec(atom_idx, evaluation=evaluation, pka=pka)

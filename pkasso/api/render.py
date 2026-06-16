@@ -3,10 +3,7 @@ from __future__ import annotations
 import html
 from typing import Any
 
-from jinja2 import Environment, FileSystemLoader, select_autoescape
-
 from .chemistry import draw_molecule_grid, draw_single_molecule, scan_figure_svg
-from .config import TEMPLATE_DIR
 from .state import AppState
 
 
@@ -212,12 +209,3 @@ def scan_plot_svg(state: AppState, highlight_idx: int) -> str:
     if plot is None:
         return render_empty("Run a pH scan to show the distribution plot.")
     return plot
-
-
-def render_page(state: AppState) -> str:
-    environment = Environment(
-        loader=FileSystemLoader(TEMPLATE_DIR),
-        autoescape=select_autoescape(("html", "xml")),
-    )
-    template = environment.get_template("page.html")
-    return template.render(form=render_form(state), results=render_results(state))

@@ -5,8 +5,9 @@ from pathlib import Path
 
 import torch
 from rdkit.Chem.rdchem import Mol
+from torch_geometric.data import Data
 
-from .descriptor import mol2vec
+from .descriptor import MolVectorizer, mol2vec
 from .ionization_group import get_ionization_aid
 from .net import GCNNet
 
@@ -24,6 +25,12 @@ def model_pred(mol: Mol, atom_idx: int, model: GCNNet, device: str = "cpu") -> f
     """Predict pKa with molgpka model."""
 
     data = mol2vec(mol, atom_idx)
+    return model_pred_data(data, model, device=device)
+
+
+def model_pred_data(data: Data, model: GCNNet, device: str = "cpu") -> float:
+    """Predict pKa from precomputed molgpka graph data."""
+
     with torch.no_grad():
         data = data.to(device)
         pKa = model(data)
@@ -37,8 +44,9 @@ def predict_acid(mol_h: Mol, model_acid: GCNNet, device: str = "cpu") -> dict[in
 
     acid_idxs = get_ionization_aid(mol_h, "acid")
     acid_res = {}
+    vectorizer = MolVectorizer(mol_h)
     for aid in acid_idxs:
-        apka = model_pred(mol_h, aid, model_acid, device=device)
+        apka = model_pred_data(vectorizer.mol2vec(aid), model_acid, device=device)
         acid_res.update({aid: apka})
     return acid_res
 
@@ -48,7 +56,8 @@ def predict_base(mol_h: Mol, model_base: GCNNet, device: str = "cpu") -> dict[in
 
     base_idxs = get_ionization_aid(mol_h, "base")
     base_res = {}
+    vectorizer = MolVectorizer(mol_h)
     for aid in base_idxs:
-        bpka = model_pred(mol_h, aid, model_base, device=device)
+        bpka = model_pred_data(vectorizer.mol2vec(aid), model_base, device=device)
         base_res.update({aid: bpka})
     return base_res
