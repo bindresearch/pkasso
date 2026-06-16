@@ -1,3 +1,15 @@
 """Public package exports for pKasso."""
 
-from pkasso.py_interface import batch_protonate as batch_protonate, protonate as protonate, scan_pH as scan_pH
+from __future__ import annotations
+
+from typing import Any
+
+__all__ = ["batch_protonate", "protonate", "scan_pH"]
+
+
+def __getattr__(name: str) -> Any:
+    if name in __all__:
+        from pkasso import py_interface
+
+        return getattr(py_interface, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

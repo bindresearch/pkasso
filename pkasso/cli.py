@@ -1,5 +1,7 @@
 """Command-line interface for running pKasso workflows."""
 
+from __future__ import annotations
+
 import os
 import sys
 from collections.abc import Callable
@@ -7,14 +9,33 @@ from pathlib import Path
 from typing import Any
 
 import click
-import numpy as np
-from numpy.typing import NDArray
-
-from .py_interface import protonate, scan_pH
-from .utils import read_smi
-from .postprocess import save_sdf
 
 COMMANDS = {"single", "batch", "scan"}
+
+
+def protonate(*args: Any, **kwargs: Any) -> Any:
+    from .py_interface import protonate as _protonate
+
+    return _protonate(*args, **kwargs)
+
+
+def scan_pH(*args: Any, **kwargs: Any) -> Any:
+    from .py_interface import scan_pH as _scan_pH
+
+    return _scan_pH(*args, **kwargs)
+
+
+def read_smi(*args: Any, **kwargs: Any) -> Any:
+    from .utils import read_smi as _read_smi
+
+    return _read_smi(*args, **kwargs)
+
+
+def save_sdf(*args: Any, **kwargs: Any) -> Any:
+    from .postprocess import save_sdf as _save_sdf
+
+    return _save_sdf(*args, **kwargs)
+
 
 def _common_option_conflicts(ctx: click.Context) -> None:
     """Raise a Click error for explicitly incompatible shared CLI options."""
@@ -270,7 +291,9 @@ def scan(
 
     click.echo("Scan pH")
 
-    pHs: NDArray[np.float64] = np.arange(min_ph, max_ph + 0.0001, 0.25, dtype=np.float64)
+    import numpy as np
+
+    pHs = np.arange(min_ph, max_ph + 0.0001, 0.25, dtype=np.float64)
 
     if not fig_out:
         fig_out = Path(f"{name}_scan.svg")
