@@ -65,8 +65,6 @@ class MolVectorizer:
         self.edge_index = torch.tensor(get_bond_pair(mol), dtype=torch.long)
         self.batch = torch.zeros(self.n_atoms, dtype=torch.long)
         self.ring = mol.GetRingInfo()
-        self.hydrogen_donor_matches = _match_atom_indices(mol, HYDROGEN_DONOR_ONE, HYDROGEN_DONOR_TWO)
-        self.hydrogen_acceptor_matches = _match_atom_indices(mol, HYDROGEN_ACCEPTOR_ONE, HYDROGEN_ACCEPTOR_TWO)
         self.base_node_features = self._calc_base_node_features()
         self.shortest_path_lengths_by_aid: dict[int, NDArray[np.int64]] = {}
 
@@ -89,8 +87,11 @@ class MolVectorizer:
                 self.ring.IsAtomInRingOfSize(atom_idx, 7),
                 self.ring.IsAtomInRingOfSize(atom_idx, 8),
             ]
-            atom_features += [atom_idx in self.hydrogen_donor_matches]
-            atom_features += [atom_idx in self.hydrogen_acceptor_matches]
+            # Preserve MolGpKa's original descriptor bug: the trained weights saw
+            # donor/acceptor flags as always false because tuple matches were
+            # compared directly with integer atom indices.
+            atom_features += [False]
+            atom_features += [False]
             atom_features += [atom.GetFormalCharge()]
             features.append(atom_features)
         return features
@@ -146,9 +147,6 @@ def get_atom_features(mol: Mol, aid: int) -> list[list[Any]]:
     AllChem.ComputeGasteigerCharges(mol)
     Chem.AssignStereochemistry(mol)
 
-    hydrogen_donor_matches = _match_atom_indices(mol, HYDROGEN_DONOR_ONE, HYDROGEN_DONOR_TWO)
-    hydrogen_acceptor_matches = _match_atom_indices(mol, HYDROGEN_ACCEPTOR_ONE, HYDROGEN_ACCEPTOR_TWO)
-
     ring = mol.GetRingInfo()
 
     m = []
@@ -170,8 +168,9 @@ def get_atom_features(mol: Mol, aid: int) -> list[list[Any]]:
             ring.IsAtomInRingOfSize(atom_idx, 8),
         ]
 
-        o += [atom_idx in hydrogen_donor_matches]
-        o += [atom_idx in hydrogen_acceptor_matches]
+        # Preserve MolGpKa's original descriptor bug; see MolVectorizer above.
+        o += [False]
+        o += [False]
         o += [atom.GetFormalCharge()]
         if atom_idx == aid:
             o += [0]
