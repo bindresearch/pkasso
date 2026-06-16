@@ -212,12 +212,3 @@ def scan_plot_svg(state: AppState, highlight_idx: int) -> str:
     if plot is None:
         return render_empty("Run a pH scan to show the distribution plot.")
     return plot
-
-
-def render_page(state: AppState) -> str:
-    environment = Environment(
-        loader=FileSystemLoader(TEMPLATE_DIR),
-        autoescape=select_autoescape(("html", "xml")),
-    )
-    template = environment.get_template("page.html")
-    return template.render(form=render_form(state), results=render_results(state))

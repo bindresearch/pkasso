@@ -482,19 +482,6 @@ def combine_cluster_distributions(
         state_freqs=state_freqs,
     )
 
-
-def smiles2hash(smiles: str | None) -> str | None:
-    """
-    Generate a registration hash from a SMILES string.
-
-    Returns None if the input is None.
-    """
-
-    if smiles is None:
-        return None
-    return str(RegistrationHash.GetMolHash(RegistrationHash.GetMolLayers(Chem.MolFromSmiles(smiles))))
-
-
 def mol2hash(mol: Mol) -> str:
     """
     Generate a registration hash from an RDKit molecule.

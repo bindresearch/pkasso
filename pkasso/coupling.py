@@ -102,54 +102,6 @@ def compare_pkas(
                 acid_pka_diff[rel_idx] = 10.0  # one disappeared
     return base_pka_diff, acid_pka_diff
 
-
-def construct_coupling_matrix(
-    indices: list[int],
-    state_strs: list[str],
-    state_vecs: list[NDArray[np.int64]],
-    base_pka_diffs: dict[str, NDArray[np.float64]],
-    acid_pka_diffs: dict[str, NDArray[np.float64]],
-    coupling_cutoff: float,
-) -> NDArray[np.int64]:
-    """
-    Build a site-site coupling matrix from pKa perturbations.
-
-    The matrix records how strongly protonating or deprotonating one
-    site affects the predicted pKa values of other sites. Entries are
-    incremented when pKa differences exceed the specified cutoff.
-
-    Parameters
-    ----------
-    indices
-        Atom map indices for protonable sites.
-    state_strs
-        State strings for microstates.
-    state_vecs
-        State vectors corresponding to state strings.
-    base_pka_diffs
-        Library of base pKa differences w.r.t. the neutral reference state.
-        Each entry of the dictionary is [state_str, pKa_diffs].
-    acid_pka_diffs
-        Library of acid pKa differences w.r.t. the neutral reference state.
-        Each entry of the dictionary is [state_str, pKa_diffs].
-    coupling_cutoff
-        pKa difference cutoff above which two sites are coupled.
-
-    Returns
-    -------
-    coupling_matrix
-        Square matrix indicating pairwise coupling strength between sites.
-    """
-
-    coupling_matrix: NDArray[np.int64] = np.zeros((len(indices), len(indices)), dtype=np.int64)
-
-    for state_str, state_vec in zip(state_strs[1:], state_vecs[1:]):
-        changed_rel_idx = np.where(state_vec != 1)[0][0]
-        coupling_matrix[changed_rel_idx] += np.where(base_pka_diffs[state_str] >= coupling_cutoff, 1, 0)
-        coupling_matrix[changed_rel_idx] += np.where(acid_pka_diffs[state_str] >= coupling_cutoff, 1, 0)
-    return coupling_matrix
-
-
 def construct_coupling_weight_matrix(
     indices: list[int],
     state_strs: list[str],
@@ -173,15 +125,6 @@ def construct_coupling_weight_matrix(
         coupling_weights[changed_rel_idx] = np.maximum(coupling_weights[changed_rel_idx], pka_diffs)
 
     return coupling_weights
-
-
-def threshold_coupling_weights(M: NDArray[np.float64], coupling_cutoff: float) -> NDArray[np.int64]:
-    """Convert raw pKa coupling weights into a thresholded coupling matrix."""
-
-    if coupling_cutoff < 0:
-        raise ValueError("coupling_cutoff must be non-negative.")
-    return np.asarray(M >= coupling_cutoff, dtype=np.int64)
-
 
 def validate_coupling_matrix(M: NDArray[np.float64] | NDArray[np.int64]) -> NDArray[np.float64] | NDArray[np.int64]:
     """Validate and return a square coupling matrix."""
