@@ -4,6 +4,7 @@ import copy
 import itertools
 import logging
 from dataclasses import dataclass, field
+from typing import Any
 
 import networkx as nx
 import numpy as np
@@ -23,7 +24,10 @@ from .tautomers import best_tautomer_smiles
 logger = logging.getLogger(__name__)
 RDLogger.DisableLog("rdApp.*")
 
-def sizeable_organic_fragments(mol, min_heavy_atoms=6):
+def sizeable_organic_fragments(
+        mol: Mol,
+        min_heavy_atoms: int = 6
+) -> list[dict[str,Any]]:
     frags = Chem.GetMolFrags(mol, asMols=True, sanitizeFrags=True)
 
     sizeable = []
