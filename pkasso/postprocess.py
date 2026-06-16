@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 
 def draw_mols(
-    mols: tuple[Mol], subImgSize: tuple[int, int] = (250, 200), max_cols: int = 4, show_probability: bool = True
+    mols: list[Mol] | tuple[Mol], subImgSize: tuple[int, int] = (250, 200), max_cols: int = 4, show_probability: bool = True
 ) -> Any:
     opts = MolDrawOptions()
     opts.backgroundColour = (1, 1, 1, 1)
@@ -115,7 +115,7 @@ def combine_results(
         res = Microstate(name, name_state, mol, smiles, float(sfreq_out), q)
         microstates.append(res)
 
-    molecule = Molecule(name, microstates)
+    molecule = Molecule(name, tuple(microstates))
     return molecule
 
 

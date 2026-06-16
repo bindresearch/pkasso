@@ -12,7 +12,7 @@ from .main import pKasso
 from .postprocess import Scan
 
 
-def protonate(inp: str | Mol, pH: float = 7.0, **kwargs: Any) -> tuple[tuple[str], tuple[Mol]]:
+def protonate(inp: str | Mol, pH: float = 7.0, **kwargs: Any) -> tuple[tuple[str, ...], tuple[Mol, ...]]:
     """
     Helper function to run pkasso via:
 
@@ -39,7 +39,7 @@ def protonate(inp: str | Mol, pH: float = 7.0, **kwargs: Any) -> tuple[tuple[str
     return molecule.smiles, molecule.mols
 
 
-def batch_protonate(input_list: list[str | Mol], pH: float = 7.0, **kwargs: Any) -> tuple[list[tuple[str]], list[tuple[Mol]]]:
+def batch_protonate(input_list: list[str | Mol], pH: float = 7.0, **kwargs: Any) -> tuple[list[tuple[str, ...]], list[tuple[Mol, ...]]]:
     """
     Batch process a list of smiles or a list of rdkit Mol objects.
 
@@ -57,8 +57,8 @@ def batch_protonate(input_list: list[str | Mol], pH: float = 7.0, **kwargs: Any)
     ```
     """
 
-    batch_smiles: list[tuple[str]] = []
-    batch_mols: list[tuple[Mol]] = []
+    batch_smiles: list[tuple[str, ...]] = []
+    batch_mols: list[tuple[Mol, ...]] = []
 
     for inp in tqdm(input_list):
         ap = pKasso(inp, **kwargs)
