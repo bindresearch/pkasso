@@ -7,7 +7,7 @@ One protonation microstate describes a unique charge pattern on the protonable s
 # Installation
 
 ```
-pip install .
+pip install pkasso
 ```
 
 # Run pKasso
@@ -61,4 +61,4 @@ For more examples, see the jupyter notebook in `example/example.ipynb`.
 
 # Local webserver
 
-A local webserver can be hosted via `pip install .[webserver]` followed by calling `pkasso-web` or by downloading and running the docker image [ADD LINK].
+A local webserver can be hosted via `pip install pkasso[webserver]` followed by calling `pkasso-web` or by downloading and running the docker image [ADD LINK].
