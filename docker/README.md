@@ -26,6 +26,16 @@ To use a different host port:
 PORT=8080 docker/run.sh
 ```
 
+To serve pKasso behind a reverse proxy at a path prefix such as
+`https://example.com/pkasso/`, pass the public prefix to the container:
+
+```bash
+PKASSO_ROOT_PATH=/pkasso docker/run.sh
+```
+
+The reverse proxy should strip `/pkasso/` before forwarding requests to the
+container.
+
 To transfer the image to another machine:
 
 ```bash

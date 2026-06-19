@@ -33,7 +33,7 @@ def render_form(state: AppState) -> str:
     return f"""
     <form id="pkasso-form"
           class="space-y-5"
-          hx-post="/predict"
+          hx-post="predict"
           hx-target="#results"
           hx-swap="innerHTML"
           hx-indicator="#predict-indicator">
@@ -122,7 +122,7 @@ def render_results(state: AppState) -> str:
           <p class="mt-1 text-sm text-[color:var(--bind-muted)]">{len(state.mols_out)} exported microstate(s)</p>
         </div>
         <div class="flex flex-wrap gap-2">
-          <a class="btn btn-outline btn-sm rounded-lg" href="/download/sdf">Download SDF</a>
+          <a class="btn btn-outline btn-sm rounded-lg" href="download/sdf">Download SDF</a>
           <button type="button" class="btn btn-secondary btn-sm rounded-lg" data-feedback-open>Feedback</button>
         </div>
       </div>
@@ -158,7 +158,7 @@ def render_scan(state: AppState) -> str:
                     class="microstate rounded-lg border border-[color:var(--bind-border)] bg-white p-3 text-left transition hover:border-accent hover:bg-accent/5 focus:outline-none focus:ring-2 focus:ring-accent"
                     data-microstate-enlarge
                     data-microstate-title="Microstate {idx + 1}"
-                    hx-get="/scan/plot?highlight_idx={idx + 1}"
+                    hx-get="scan/plot?highlight_idx={idx + 1}"
                     hx-target="#scan-plot"
                     hx-swap="innerHTML"
                     hx-trigger="mouseenter, focus, click">
@@ -188,7 +188,7 @@ def render_scan(state: AppState) -> str:
         </div>
         <button type="button"
                 class="btn btn-ghost btn-sm rounded-lg"
-                hx-get="/scan/plot?highlight_idx=0"
+                hx-get="scan/plot?highlight_idx=0"
                 hx-target="#scan-plot"
                 hx-swap="innerHTML">
           Clear highlight
