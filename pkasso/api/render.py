@@ -11,6 +11,13 @@ def esc(value: Any) -> str:
     return html.escape(str(value), quote=True)
 
 
+def prefixed_path(root_path: str, path: str) -> str:
+    root_path = root_path.rstrip("/")
+    if not path.startswith("/"):
+        path = f"/{path}"
+    return f"{root_path}{path}"
+
+
 def render_empty(message: str) -> str:
     return f"""
     <div class="rounded-lg border border-dashed border-[color:var(--bind-border)] bg-white p-8 text-center text-sm text-[color:var(--bind-muted)]">
@@ -27,13 +34,14 @@ def render_alert(message: str) -> str:
     """
 
 
-def render_form(state: AppState) -> str:
+def render_form(state: AppState, root_path: str = "") -> str:
     tautomer_checked = "checked" if state.tautomer_search else ""
     scan_checked = "checked" if state.scan_enabled else ""
+    predict_url = prefixed_path(root_path, "/predict")
     return f"""
     <form id="pkasso-form"
           class="space-y-5"
-          hx-post="predict"
+          hx-post="{predict_url}"
           hx-target="#results"
           hx-swap="innerHTML"
           hx-indicator="#predict-indicator">
@@ -95,7 +103,7 @@ def render_form(state: AppState) -> str:
     """
 
 
-def render_results(state: AppState) -> str:
+def render_results(state: AppState, root_path: str = "") -> str:
     if state.error:
         return render_alert(state.error)
 
@@ -109,7 +117,7 @@ def render_results(state: AppState) -> str:
         molecule_grid = render_alert(f"Could not render molecule images: {exc}")
 
     scan_html = (
-        render_scan(state)
+        render_scan(state, root_path)
         if state.scan is not None
         else render_empty("Enable pH scan and calculate states to inspect microstate distributions.")
     )
@@ -122,7 +130,7 @@ def render_results(state: AppState) -> str:
           <p class="mt-1 text-sm text-[color:var(--bind-muted)]">{len(state.mols_out)} exported microstate(s)</p>
         </div>
         <div class="flex flex-wrap gap-2">
-          <a class="btn btn-outline btn-sm rounded-lg" href="download/sdf">Download SDF</a>
+          <a class="btn btn-outline btn-sm rounded-lg" href="{prefixed_path(root_path, '/download/sdf')}">Download SDF</a>
           <button type="button" class="btn btn-secondary btn-sm rounded-lg" data-feedback-open>Feedback</button>
         </div>
       </div>
@@ -140,7 +148,7 @@ def render_results(state: AppState) -> str:
     """
 
 
-def render_scan(state: AppState) -> str:
+def render_scan(state: AppState, root_path: str = "") -> str:
     if state.scan is None:
         return render_empty("Enable pH scan and calculate states to inspect microstate distributions.")
 
@@ -158,7 +166,7 @@ def render_scan(state: AppState) -> str:
                     class="microstate rounded-lg border border-[color:var(--bind-border)] bg-white p-3 text-left transition hover:border-accent hover:bg-accent/5 focus:outline-none focus:ring-2 focus:ring-accent"
                     data-microstate-enlarge
                     data-microstate-title="Microstate {idx + 1}"
-                    hx-get="scan/plot?highlight_idx={idx + 1}"
+                    hx-get="{prefixed_path(root_path, f'/scan/plot?highlight_idx={idx + 1}')}"
                     hx-target="#scan-plot"
                     hx-swap="innerHTML"
                     hx-trigger="mouseenter, focus, click">
@@ -188,7 +196,7 @@ def render_scan(state: AppState) -> str:
         </div>
         <button type="button"
                 class="btn btn-ghost btn-sm rounded-lg"
-                hx-get="scan/plot?highlight_idx=0"
+                hx-get="{prefixed_path(root_path, '/scan/plot?highlight_idx=0')}"
                 hx-target="#scan-plot"
                 hx-swap="innerHTML">
           Clear highlight
