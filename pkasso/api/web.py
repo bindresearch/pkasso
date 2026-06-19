@@ -29,6 +29,10 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 templates = Jinja2Templates(directory=TEMPLATE_DIR)
 
 
+def request_root_path(request: Request) -> str:
+    return str(request.scope.get("root_path") or "").rstrip("/")
+
+
 def dependency_message(exc: Exception) -> str:
     detail = str(exc)
     if isinstance(exc, ModuleNotFoundError):
@@ -69,12 +73,14 @@ def form_payload(
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request) -> Response:
     state = session_state(request)
+    root_path = request_root_path(request)
     return templates.TemplateResponse(
         request=request,
         name="page.html",
         context={
-            "form": render_form(state),
-            "results": render_results(state),
+            "form": render_form(state, root_path),
+            "results": render_results(state, root_path),
+            "root_path": root_path,
         },
     )
 
@@ -153,6 +159,7 @@ async def predict(
     scan_enabled: Annotated[str | None, Form()] = None,
 ) -> HTMLResponse:
     state = session_state(request)
+    root_path = request_root_path(request)
     update_state_from_form(
         state,
         form_payload(ligand, smiles, ph, nmols_export, tautomer_search, scan_enabled),
@@ -169,7 +176,7 @@ async def predict(
     except Exception as exc:
         state.error = dependency_message(exc)
 
-    return HTMLResponse(render_results(state))
+    return HTMLResponse(render_results(state, root_path))
 
 
 @app.post("/scan", response_class=HTMLResponse)
@@ -182,6 +189,7 @@ async def scan(
     tautomer_search: Annotated[str | None, Form()] = None,
 ) -> HTMLResponse:
     state = session_state(request)
+    root_path = request_root_path(request)
     update_state_from_form(state, form_payload(ligand, smiles, ph, nmols_export, tautomer_search))
     state.scan_enabled = True
 
@@ -197,7 +205,7 @@ async def scan(
         state.error = dependency_message(exc)
         return HTMLResponse(render_alert(state.error))
 
-    return HTMLResponse(render_scan(state))
+    return HTMLResponse(render_scan(state, root_path))
 
 
 @app.exception_handler(404)

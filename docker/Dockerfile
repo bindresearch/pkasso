@@ -14,6 +14,7 @@ RUN apt-get update \
         libglib2.0-0 \
         libgomp1 \
         libsm6 \
+        tini \
         libxext6 \
         libxrender1 \
     && rm -rf /var/lib/apt/lists/*
@@ -27,4 +28,5 @@ RUN python -m pip install --upgrade pip \
 
 EXPOSE 8001
 
+ENTRYPOINT ["tini", "--"]
 CMD ["pkasso-web", "--host", "0.0.0.0", "--port", "8001"]
