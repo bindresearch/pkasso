@@ -20,6 +20,13 @@ def normalize_root_path(value: str) -> str:
     return "/" + value.strip("/")
 
 
+def normalize_forwarded_allow_ips(value: str | None) -> str | None:
+    if value is None:
+        return None
+    value = value.strip()
+    return value or None
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run the pKasso daisyUI/HTMX GUI.")
     parser.add_argument("--host", default="0.0.0.0")
@@ -30,8 +37,18 @@ def main() -> None:
         default=os.environ.get("PKASSO_ROOT_PATH", ""),
         help="Public URL path prefix when served behind a proxy, e.g. /pkasso. Defaults to PKASSO_ROOT_PATH.",
     )
+    parser.add_argument(
+        "--forwarded-allow-ips",
+        default=os.environ.get("PKASSO_FORWARDED_ALLOW_IPS", os.environ.get("FORWARDED_ALLOW_IPS")),
+        help=(
+            "Comma-separated proxy IPs whose X-Forwarded-* headers should be trusted. "
+            "Use '*' only when pKasso is reachable exclusively through a trusted proxy. "
+            "Defaults to PKASSO_FORWARDED_ALLOW_IPS or FORWARDED_ALLOW_IPS."
+        ),
+    )
     args = parser.parse_args()
     args.root_path = normalize_root_path(args.root_path)
+    args.forwarded_allow_ips = normalize_forwarded_allow_ips(args.forwarded_allow_ips)
 
     missing = [
         package_name for module_name, package_name in WEB_DEPENDENCIES.items() if importlib.util.find_spec(module_name) is None
@@ -51,6 +68,8 @@ def main() -> None:
         host=args.host,
         port=args.port,
         reload=args.reload,
+        proxy_headers=True,
+        forwarded_allow_ips=args.forwarded_allow_ips,
         root_path=args.root_path,
     )
 
