@@ -4,18 +4,20 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>pKasso</title>
-  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- <script src="https://cdn.tailwindcss.com"></script> -->
+  <!-- <link rel="stylesheet" href="./static/tailwind_output.css"> -->
   <link href="https://cdn.jsdelivr.net/npm/daisyui@4.12.24/dist/full.min.css" rel="stylesheet" type="text/css" />
+  <link href="{{ root_path }}/static/tailwind_output.css" rel="stylesheet" type="text/css" />
   <script src="https://unpkg.com/htmx.org@1.9.12"></script>
-  <link rel="icon" href="{{ url_for('static', path='favicon.ico') }}" type="image/x-icon" />
-  <link href="{{ url_for('static', path='app.css') }}" rel="stylesheet" type="text/css" />
-  <link href="{{ url_for('static', path='styles.css') }}" rel="stylesheet" type="text/css" />
+  <link rel="icon" href="{{ root_path }}/static/favicon.ico" type="image/x-icon" />
+  <link href="{{ root_path }}/static/app.css" rel="stylesheet" type="text/css" />
+  <!-- <link href="{{ root_path }}/static/styles.css" rel="stylesheet" type="text/css" /> -->
 </head>
 <body class="min-h-screen">
   <!-- <header class="bind-header">
     <div class="mx-auto flex max-w-7xl items-center justify-between gap-6 px-4 py-4">
       <a href="/" class="flex items-center gap-3 text-inherit no-underline">
-        <img src="{{ url_for('static', path='bind-rounded_nobg.svg') }}" alt="" class="h-10 w-10 object-contain" />
+        <img src="{{ root_path }}/static/bind-rounded_nobg.svg" alt="" class="h-10 w-10 object-contain" />
         <div class="leading-tight">
           <div class="text-lg font-semibold tracking-tight">Bind</div>
           <div class="text-xs font-medium text-[color:var(--bind-muted)]">pKasso</div>
@@ -119,7 +121,7 @@
       </div>
     </form>
   </dialog>
-  <script src="{{ url_for('static', path='app.js') }}"></script>
+  <script src="{{ root_path }}/static/app.js"></script>
 </body>
 </html>
 <footer class="">

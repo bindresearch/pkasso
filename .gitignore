@@ -204,6 +204,21 @@ cython_debug/
 # Ruff stuff:
 .ruff_cache/
 
+# Frontend / Tailwind
+node_modules/
+/package.json
+/package-lock.json
+/tailwind.config.js
+/pkasso/api/static/tailwind_input.css
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+input.css
+output.css
+tailwind_output.css
+!pkasso/api/static/tailwind_output.css
+
 # PyPI configuration file
 .pypirc
 

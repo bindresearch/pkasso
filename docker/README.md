@@ -34,7 +34,25 @@ PKASSO_ROOT_PATH=/pkasso docker/run.sh
 ```
 
 The reverse proxy should strip `/pkasso/` before forwarding requests to the
-container.
+container. If the proxy terminates HTTPS and forwards to the container over
+HTTP, it should also pass the original protocol and host:
+
+```nginx
+proxy_set_header Host $host;
+proxy_set_header X-Forwarded-Host $host;
+proxy_set_header X-Forwarded-Proto https;
+proxy_set_header X-Forwarded-Port 443;
+```
+
+Allow pKasso to trust those forwarded headers from the proxy. For a container
+that is reachable only through the trusted reverse proxy, this can be:
+
+```bash
+PKASSO_ROOT_PATH=/pkasso PKASSO_FORWARDED_ALLOW_IPS='*' docker/run.sh
+```
+
+For stricter deployments, set `PKASSO_FORWARDED_ALLOW_IPS` to the proxy IP or a
+comma-separated list of proxy IPs.
 
 To transfer the image to another machine:
 
