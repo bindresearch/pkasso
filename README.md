@@ -6,6 +6,8 @@ One protonation microstate describes a unique charge pattern on the protonable s
 
 The easiest way to run pKasso is via the [webserver](https://tools.bindresearch.org/pkasso).
 
+*pKasso is under active development. Features, prediction models, and results may change in future releases.*
+
 ## Local installation
 
 ```
