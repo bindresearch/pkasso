@@ -87,6 +87,6 @@ warn_unused_configs = true
 follow_imports_for_stubs = true
 
 [[tool.mypy.overrides]]
-module = ["rdkit", "rdkit.*"]
+module = ["rdkit", "rdkit.*", "numpy", "numpy.*"]
 follow_imports = "skip"
 ignore_missing_imports = true
