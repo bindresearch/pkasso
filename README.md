@@ -4,9 +4,9 @@ pKasso determines protonation states for small molecules based on the pKa predic
 
 One protonation microstate describes a unique charge pattern on the protonable sites of molecules. pKasso enumerates protonation microstates, screens pKa values between connected microstates, and predicts pH-dependent microstate frequencies based on the graph of free energy differences between microstates.
 
-The easiest way to run pKasso is via the **webserver**: [ADD LINK TO WEBSERVER]
+The easiest way to run pKasso is via the [webserver](https://tools.bindresearch.org/pkasso).
 
-# Installation
+## Local installation
 
 ```
 # Create conda environment
@@ -17,7 +17,7 @@ conda activate pkasso
 pip install pkasso
 ```
 
-# Command line interface
+## Command line interface
 
 The command line interface is called via `pkasso`. 
 
@@ -39,7 +39,7 @@ pkasso batch --help
 pkasso scan --help
 ```
 
-# Python interface (e.g. in a notebook)
+## Python interface
 
 ```
 from pkasso import protonate
@@ -57,8 +57,8 @@ smiles_out, mols_out = protonate(smiles, name=name, pH=pH, cutoff_export=cutoff_
 print(smiles_out)
 ```
 
-For more examples, see the jupyter notebook in `example/example.ipynb`.
+For more examples, see the [jupyter notebook](https://github.com/bindresearch/pkasso/blob/main/example/example.ipynb).
 
-# Local webserver
+## Local webserver
 
-A local webserver can be hosted via `pip install pkasso[webserver]` followed by calling `pkasso-web` or by downloading and running the docker image [ADD LINK].
+A local webserver can be hosted via `pip install pkasso[webserver]` followed by calling `pkasso-web` or by downloading and running the [docker image](https://github.com/bindresearch/pkasso/pkgs/container/pkasso) (main).
