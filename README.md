@@ -1,12 +1,21 @@
 # pKasso
 
-pKasso determines protonation states for small molecules based on the pKa predictor MolGpKa (https://github.com/Xundrug/MolGpKa).
+Developed by [Bind Research](https://bindresearch.org/)
 
-One protonation microstate describes a unique charge pattern on the protonable sites of molecules. pKasso enumerates protonation microstates, screens pKa values between connected microstates, and predicts pH-dependent microstate frequencies based on the graph of free energy differences between microstates.
+## Protonation state prediction for small molecules
 
-The easiest way to run pKasso is via the **webserver**: [ADD LINK TO WEBSERVER]
+pKasso determines protonation states for small molecules from SMILES strings or RDKit molecule objects. pKasso is open-source and free to use (MIT Licence).
 
-# Installation
+Protonation microstates describe the unique charge patterns on protonable sites of molecules. The acid/base equilibria (micro-pKa values) of individual protonable sites are coupled, leading to a graph of free energy difference between protonation microstates. pKasso computes this graph based on micro-pKa predictions from [MolGpKa](https://github.com/Xundrug/MolGpKa). pKasso then converts the results into pH-dependent absolute microstate probabilities and predicts net acid/base equilibria (macro-pKa values) of the molecule.
+
+*pKasso is under active development. Features, prediction models, and results may change in future releases.*
+
+## Run pKasso
+
+The easiest way to run pKasso is via the [webserver](https://tools.bindresearch.org/pkasso).
+
+
+### Local installation
 
 ```
 # Create conda environment
@@ -17,7 +26,7 @@ conda activate pkasso
 pip install pkasso
 ```
 
-# Command line interface
+### Command line interface
 
 The command line interface is called via `pkasso`. 
 
@@ -39,7 +48,7 @@ pkasso batch --help
 pkasso scan --help
 ```
 
-# Python interface (e.g. in a notebook)
+### Python interface
 
 ```
 from pkasso import protonate
@@ -57,8 +66,8 @@ smiles_out, mols_out = protonate(smiles, name=name, pH=pH, cutoff_export=cutoff_
 print(smiles_out)
 ```
 
-For more examples, see the jupyter notebook in `example/example.ipynb`.
+For more examples, see the [jupyter notebook](https://github.com/bindresearch/pkasso/blob/main/example/example.ipynb).
 
-# Local webserver
+### Local webserver
 
-A local webserver can be hosted via `pip install pkasso[webserver]` followed by calling `pkasso-web` or by downloading and running the docker image [ADD LINK].
+A local webserver can be hosted via `pip install pkasso[webserver]` followed by calling `pkasso-web` or by downloading and running the [docker image](https://github.com/bindresearch/pkasso/pkgs/container/pkasso) (main).
