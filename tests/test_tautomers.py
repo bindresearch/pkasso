@@ -143,12 +143,15 @@ def test_returns_input_smiles_when_conformer_generation_fails(monkeypatch):
     )
 
 
-def test_tautomer_ranking_uses_rdkit_score_before_mmff_energy(monkeypatch):
+def test_tautomer_ranking_only_prepares_tautomers_inside_score_window(monkeypatch):
     tautomers = load_tautomers_module()
+
+    calls = []
 
     def mock_rdkit_tautomer_conformers(mol, num_confs=10):
         smiles = tautomers.Chem.MolToSmiles(mol)
-        energy = 100.0 if smiles == "NC(=O)c1ccccc1" else 0.0
+        calls.append(smiles)
+        energy = 100.0 if smiles == "O=c1cccc[nH]1" else 0.0
         return mol, [(0, energy)]
 
     monkeypatch.setattr(
@@ -159,11 +162,40 @@ def test_tautomer_ranking_uses_rdkit_score_before_mmff_energy(monkeypatch):
 
     assert (
         tautomers.best_tautomer_smiles(
-            "NC(=O)c1ccccc1",
+            "O=C1C=CC=CN1",
             num_confs=1,
         )
-        == "NC(=O)c1ccccc1"
+        == "O=c1cccc[nH]1"
     )
+    assert calls == ["O=c1cccc[nH]1"]
+
+
+def test_tautomer_ranking_uses_mmff_energy_within_score_window(monkeypatch):
+    tautomers = load_tautomers_module()
+
+    calls = []
+
+    def mock_rdkit_tautomer_conformers(mol, num_confs=10):
+        smiles = tautomers.Chem.MolToSmiles(mol)
+        calls.append(smiles)
+        energy = 0.0 if smiles == "Oc1ccccn1" else 10.0
+        return mol, [(0, energy)]
+
+    monkeypatch.setattr(
+        tautomers,
+        "rdkit_tautomer_conformers",
+        mock_rdkit_tautomer_conformers,
+    )
+
+    assert (
+        tautomers.best_tautomer_smiles(
+            "O=C1C=CC=CN1",
+            num_confs=1,
+            score_window=2,
+        )
+        == "Oc1ccccn1"
+    )
+    assert calls == ["O=c1cccc[nH]1", "Oc1ccccn1"]
 
 
 def test_tautomer_ranking_uses_mmff_energy_as_tiebreaker(monkeypatch):
