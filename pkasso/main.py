@@ -56,6 +56,7 @@ def preprocess(
     max_tautomers: int = 100,
     num_confs: int = 10,
     strip_fragments: bool = True,
+    score_window: int = 1,
 ) -> tuple[Mol, str]:
     """
     Construct and standardize an RDKit molecule from a SMILES string.
@@ -105,6 +106,7 @@ def preprocess(
             smiles,
             max_tautomers=max_tautomers,
             num_confs=num_confs,
+            score_window=score_window,
         )
     mol = Chem.MolFromSmiles(smiles, sanitize=True)
 
@@ -778,6 +780,7 @@ class pKasso:
     num_confs: int = 10
     total_max_sites: int = 25
     strip_fragments: bool = True
+    score_window: int = 1
 
     def pka_predictor(self, mol: Mol) -> Predictor:
         """Create the configured molecule-specific pKa predictor."""
@@ -837,6 +840,7 @@ class pKasso:
             max_tautomers=self.max_tautomers,
             num_confs=self.num_confs,
             strip_fragments=self.strip_fragments,
+            score_window=self.score_window,
         )
 
         self.charged_indices = special_cases.find_charged(self.mol0)
