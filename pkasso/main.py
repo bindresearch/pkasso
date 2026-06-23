@@ -779,6 +779,7 @@ class pKasso:
     max_tautomers: int = 20
     num_confs: int = 10
     total_max_sites: int = 25
+    max_cut_edges: int = 1
     strip_fragments: bool = True
     score_window: int = 0
 
@@ -1205,6 +1206,7 @@ class pKasso:
         q_options0: NDArray[np.int64],
         coupling_weights: NDArray[np.float64],
         coupling_cutoff: float,
+        max_cut_edges: int = 1,
     ) -> list[list[int]]:
         """
         Recursively split an oversized cluster by local penalty-limited cuts.
@@ -1222,7 +1224,7 @@ class pKasso:
             split_clusters = []
             for component in components:
                 split_clusters.extend(
-                    self.split_cluster_by_coupling_penalty(component, q_options0, coupling_weights, coupling_cutoff)
+                    self.split_cluster_by_coupling_penalty(component, q_options0, coupling_weights, coupling_cutoff, max_cut_edges=self.max_cut_edges)
                 )
             return split_clusters
 
@@ -1234,7 +1236,7 @@ class pKasso:
             graph,
             coupling_weights,
             lambda child_cluster: count_state_combinations(q_options0[child_cluster]),
-            max_cut_edges=2,
+            max_cut_edges=max_cut_edges,
             coupling_cutoff=coupling_cutoff,
         )
         if child_clusters is not None:
@@ -1246,6 +1248,7 @@ class pKasso:
                         q_options0,
                         coupling_weights,
                         coupling_cutoff,
+                        max_cut_edges=self.max_cut_edges
                     )
                 )
             return split_clusters
@@ -1258,6 +1261,7 @@ class pKasso:
             q_options0,
             coupling_weights,
             next_coupling_cutoff,
+            max_cut_edges=self.max_cut_edges
         )
 
     def screen_clusters(self, indices0: list[int], q_options0: NDArray[np.int64]) -> list[list[int]]:
@@ -1298,7 +1302,7 @@ class pKasso:
         split_clusters = []
         for cluster in sorted(clusters, key=lambda c: c[0]):
             split_clusters.extend(
-                self.split_cluster_by_coupling_penalty(cluster, q_options0, coupling_weights, coupling_cutoff)
+                self.split_cluster_by_coupling_penalty(cluster, q_options0, coupling_weights, coupling_cutoff, max_cut_edges=self.max_cut_edges)
             )
         return split_clusters
 
