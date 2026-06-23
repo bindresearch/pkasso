@@ -179,6 +179,9 @@ def best_tautomer_smiles(
     # MMFF ranking within the RDKit score window
     # ---------------------------------------------------------
 
+    if len(ranked) == 1:
+        return str(Chem.MolToSmiles(ranked[0]["taut"]))
+
     prepared: list[TautomerEntry] = []
 
     for entry in ranked:

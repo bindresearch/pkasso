@@ -130,9 +130,14 @@ def test_max_tautomers_falls_back_to_input_smiles(capsys):
 def test_returns_input_smiles_when_conformer_generation_fails(monkeypatch):
     tautomers = load_tautomers_module()
 
+    monkeypatch.setattr(
+        tautomers.rdMolStandardize.TautomerEnumerator,
+        "ScoreTautomer",
+        lambda self, mol: 1,
+    )
     monkeypatch.setattr(tautomers, "rdkit_tautomer_conformers", lambda mol, num_confs=10: None)
 
-    smiles = "O=C(NO)C1c2ccccc2Oc2ccccc21"
+    smiles = "CC(=O)C"
 
     assert (
         tautomers.best_tautomer_smiles(
@@ -143,7 +148,7 @@ def test_returns_input_smiles_when_conformer_generation_fails(monkeypatch):
     )
 
 
-def test_tautomer_ranking_only_prepares_tautomers_inside_score_window(monkeypatch):
+def test_tautomer_ranking_skips_mmff_for_single_top_score(monkeypatch):
     tautomers = load_tautomers_module()
 
     calls = []
@@ -167,7 +172,7 @@ def test_tautomer_ranking_only_prepares_tautomers_inside_score_window(monkeypatc
         )
         == "O=c1cccc[nH]1"
     )
-    assert calls == ["O=c1cccc[nH]1"]
+    assert calls == []
 
 
 def test_tautomer_ranking_uses_mmff_energy_within_score_window(monkeypatch):
