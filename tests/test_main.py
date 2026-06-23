@@ -3,6 +3,7 @@ import sys
 import types
 from pathlib import Path
 
+import networkx as nx
 import pytest
 import numpy as np
 
@@ -162,6 +163,32 @@ def test_count_state_combinations():
         ]
     )
     assert main.count_state_combinations(q_options) == 6
+
+
+def test_split_cluster_preserves_explicit_max_cut_edges_through_recursion(monkeypatch):
+    q_options = np.ones((4, 3), dtype=np.int64)
+    weights = np.zeros((4, 4), dtype=np.float64)
+    seen_max_cut_edges = []
+
+    def coupling_weights_to_graph(coupling_weights, coupling_cutoff, nodes=None):
+        graph = nx.Graph()
+        graph.add_nodes_from([0, 1, 2, 3] if nodes is None else nodes)
+        for edge in ((0, 1), (2, 3)):
+            if all(node in graph for node in edge):
+                graph.add_edge(*edge)
+        return graph
+
+    def find_best_penalty_limited_split(*args, max_cut_edges, **kwargs):
+        seen_max_cut_edges.append(max_cut_edges)
+        return []
+
+    monkeypatch.setattr(main.coupling, "coupling_weights_to_graph", coupling_weights_to_graph, raising=False)
+    monkeypatch.setattr(main.coupling, "find_best_penalty_limited_split", find_best_penalty_limited_split, raising=False)
+
+    pk = main.pKasso("CC", cutoff_states=2, max_cut_edges=1)
+    pk.split_cluster_by_coupling_penalty([0, 1, 2, 3], q_options, weights, 0.1, max_cut_edges=2)
+
+    assert seen_max_cut_edges == [2, 2]
 
 
 @pytest.mark.parametrize(
