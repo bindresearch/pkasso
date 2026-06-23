@@ -96,7 +96,7 @@ def best_tautomer_smiles(
     smiles: str,
     max_tautomers: int = 20,  # max number of tautomers for rdkit
     num_confs: int = 10,  # conformations per tautomer (rdkit)
-    score_window: int = 1,  # RDKit score window considered for MMFF ranking
+    score_window: int = 0,  # RDKit score window considered for MMFF ranking
 ) -> str:
     """Return a chemically plausible tautomer SMILES using RDKit and MMFF ranking."""
 
@@ -168,6 +168,7 @@ def best_tautomer_smiles(
     if len(ranked) == 0:
         return smiles
 
+    # Reduce list to top scorers (within score_window of best score)
     best_rdkit_score = max(entry["rdkit_score"] for entry in ranked)
     min_candidate_score = best_rdkit_score - score_window
     ranked = [entry for entry in ranked if entry["rdkit_score"] >= min_candidate_score]
