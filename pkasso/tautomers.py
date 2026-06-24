@@ -53,6 +53,7 @@ def has_hydroximic_acid_tautomer(mol: Chem.Mol) -> bool:
 def rdkit_tautomer_conformers(
     mol: Chem.Mol,
     num_confs: int = 10,
+    num_threads: int = 1,
 ) -> tuple[Chem.Mol, list[ConformerEnergy]] | None:
     """Generate and MMFF-rank conformers for a tautomer."""
 
@@ -61,6 +62,7 @@ def rdkit_tautomer_conformers(
     params = AllChem.ETKDGv3()
 
     params.useRandomCoords = False
+    params.numThreads = num_threads
 
     conf_ids = AllChem.EmbedMultipleConfs(
         mol,
@@ -79,6 +81,7 @@ def rdkit_tautomer_conformers(
 
     results = AllChem.MMFFOptimizeMoleculeConfs(
         mol,
+        numThreads=num_threads,
         mmffVariant="MMFF94s",
     )
 
@@ -97,6 +100,7 @@ def best_tautomer_smiles(
     max_tautomers: int = 20,  # max number of tautomers for rdkit
     num_confs: int = 10,  # conformations per tautomer (rdkit)
     score_window: int = 0,  # RDKit score window considered for MMFF ranking
+    num_threads: int = 1, # number of threads for rdkit optimizer
 ) -> str:
     """Return a chemically plausible tautomer SMILES using RDKit and MMFF ranking."""
 
@@ -189,6 +193,7 @@ def best_tautomer_smiles(
             prep = rdkit_tautomer_conformers(
                 entry["taut"],
                 num_confs=num_confs,
+                num_threads=num_threads,
             )
 
             if prep is None:
