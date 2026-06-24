@@ -1224,7 +1224,12 @@ class pKasso:
             split_clusters = []
             for component in components:
                 split_clusters.extend(
-                    self.split_cluster_by_coupling_penalty(component, q_options0, coupling_weights, coupling_cutoff, max_cut_edges=max_cut_edges)
+                    self.split_cluster_by_coupling_penalty(
+                        component,
+                        q_options0,
+                        coupling_weights,
+                        coupling_cutoff,max_cut_edges=max_cut_edges
+                    )
                 )
             return split_clusters
 
@@ -1302,7 +1307,13 @@ class pKasso:
         split_clusters = []
         for cluster in sorted(clusters, key=lambda c: c[0]):
             split_clusters.extend(
-                self.split_cluster_by_coupling_penalty(cluster, q_options0, coupling_weights, coupling_cutoff, max_cut_edges=self.max_cut_edges)
+                self.split_cluster_by_coupling_penalty(
+                    cluster,
+                    q_options0,
+                    coupling_weights,
+                    coupling_cutoff,
+                    max_cut_edges=self.max_cut_edges
+                )
             )
         return split_clusters
 
