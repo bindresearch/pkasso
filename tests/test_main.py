@@ -178,7 +178,7 @@ def test_split_cluster_preserves_explicit_max_cut_edges_through_recursion(monkey
                 graph.add_edge(*edge)
         return graph
 
-    def find_best_penalty_limited_split(*args, max_cut_edges, **kwargs):
+    def find_best_penalty_limited_split(graph, coupling_weights, cluster_state_count, max_cut_edges, coupling_cutoff):
         seen_max_cut_edges.append(max_cut_edges)
         return []
 
