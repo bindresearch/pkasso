@@ -56,6 +56,8 @@ def preprocess(
     max_tautomers: int = 100,
     num_confs: int = 10,
     strip_fragments: bool = True,
+    score_window: int = 0,
+    num_threads: int = 1,
 ) -> tuple[Mol, str]:
     """
     Construct and standardize an RDKit molecule from a SMILES string.
@@ -105,6 +107,8 @@ def preprocess(
             smiles,
             max_tautomers=max_tautomers,
             num_confs=num_confs,
+            score_window=score_window,
+            num_threads=num_threads,
         )
     mol = Chem.MolFromSmiles(smiles, sanitize=True)
 
@@ -777,7 +781,10 @@ class pKasso:
     max_tautomers: int = 20
     num_confs: int = 10
     total_max_sites: int = 25
+    max_cut_edges: int = 1
     strip_fragments: bool = True
+    score_window: int = 0
+    num_threads: int = 1
 
     def pka_predictor(self, mol: Mol) -> Predictor:
         """Create the configured molecule-specific pKa predictor."""
@@ -837,6 +844,8 @@ class pKasso:
             max_tautomers=self.max_tautomers,
             num_confs=self.num_confs,
             strip_fragments=self.strip_fragments,
+            score_window=self.score_window,
+            num_threads=self.num_threads,
         )
 
         self.charged_indices = special_cases.find_charged(self.mol0)
@@ -1201,6 +1210,7 @@ class pKasso:
         q_options0: NDArray[np.int64],
         coupling_weights: NDArray[np.float64],
         coupling_cutoff: float,
+        max_cut_edges: int = 1,
     ) -> list[list[int]]:
         """
         Recursively split an oversized cluster by local penalty-limited cuts.
@@ -1218,7 +1228,12 @@ class pKasso:
             split_clusters = []
             for component in components:
                 split_clusters.extend(
-                    self.split_cluster_by_coupling_penalty(component, q_options0, coupling_weights, coupling_cutoff)
+                    self.split_cluster_by_coupling_penalty(
+                        component,
+                        q_options0,
+                        coupling_weights,
+                        coupling_cutoff,max_cut_edges=max_cut_edges
+                    )
                 )
             return split_clusters
 
@@ -1230,8 +1245,8 @@ class pKasso:
             graph,
             coupling_weights,
             lambda child_cluster: count_state_combinations(q_options0[child_cluster]),
-            max_cut_edges=2,
-            coupling_cutoff=coupling_cutoff,
+            max_cut_edges,
+            coupling_cutoff,
         )
         if child_clusters is not None:
             split_clusters = []
@@ -1242,6 +1257,7 @@ class pKasso:
                         q_options0,
                         coupling_weights,
                         coupling_cutoff,
+                        max_cut_edges=max_cut_edges
                     )
                 )
             return split_clusters
@@ -1254,6 +1270,7 @@ class pKasso:
             q_options0,
             coupling_weights,
             next_coupling_cutoff,
+            max_cut_edges=max_cut_edges
         )
 
     def screen_clusters(self, indices0: list[int], q_options0: NDArray[np.int64]) -> list[list[int]]:
@@ -1294,7 +1311,13 @@ class pKasso:
         split_clusters = []
         for cluster in sorted(clusters, key=lambda c: c[0]):
             split_clusters.extend(
-                self.split_cluster_by_coupling_penalty(cluster, q_options0, coupling_weights, coupling_cutoff)
+                self.split_cluster_by_coupling_penalty(
+                    cluster,
+                    q_options0,
+                    coupling_weights,
+                    coupling_cutoff,
+                    max_cut_edges=self.max_cut_edges
+                )
             )
         return split_clusters
 
