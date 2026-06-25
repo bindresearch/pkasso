@@ -18,7 +18,7 @@ from . import coupling, special_cases, utils
 from .predict_pka import MolgpkaPredictor, Predictor
 from .postprocess import Molecule, Scan, combine_results
 from .transitions import calc_freqs_from_states, calc_state_diffs
-from .utils import pack_indices, pack_vec, unpack_vec, state_str_to_q
+from .utils import pack_indices, pack_vec, unpack_vec, state_str_to_q, construct_mol
 from .tautomers import best_tautomer_smiles
 
 logger = logging.getLogger(__name__)
@@ -139,8 +139,8 @@ def preprocess(
 
 
 def find_candidate_sites(
-    base: dict[int, float],
-    acid: dict[int, float],
+    base_map_ids: list[int],
+    acid_map_ids: list[int],
     exclude_base_indices: list[int],
     exclude_acid_indices: list[int],
     charged_indices: list[int],
@@ -152,9 +152,9 @@ def find_candidate_sites(
     Parameters
     ----------
     base
-        Mapping of atom map indices to predicted basic pKa values.
+        Atom base map ids.
     acid
-        Mapping of atom map indices to predicted acidic pKa values.
+        Atom acid map ids.
     exclude_base_indices
         Atom map indices that must not be considered for protonation.
     exclude_acid_indices
@@ -175,10 +175,7 @@ def find_candidate_sites(
         [deprotonated, unchanged, protonated].
     """
 
-    prot_candidates = list(base.keys())  # should be map idx
-    deprot_candidates = list(acid.keys())
-
-    indices_raw = list(sorted(set(prot_candidates + deprot_candidates)))
+    indices_raw = list(sorted(set(base_map_ids + acid_map_ids)))
     indices: list[int] = []
 
     logger.debug(f"relevant indices: {indices_raw}")
@@ -193,10 +190,10 @@ def find_candidate_sites(
     q_options = np.zeros((len(indices), 3), dtype=np.int64)  # deprot=0, stay=1, prot=2
     for rel_idx, map_idx in enumerate(indices):
         q_options[rel_idx, 1] = 1  # always allow stay
-        if map_idx in prot_candidates:
+        if map_idx in base_map_ids:
             if map_idx not in exclude_base_indices:
                 q_options[rel_idx, 2] = 1  # allow protonation
-        if map_idx in deprot_candidates:
+        if map_idx in acid_map_ids:
             if map_idx not in exclude_acid_indices:
                 q_options[rel_idx, 0] = 1  # allow deprotonation
 
@@ -257,61 +254,6 @@ def count_state_combinations(q_options: NDArray[np.int64]) -> int:
 
     q_counts = np.count_nonzero(q_options, axis=1)
     return int(np.prod(q_counts))
-
-
-#########################################
-# rdkit mol object construction
-
-
-def construct_mol(mol0: Mol, indices: list[int], state_vec: NDArray[np.int64]) -> Mol:
-    """
-    Construct a protonation-state-specific molecule from a reference molecule.
-
-    The function applies the protonation/deprotonation state encoded in
-    ``state_vec`` to the atoms specified by ``indices`` (atom map numbers).
-    Formal charges are adjusted accordingly and hydrogens are added or removed
-    where required. The resulting molecule is sanitized and returned.
-
-    Parameters
-    ----------
-    mol0
-        Reference molecule (neutral standardized structure)
-        with atom map numbers assigned.
-    indices
-        Atom map indices corresponding to the sites whose states are
-        defined in ``state_vec``.
-    state_vec
-        Protonation state vector for the selected sites. Values are encoded
-        as [0, 1, 2] corresponding to [deprotonated, unchanged, protonated].
-
-    Returns
-    -------
-    mol
-        RDKit molecule with the specified protonation states applied.
-    """
-
-    mol_cand = copy.deepcopy(mol0)
-
-    qs = state_vec - 1
-
-    rw = Chem.RWMol(Chem.AddHs(mol_cand))
-
-    for map_idx, q in zip(indices, qs):
-        atom = utils.get_atom_with_map_idx(rw, map_idx)
-        if atom is None:
-            raise ValueError(f"Could not find atom with map index {map_idx}.")
-        atom.SetFormalCharge(int(q))
-        if q == -1:
-            for nbr in atom.GetNeighbors():
-                if nbr.GetAtomicNum() == 1:
-                    rw.RemoveAtom(nbr.GetIdx())
-                    break
-
-    mol_cand = Chem.RemoveHs(rw)
-    Chem.SanitizeMol(mol_cand)
-
-    return mol_cand
-
 
 #############################################################################################
 # Cluster tests and operations
@@ -857,6 +799,9 @@ class pKasso:
         logger.debug(f"Exclude base indices: {self.exclude_base_indices}")
         logger.debug(f"Exclude acid indices: {self.exclude_acid_indices}")
 
+        self.acid_map_ids = pka_predictor.pred_acid_ids()
+        self.base_map_ids = pka_predictor.pred_base_ids()
+
         self.acid0 = pka_predictor.pred_acid()  # returns pkas for map indices
         self.base0 = pka_predictor.pred_base()  # returns pkas for map indices
 
@@ -864,7 +809,7 @@ class pKasso:
             raise ValueError(f'Molecule must contain <={self.total_max_sites} protonation sites.')
 
         self.indices0, self.q_options0 = find_candidate_sites(
-            self.base0, self.acid0, self.exclude_base_indices, self.exclude_acid_indices, self.charged_indices
+            self.base_map_ids, self.acid_map_ids, self.exclude_base_indices, self.exclude_acid_indices, self.charged_indices
         )
 
         self.indices0_str = pack_indices(self.indices0)

@@ -18,10 +18,11 @@ from .special_cases import (
     match_smarts,
     oh_ring_sulfonate,
 )
-from .external.net import GCNNet
-from .external.pka import load_model
-from .external.pka import predict_acid as molgpka_predict_acid
-from .external.pka import predict_base as molgpka_predict_base
+from .external.molgpka.net import GCNNet
+from .external.molgpka.pka import load_model
+from .external.molgpka.pka import predict_acid as molgpka_predict_acid
+from .external.molgpka.pka import predict_base as molgpka_predict_base
+from .external.molgpka.ionization_group import get_ionization_aid
 
 pkg_base = resources.files("pkasso")
 
@@ -40,6 +41,17 @@ def get_acid_neighbors(mol_h: Mol, acid: dict[int, float]) -> dict[int, float]:
             acid_heavy[neighbor_map_idx] = pka
     return acid_heavy
 
+def get_acid_id_neighbors(mol_h: Mol, acid_ids: list[int]) -> list[int]:
+    """Find heavy-atom neighbour ids for acidic proton."""
+    acid_heavy_ids = []
+
+    for at_idx in acid_ids:
+        H_acid = mol_h.GetAtomWithIdx(at_idx)
+        for bond in H_acid.GetBonds():
+            neighbor = bond.GetOtherAtom(H_acid)
+            neighbor_map_idx = neighbor.GetAtomMapNum()
+            acid_heavy_ids.append(neighbor_map_idx)
+    return acid_heavy_ids
 
 def convert_base_map_idx(mol_h: Mol, base_res: dict[int, float]) -> dict[int, float]:
     base_res_map_ids: dict[int, float] = {}
@@ -49,6 +61,13 @@ def convert_base_map_idx(mol_h: Mol, base_res: dict[int, float]) -> dict[int, fl
         base_res_map_ids[map_idx] = pka
     return base_res_map_ids
 
+def convert_base_ids_to_map_ids(mol_h: Mol, base_ids: list[int]) -> list[int]:
+    base_map_ids: list[int] = {}
+    for aid in base_ids:
+        atom = mol_h.GetAtomWithIdx(aid)
+        map_idx = atom.GetAtomMapNum()
+        base_map_ids.append(map_idx)
+    return base_map_ids
 
 class Predictor(ABC):
     def __init__(self, mol: Mol, device: str = "cpu"):
@@ -61,15 +80,24 @@ class Predictor(ABC):
         ...
 
     @abstractmethod
+    def pred_acid_ids(self) -> list[int]:
+        """Predict acidic map ids."""
+        ...
+
+    @abstractmethod
     def pred_base(self) -> dict[int, float]:
         """Predict basic pKa values keyed by atom map index."""
+        ...
+
+    @abstractmethod
+    def pred_base_ids(self) -> list[int]:
+        """Predict base map ids."""
         ...
 
     @abstractmethod
     def exclude_sites(self) -> tuple[list[int], list[int]]:
         """Return base and acid atom map indices to exclude for this backend."""
         ...
-
 
 class MolgpkaPredictor(Predictor):
     model_file_base: ClassVar[Path] = ROOT / "weight_base.pth"
@@ -95,6 +123,11 @@ class MolgpkaPredictor(Predictor):
     def pred_acid(self) -> dict[int, float]:
         acid = self._predict_acid_raw()
         return self._curate_acid(acid)
+
+    def pred_acid_ids(self) -> list[int]:
+        acid = self._predict_acid_raw()
+        acid_curated = self._curate_acid(acid)
+        return list(acid_curated.keys())
 
     def exclude_sites(self) -> tuple[list[int], list[int]]:
         return self._exclude_molgpka_sites()
@@ -268,6 +301,11 @@ class MolgpkaPredictor(Predictor):
         base = self._predict_base_raw()
         return self._curate_base(base)
 
+    def pred_base_ids(self) -> list[int]:
+        base = self._predict_base_raw()
+        base_curated = self._curate_base(base)
+        return list(base_curated.keys())
+
     def _predict_base_raw(self) -> dict[int, float]:
         """Run molgpka base prediction and convert results to atom map indices."""
 
@@ -332,6 +370,63 @@ class MolgpkaPredictor(Predictor):
         base = base_curated
         return base
 
+###########################################################################
+
+class UnipkaPredictor(Predictor):
+    model_file: ClassVar[Path] = ROOT / "checkpoint_best.pt"
+    _model_cache: ClassVar[dict[tuple[type, str], tuple[GCNNet, GCNNet]]] = {}
+
+    def __init__(self, mol: Mol, device: str = "cpu") -> None:
+        super().__init__(mol, device=device)
+        self.model = self._load_models(device)
+        self.mol_h = Chem.rdmolops.AddHs(Chem.Mol(mol))
+        self.atom_indices = [atom.GetIdx() for atom in mol.GetAtoms()]
+        self.qs = np.array([at.GetFormalCharge() for at in mol.GetAtoms()])
+
+    @classmethod
+    def _load_models(cls, device: str) -> tuple[GCNNet, GCNNet]:
+        cache_key = (cls, device)
+        if cache_key not in cls._model_cache:
+            model = load_model(cls.model_file, device=device)
+            cls._model_cache[cache_key] = model
+        return cls._model_cache[cache_key]
+
+    def exclude_sites(self) -> tuple[list[int], list[int]]:
+        return [], []
+
+    def pred_acid(self) -> dict[int, float]:
+        acid = self._predict_acid_raw()
+        return self._curate_acid(acid)
+
+    def pred_acid_ids(self) -> list[int]:
+        acid_ids = get_ionization_aid(self.mol_h, "acid")
+        acid_map_ids = get_acid_id_neighbors(acid_ids)
+        return acid_ids
+    
+    def _predict_acid_raw(self) -> dict[int, float]:
+        """Run molgpka acid prediction and convert results to atom map indices."""
+
+        acid_idxs = get_ionization_aid(self.mol_h, "acid")
+        acid_map_ids = get_acid_id_neighbors(acid_idxs)
+
+        acid = unipka_predict_acid(self.mol_h, self.model, device=self.device)
+        return get_acid_neighbors(self.mol_h, acid)
+
+    def pred_base(self) -> dict[int, float]:
+        base = self._predict_base_raw()
+
+    def pred_base_ids(self) -> list[int]:
+        base_ids = get_ionization_aid(self.mol_h, "base")
+        base_map_ids = convert_base_ids_to_map_ids(self.mol_h, base_ids)
+        return base_map_ids
+
+    def _predict_base_raw(self) -> dict[int, float]:
+        """Run base prediction and convert results to atom map indices."""
+
+        base_aid = unipka_predict_base(self.mol_h, self.model_base, device=self.device)
+        return convert_base_map_idx(self.mol_h, base_aid)
+
+############################################################################
 
 def predict_acid(
     mol: Mol,
