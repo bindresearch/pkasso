@@ -39,10 +39,14 @@ def model_pred_data(data: Data, model: GCNNet, device: str = "cpu") -> float:
     return pka
 
 
-def predict_acid(mol_h: Mol, model_acid: GCNNet, device: str = "cpu") -> dict[int, float]:
+def predict_acid(mol_h: Mol,
+                 model_acid: GCNNet,
+                 smarts_pattern: Path,
+                 device: str = "cpu",
+) -> dict[int, float]:
     """Predict acid pKas with molgpka model."""
 
-    acid_idxs = get_ionization_aid(mol_h, "acid")
+    acid_idxs = get_ionization_aid(mol_h, "acid", smarts_pattern)
     acid_res = {}
     vectorizer = MolVectorizer(mol_h)
     for aid in acid_idxs:
@@ -51,10 +55,14 @@ def predict_acid(mol_h: Mol, model_acid: GCNNet, device: str = "cpu") -> dict[in
     return acid_res
 
 
-def predict_base(mol_h: Mol, model_base: GCNNet, device: str = "cpu") -> dict[int, float]:
+def predict_base(mol_h: Mol,
+                 model_base: GCNNet,
+                 smarts_pattern: Path,
+                 device: str = "cpu"
+) -> dict[int, float]:
     """Predict base pKas with molgpka model."""
 
-    base_idxs = get_ionization_aid(mol_h, "base")
+    base_idxs = get_ionization_aid(mol_h, "base", smarts_pattern)
     base_res = {}
     vectorizer = MolVectorizer(mol_h)
     for aid in base_idxs:

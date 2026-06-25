@@ -102,6 +102,8 @@ class Predictor(ABC):
 class MolgpkaPredictor(Predictor):
     model_file_base: ClassVar[Path] = ROOT / "weight_base.pth"
     model_file_acid: ClassVar[Path] = ROOT / "weight_acid.pth"
+    smarts_pattern: ClassVar[Path] = ROOT / "smarts_pattern_molgpka.tsv"
+
     _model_cache: ClassVar[dict[tuple[type, str], tuple[GCNNet, GCNNet]]] = {}
 
     def __init__(self, mol: Mol, device: str = "cpu") -> None:
@@ -214,7 +216,7 @@ class MolgpkaPredictor(Predictor):
     def _predict_acid_raw(self) -> dict[int, float]:
         """Run molgpka acid prediction and convert results to atom map indices."""
 
-        acid = molgpka_predict_acid(self.mol_h, self.model_acid, device=self.device)
+        acid = molgpka_predict_acid(self.mol_h, self.model_acid, self.smarts_pattern, device=self.device)
         return get_acid_neighbors(self.mol_h, acid)
 
     def _curate_acid(self, acid: dict[int, float]) -> dict[int, float]:
@@ -309,7 +311,7 @@ class MolgpkaPredictor(Predictor):
     def _predict_base_raw(self) -> dict[int, float]:
         """Run molgpka base prediction and convert results to atom map indices."""
 
-        base_aid = molgpka_predict_base(self.mol_h, self.model_base, device=self.device)
+        base_aid = molgpka_predict_base(self.mol_h, self.model_base, self.smarts_pattern, device=self.device)
         return convert_base_map_idx(self.mol_h, base_aid)
 
     def _curate_base(self, base: dict[int, float]) -> dict[int, float]:
@@ -374,6 +376,7 @@ class MolgpkaPredictor(Predictor):
 
 class UnipkaPredictor(Predictor):
     model_file: ClassVar[Path] = ROOT / "checkpoint_best.pt"
+    smarts_pattern: ClassVar[Path] = ROOT / "smarts_pattern_unipka.tsv"
     _model_cache: ClassVar[dict[tuple[type, str], tuple[GCNNet, GCNNet]]] = {}
 
     def __init__(self, mol: Mol, device: str = "cpu") -> None:
@@ -399,24 +402,32 @@ class UnipkaPredictor(Predictor):
         return self._curate_acid(acid)
 
     def pred_acid_ids(self) -> list[int]:
-        acid_ids = get_ionization_aid(self.mol_h, "acid")
+        acid_ids = get_ionization_aid(self.mol_h, "acid", self.smarts_pattern)
         acid_map_ids = get_acid_id_neighbors(acid_ids)
-        return acid_ids
+        return acid_map_ids
     
     def _predict_acid_raw(self) -> dict[int, float]:
         """Run molgpka acid prediction and convert results to atom map indices."""
 
-        acid_idxs = get_ionization_aid(self.mol_h, "acid")
+        acid_idxs = get_ionization_aid(self.mol_h, "acid", self.smarts_pattern)
         acid_map_ids = get_acid_id_neighbors(acid_idxs)
+
+        # Note:
+        # Wire in the creation of smiles corresponding to the acid_map_ids upstream!
+        # Ideally the smiles strings are created at the start in parallel to construct_mols (e.g. construct_smiles)
+        # Possibly break the ABC concept here as they need such different input?
+        # The predictor only needs to be passed the original smiles string (corresponding to self.mol_h)
+        # as well as the smiles strings corresponding to the changes in acid map ids
 
         acid = unipka_predict_acid(self.mol_h, self.model, device=self.device)
         return get_acid_neighbors(self.mol_h, acid)
 
     def pred_base(self) -> dict[int, float]:
         base = self._predict_base_raw()
+        return base
 
     def pred_base_ids(self) -> list[int]:
-        base_ids = get_ionization_aid(self.mol_h, "base")
+        base_ids = get_ionization_aid(self.mol_h, "base", self.smarts_pattern)
         base_map_ids = convert_base_ids_to_map_ids(self.mol_h, base_ids)
         return base_map_ids
 

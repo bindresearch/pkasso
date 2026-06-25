@@ -66,13 +66,11 @@ def pack_vec(state_vec: NDArray[np.int64]) -> str:
     state_str = "".join([str(x) for x in state_vec])
     return state_str
 
-
 def unpack_vec(state_str: str) -> NDArray[np.int64]:
     """Unpack string into vector."""
 
     state_vec = np.array([int(s) for s in state_str], dtype=int)
     return state_vec
-
 
 def calc_state_strs(state_vecs: list[NDArray[np.int64]]) -> list[str]:
     """Calc state strings from vectors."""

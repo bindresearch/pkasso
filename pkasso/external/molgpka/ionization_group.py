@@ -1,24 +1,24 @@
 from __future__ import division, unicode_literals
 
 import os
-from importlib import resources
+# from importlib import resources
 
 import pandas as pd
 from pandas import DataFrame
 from rdkit import Chem
 from rdkit.Chem import Mol
 
-pkg_base = resources.files("pkasso")
-root = f"{pkg_base}/data"
+# pkg_base = resources.files("pkasso")
+# root = f"{pkg_base}/data"
 
-SMARTS_FILE = os.path.join(root, "smarts_pattern.tsv")
+# SMARTS_FILE = os.path.join(root, "smarts_pattern.tsv")
 
 
-def split_acid_base_pattern() -> tuple[DataFrame, DataFrame]:
+def split_acid_base_pattern(smarts_file) -> tuple[DataFrame, DataFrame]:
     """
     Load SMARTS patterns and split them into acid and base DataFrames.
     """
-    df_smarts = pd.read_csv(SMARTS_FILE, sep="\t")
+    df_smarts = pd.read_csv(smarts_file, sep="\t")
     df_smarts_acid = df_smarts[df_smarts.Acid_or_base == "A"]
     df_smarts_base = df_smarts[df_smarts.Acid_or_base == "B"]
     return df_smarts_acid, df_smarts_base
@@ -88,6 +88,7 @@ def match_base(df_smarts_base: DataFrame, mol: Mol) -> list[int]:
 def get_ionization_aid(
     mol: Mol,
     acid_or_base: str,
+    smarts_pattern: Path,
 ) -> list[int]:
     """
     Identify ionization-relevant atom indices in a molecule.
@@ -105,7 +106,7 @@ def get_ionization_aid(
     List[int]
         Matched atom indices.
     """
-    df_smarts_acid, df_smarts_base = split_acid_base_pattern()
+    df_smarts_acid, df_smarts_base = split_acid_base_pattern(smarts_pattern)
 
     if not mol:
         raise RuntimeError("No mol found for get_ionization_aid")
