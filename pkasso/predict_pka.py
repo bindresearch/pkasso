@@ -407,7 +407,7 @@ class UnipkaPredictor(Predictor):
         return acid_map_ids
     
     def _predict_acid_raw(self) -> dict[int, float]:
-        """Run molgpka acid prediction and convert results to atom map indices."""
+        """Run acid prediction and convert results to atom map indices."""
 
         acid_idxs = get_ionization_aid(self.mol_h, "acid", self.smarts_pattern)
         acid_map_ids = get_acid_id_neighbors(acid_idxs)
