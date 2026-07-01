@@ -102,6 +102,86 @@ def compare_pkas(
                 acid_pka_diff[rel_idx] = 10.0  # one disappeared
     return base_pka_diff, acid_pka_diff
 
+
+def compare_free_energies(
+    indices: list[int],
+    q_options: NDArray[np.int64],
+    state_str0: str,
+    state_str1: str,
+    standard_free_energy_lib: dict[str, float],
+    missing_diff: float = 10.0,
+) -> NDArray[np.float64]:
+    """
+    Compute pH-independent free-energy coupling responses.
+
+    For a single-site perturbation ``state_str1`` relative to ``state_str0``,
+    each other site's response is the change in that site's transition free
+    energy under the perturbed background:
+
+        |(G_perturbed+target - G_perturbed) - (G_target - G_reference)|
+
+    The returned values are divided by ``ln(10)`` so they live on the same
+    pKa-unit scale as ``compare_pkas`` and can use the existing coupling
+    thresholds.
+    """
+
+    state_vec0 = _unpack_state_str(state_str0)
+    state_vec1 = _unpack_state_str(state_str1)
+    changed_rel_idxs = np.where(state_vec1 != state_vec0)[0]
+    if len(changed_rel_idxs) != 1:
+        raise ValueError("state_str1 must differ from state_str0 at exactly one site.")
+
+    changed_rel_idx = int(changed_rel_idxs[0])
+    energy_diffs = np.zeros(len(indices), dtype=np.float64)
+
+    if state_str0 not in standard_free_energy_lib or state_str1 not in standard_free_energy_lib:
+        energy_diffs[:] = missing_diff
+        energy_diffs[changed_rel_idx] = 0.0
+        return energy_diffs
+
+    g_reference = standard_free_energy_lib[state_str0]
+    g_perturbed = standard_free_energy_lib[state_str1]
+
+    for rel_idx in range(len(indices)):
+        if rel_idx == changed_rel_idx:
+            continue
+
+        target_diffs = []
+        for q_idx, allowed in enumerate(q_options[rel_idx]):
+            if allowed != 1 or q_idx == state_vec0[rel_idx]:
+                continue
+
+            state_vec_target = state_vec0.copy()
+            state_vec_target[rel_idx] = q_idx
+            state_str_target = _pack_state_vec(state_vec_target)
+
+            state_vec_perturbed_target = state_vec1.copy()
+            state_vec_perturbed_target[rel_idx] = q_idx
+            state_str_perturbed_target = _pack_state_vec(state_vec_perturbed_target)
+
+            if (
+                state_str_target in standard_free_energy_lib
+                and state_str_perturbed_target in standard_free_energy_lib
+            ):
+                reference_transition = standard_free_energy_lib[state_str_target] - g_reference
+                perturbed_transition = standard_free_energy_lib[state_str_perturbed_target] - g_perturbed
+                target_diffs.append(abs(perturbed_transition - reference_transition) / np.log(10))
+            else:
+                target_diffs.append(missing_diff)
+
+        if target_diffs:
+            energy_diffs[rel_idx] = max(target_diffs)
+
+    return energy_diffs
+
+
+def _unpack_state_str(state_str: str) -> NDArray[np.int64]:
+    return np.array([int(s) for s in state_str], dtype=np.int64)
+
+
+def _pack_state_vec(state_vec: NDArray[np.int64]) -> str:
+    return "".join(str(int(q)) for q in state_vec)
+
 def construct_coupling_weight_matrix(
     indices: list[int],
     state_strs: list[str],
@@ -123,6 +203,28 @@ def construct_coupling_weight_matrix(
         changed_rel_idx = np.where(state_vec != 1)[0][0]
         pka_diffs = np.maximum(base_pka_diffs[state_str], acid_pka_diffs[state_str])
         coupling_weights[changed_rel_idx] = np.maximum(coupling_weights[changed_rel_idx], pka_diffs)
+
+    return coupling_weights
+
+
+def construct_free_energy_coupling_weight_matrix(
+    indices: list[int],
+    state_strs: list[str],
+    state_vecs: list[NDArray[np.int64]],
+    free_energy_diffs: dict[str, NDArray[np.float64]],
+) -> NDArray[np.float64]:
+    """
+    Build a site-site coupling matrix from free-energy perturbations.
+
+    Each row corresponds to the site perturbed in a single-site state; columns
+    store the largest response observed for the target site.
+    """
+
+    coupling_weights: NDArray[np.float64] = np.zeros((len(indices), len(indices)), dtype=np.float64)
+
+    for state_str, state_vec in zip(state_strs[1:], state_vecs[1:]):
+        changed_rel_idx = np.where(state_vec != 1)[0][0]
+        coupling_weights[changed_rel_idx] = np.maximum(coupling_weights[changed_rel_idx], free_energy_diffs[state_str])
 
     return coupling_weights
 

@@ -37,6 +37,7 @@ class FreeEnergyPredictionConfig(PredictionConfig):
 
     model_dir: Path = PKASSO_DATA
     dict_dir: Path = PKASSO_DATA
+    target_mean: float = 6.497260103383458
     loss_func: str = "infer_free_energy"
     valid_subset: str = "valid"
     conformer_gen_mode: str = "mmff"

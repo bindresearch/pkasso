@@ -1,6 +1,5 @@
 """Core pKasso workflow implementation."""
 
-import copy
 import itertools
 import logging
 from dataclasses import dataclass, field
@@ -268,6 +267,7 @@ class ProtonationIndexSpace:
     mols_lib: dict[str, Mol] = field(default_factory=dict)
     base_lib: dict[str, dict[int, float]] = field(default_factory=dict)
     acid_lib: dict[str, dict[int, float]] = field(default_factory=dict)
+    standard_free_energy_lib: dict[str, float] = field(default_factory=dict)
 
     @property
     def indices_str(self) -> str:
@@ -1084,6 +1084,7 @@ class pKasso:
         self,
         indices: list[int],
         q_options: NDArray[np.int64],
+        standard_free_energy_lib: dict[str, float] | None = None,
     ) -> NDArray[np.float64]:
         """
         Perform pairwise pKa sensitivity analysis and return raw coupling weights.
@@ -1116,12 +1117,35 @@ class pKasso:
         state_strs = utils.calc_state_strs(state_vecs)
 
         self.construct_mols(space, state_strs, state_vecs)
+
+        if standard_free_energy_lib is not None:
+            space.standard_free_energy_lib.update(standard_free_energy_lib)
+
+        state_str0 = state_strs[0]  # Neutral state
+        if space.standard_free_energy_lib:
+            free_energy_diffs = {}
+            for state_str1 in state_strs[1:]:
+                free_energy_diffs[state_str1] = coupling.compare_free_energies(
+                    indices,
+                    q_options,
+                    state_str0,
+                    state_str1,
+                    space.standard_free_energy_lib,
+                )
+
+            return coupling.construct_free_energy_coupling_weight_matrix(
+                indices,
+                state_strs,
+                state_vecs,
+                free_energy_diffs,
+            )
+
+        # Compare pKas if molgpka (no standard free energies directly)
         self.run_acid_base_calcs(space, state_strs, state_vecs)
 
         for key, val in space.base_lib.items():
             logger.debug(f"{key}: {val}")
 
-        state_str0 = state_strs[0]  # Neutral state
         base_pka_diffs = {}
         acid_pka_diffs = {}
         for state_str1 in state_strs[1:]:
