@@ -182,6 +182,22 @@ def test_compare_free_energies_measures_target_transition_response():
     assert diffs[1] == pytest.approx(0.5 / np.log(10))
 
 
+def test_construct_state_vectors_coupling_includes_single_and_double_perturbations():
+    indices = [1, 2]
+    q_options = np.array(
+        [
+            [1, 1, 1],
+            [1, 1, 0],
+        ],
+        dtype=np.int64,
+    )
+
+    state_vecs = coupling.construct_state_vectors_coupling(indices, q_options)
+    state_strs = ["".join(str(int(q)) for q in state_vec) for state_vec in state_vecs]
+
+    assert state_strs == ["11", "01", "21", "10", "00", "20"]
+
+
 def test_construct_free_energy_coupling_weight_matrix_tracks_perturbed_site():
     indices = [1, 2]
     state_vecs = [

@@ -2,6 +2,7 @@
 
 import itertools
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -16,7 +17,12 @@ from rdkit.Chem.rdchem import Mol
 from . import coupling, special_cases, utils
 from .predict_pka import MolgpkaPredictor, Predictor
 from .postprocess import Molecule, Scan, combine_results
-from .transitions import calc_freqs_from_states, calc_state_diffs
+from .transitions import (
+    calc_freqs_from_states,
+    calc_populations,
+    calc_state_diffs,
+    calc_state_pH_dependent_free_energies,
+)
 from .utils import pack_indices, pack_vec, unpack_vec, state_str_to_q, construct_mol
 from .tautomers import best_tautomer_smiles
 
@@ -253,6 +259,21 @@ def count_state_combinations(q_options: NDArray[np.int64]) -> int:
 
     q_counts = np.count_nonzero(q_options, axis=1)
     return int(np.prod(q_counts))
+
+
+def _coerce_standard_free_energy_values(result: Any, expected_count: int) -> list[float]:
+    """Extract ordered standard free energies from a predictor result."""
+
+    if hasattr(result, "columns") and "standard_free_energy" in result.columns:
+        values = result["standard_free_energy"].tolist()
+    elif isinstance(result, dict) and "standard_free_energy" in result:
+        values = list(result["standard_free_energy"])
+    else:
+        values = list(result)
+
+    if len(values) != expected_count:
+        raise ValueError(f"Expected {expected_count} standard free energies, got {len(values)}.")
+    return [float(value) for value in values]
 
 #############################################################################################
 # Cluster tests and operations
@@ -727,11 +748,38 @@ class pKasso:
     strip_fragments: bool = True
     score_window: int = 0
     num_threads: int = 1
+    standard_free_energy_config: Any | None = None
+    standard_free_energy_predictor: Callable[[list[Mol]], Any] | None = None
 
     def pka_predictor(self, mol: Mol) -> Predictor:
         """Create the configured molecule-specific pKa predictor."""
 
         return self.pka_predictor_cls(mol, device=self.device)
+
+    def uses_standard_free_energies(self) -> bool:
+        """Return whether this run should use direct microstate free energies."""
+
+        return self.standard_free_energy_predictor is not None or self.pka_predictor_cls.__name__ == "UnipkaPredictor"
+
+    def standard_free_energy_target_mean(self) -> float:
+        """Return the training-set pH offset used by the Uni-pKa free-energy head."""
+
+        return float(getattr(self.standard_free_energy_config, "target_mean", 6.497260103383458))
+
+    def predict_standard_free_energy_values(self, mols: list[Mol]) -> list[float]:
+        """Predict ordered standard free energies for a batch of microstate mols."""
+
+        if not mols:
+            return []
+
+        if self.standard_free_energy_predictor is not None:
+            result = self.standard_free_energy_predictor(mols)
+        else:
+            from .external.unipka.pka_predictor import predict_standard_free_energies
+
+            result = predict_standard_free_energies(mols, config=self.standard_free_energy_config)
+
+        return _coerce_standard_free_energy_values(result, len(mols))
 
     def run_single(self, pH: float = 7.0) -> Molecule:
         """
@@ -805,7 +853,8 @@ class pKasso:
         self.acid0 = pka_predictor.pred_acid()  # returns pkas for map indices
         self.base0 = pka_predictor.pred_base()  # returns pkas for map indices
 
-        if len(self.acid0) + len(self.base0) > self.total_max_sites:
+        n_candidate_sites = len(set(self.acid_map_ids + self.base_map_ids))
+        if n_candidate_sites > self.total_max_sites:
             raise ValueError(f'Molecule must contain <={self.total_max_sites} protonation sites.')
 
         self.indices0, self.q_options0 = find_candidate_sites(
@@ -1031,24 +1080,39 @@ class pKasso:
         state_strs = utils.calc_state_strs(state_vecs)
 
         self.construct_mols(space, state_strs, state_vecs)
-        self.run_acid_base_calcs(space, state_strs, state_vecs)
 
-        ps_all = calc_state_diffs(
-            state_strs,
-            state_vecs,
-            space.indices,
-            space.base_lib,
-            space.acid_lib,
-            pH=pH,
-            matrix_def=self.matrix_def,
-        )
+        if self.uses_standard_free_energies():
+            self.run_standard_free_energy_calcs(space, state_strs)
+            standard_free_energies = np.array(
+                [space.standard_free_energy_lib[state_str] for state_str in state_strs],
+                dtype=np.float64,
+            )
+            Gs = calc_state_pH_dependent_free_energies(
+                standard_free_energies,
+                state_vecs,
+                pH,
+                self.standard_free_energy_target_mean(),
+            )
+            state_freqs = calc_populations(Gs - np.min(Gs))
+        else:
+            self.run_acid_base_calcs(space, state_strs, state_vecs)
 
-        state_strs, state_freqs = calc_freqs_from_states(
-            state_strs,
-            state_vecs,
-            ps_all,
-            self.matrix_def,
-        )
+            ps_all = calc_state_diffs(
+                state_strs,
+                state_vecs,
+                space.indices,
+                space.base_lib,
+                space.acid_lib,
+                pH=pH,
+                matrix_def=self.matrix_def,
+            )
+
+            state_strs, state_freqs = calc_freqs_from_states(
+                state_strs,
+                state_vecs,
+                ps_all,
+                self.matrix_def,
+            )
 
         # Cull
 
@@ -1113,16 +1177,20 @@ class pKasso:
 
         space = self.index_spaces.get_or_create(indices, q_options)
 
-        state_vecs = coupling.construct_state_vectors_single(indices, q_options)
-        state_strs = utils.calc_state_strs(state_vecs)
-
-        self.construct_mols(space, state_strs, state_vecs)
-
         if standard_free_energy_lib is not None:
             space.standard_free_energy_lib.update(standard_free_energy_lib)
 
-        state_str0 = state_strs[0]  # Neutral state
-        if space.standard_free_energy_lib:
+        if self.uses_standard_free_energies() or space.standard_free_energy_lib:
+            state_vecs_screen = coupling.construct_state_vectors_coupling(indices, q_options)
+            state_strs_screen = utils.calc_state_strs(state_vecs_screen)
+            self.construct_mols(space, state_strs_screen, state_vecs_screen)
+
+            if self.uses_standard_free_energies():
+                self.run_standard_free_energy_calcs(space, state_strs_screen)
+
+            state_vecs = coupling.construct_state_vectors_single(indices, q_options)
+            state_strs = utils.calc_state_strs(state_vecs)
+            state_str0 = state_strs[0]  # Neutral state
             free_energy_diffs = {}
             for state_str1 in state_strs[1:]:
                 free_energy_diffs[state_str1] = coupling.compare_free_energies(
@@ -1141,6 +1209,9 @@ class pKasso:
             )
 
         # Compare pKas if molgpka (no standard free energies directly)
+        state_vecs = coupling.construct_state_vectors_single(indices, q_options)
+        state_strs = utils.calc_state_strs(state_vecs)
+        self.construct_mols(space, state_strs, state_vecs)
         self.run_acid_base_calcs(space, state_strs, state_vecs)
 
         for key, val in space.base_lib.items():
@@ -1148,6 +1219,7 @@ class pKasso:
 
         base_pka_diffs = {}
         acid_pka_diffs = {}
+        state_str0 = state_strs[0]  # Neutral state
         for state_str1 in state_strs[1:]:
             base_pka_diffs[state_str1], acid_pka_diffs[state_str1] = coupling.compare_pkas(
                 indices, q_options, state_str0, state_str1, space.base_lib, space.acid_lib
@@ -1324,6 +1396,27 @@ class pKasso:
                 mol_cand = construct_mol(self.mol0, space.indices, state_vec)
                 mol_cand.SetProp("_Name", state_str)
                 space.mols_lib[state_str] = mol_cand
+
+    ###################################
+    # Standard free energy calculation
+
+    def run_standard_free_energy_calcs(
+        self,
+        space: ProtonationIndexSpace,
+        state_strs: list[str],
+    ) -> None:
+        """Compute and cache Uni-pKa standard free energies for microstates."""
+
+        missing_state_strs = [
+            state_str for state_str in state_strs if state_str not in space.standard_free_energy_lib
+        ]
+        if not missing_state_strs:
+            return
+
+        mols = [space.mols_lib[state_str] for state_str in missing_state_strs]
+        standard_free_energies = self.predict_standard_free_energy_values(mols)
+        for state_str, standard_free_energy in zip(missing_state_strs, standard_free_energies):
+            space.standard_free_energy_lib[state_str] = standard_free_energy
 
     ###################################
     # Acid-base calculation

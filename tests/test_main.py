@@ -1,4 +1,5 @@
 import importlib.util
+import itertools
 import sys
 import types
 from pathlib import Path
@@ -27,10 +28,48 @@ def load_main_module():
     transitions = types.ModuleType("pkasso.transitions")
     transitions.calc_freqs_from_states = lambda *args, **kwargs: None
     transitions.calc_state_diffs = lambda *args, **kwargs: None
+    transitions.calc_state_pH_dependent_free_energies = (
+        lambda standard_free_energies, state_vecs, pH, target_mean:
+        np.asarray(standard_free_energies, dtype=np.float64)
+        + np.array([np.sum(state_vec - 1) for state_vec in state_vecs]) * np.log(10) * (pH - target_mean)
+    )
+    transitions.calc_populations = lambda Gs: np.exp(-Gs) / np.sum(np.exp(-Gs))
 
     coupling = types.ModuleType("pkasso.coupling")
     coupling.compare_pkas = lambda *args, **kwargs: None
+    coupling.compare_free_energies = lambda indices, *args, **kwargs: np.zeros(len(indices), dtype=np.float64)
+    coupling.construct_free_energy_coupling_weight_matrix = (
+        lambda indices, *args, **kwargs: np.zeros((len(indices), len(indices)), dtype=np.float64)
+    )
+    coupling.construct_coupling_weight_matrix = (
+        lambda indices, *args, **kwargs: np.zeros((len(indices), len(indices)), dtype=np.float64)
+    )
     coupling.find_coupled_sites = lambda *args, **kwargs: []
+    def construct_state_vectors_single(indices, q_options):
+        state_vecs = [np.ones(len(indices), dtype=np.int64)]
+        for rel_idx, qs in enumerate(q_options):
+            for q in (0, 2):
+                if qs[q] == 1:
+                    state_vec = np.ones(len(indices), dtype=np.int64)
+                    state_vec[rel_idx] = q
+                    state_vecs.append(state_vec)
+        return state_vecs
+
+    def construct_state_vectors_coupling(indices, q_options):
+        state_vecs = construct_state_vectors_single(indices, q_options)
+        state_vecs_by_str = {"".join(str(int(q)) for q in state_vec): state_vec for state_vec in state_vecs}
+        for state_vec0, state_vec1 in itertools.combinations(state_vecs[1:], 2):
+            changed0 = np.where(state_vec0 != 1)[0]
+            changed1 = np.where(state_vec1 != 1)[0]
+            if len(changed0) == 1 and len(changed1) == 1 and changed0[0] != changed1[0]:
+                state_vec = np.ones(len(indices), dtype=np.int64)
+                state_vec[changed0[0]] = state_vec0[changed0[0]]
+                state_vec[changed1[0]] = state_vec1[changed1[0]]
+                state_vecs_by_str.setdefault("".join(str(int(q)) for q in state_vec), state_vec)
+        return list(state_vecs_by_str.values())
+
+    coupling.construct_state_vectors_single = construct_state_vectors_single
+    coupling.construct_state_vectors_coupling = construct_state_vectors_coupling
 
     old_modules = {
         name: sys.modules.get(name)
@@ -152,6 +191,71 @@ def test_count_state_combinations():
         ]
     )
     assert main.count_state_combinations(q_options) == 6
+
+
+def test_process_cluster_uses_batched_standard_free_energies_for_unipka_path():
+    mol = Chem.MolFromSmiles("N")
+    for atom in mol.GetAtoms():
+        atom.SetAtomMapNum(atom.GetIdx() + 1)
+
+    calls = []
+
+    def predict_standard_free_energies(mols):
+        calls.append([mol.GetProp("_Name") for mol in mols])
+        return [0.0 for _ in mols]
+
+    pk = main.pKasso(
+        "N",
+        tautomer_search=False,
+        standard_free_energy_predictor=predict_standard_free_energies,
+        standard_free_energy_config=types.SimpleNamespace(target_mean=6.0),
+    )
+    pk.mol0 = mol
+    space = main.ProtonationIndexSpace(
+        indices=[1],
+        q_options=np.array([[1, 1, 1]], dtype=np.int64),
+    )
+
+    dist = pk.process_cluster(space, pH=7.0, sfreq_cutoff_individual=0.0, max_states_individual=10)
+    freqs_by_state = dict(zip(dist.state_strs, dist.state_freqs))
+
+    assert calls == [["0", "1", "2"]]
+    assert freqs_by_state["0"] > freqs_by_state["1"] > freqs_by_state["2"]
+    assert np.sum(dist.state_freqs) == pytest.approx(1.0)
+
+
+def test_coupling_assay_weights_batches_double_states_for_unipka_path():
+    mol = Chem.MolFromSmiles("NCCN")
+    for atom in mol.GetAtoms():
+        atom.SetAtomMapNum(atom.GetIdx() + 1)
+
+    calls = []
+
+    def predict_standard_free_energies(mols):
+        calls.append([mol.GetProp("_Name") for mol in mols])
+        return [0.0 for _ in mols]
+
+    pk = main.pKasso(
+        "NCCN",
+        tautomer_search=False,
+        standard_free_energy_predictor=predict_standard_free_energies,
+    )
+    pk.mol0 = mol
+    pk.initialize_paths_models_libs()
+
+    weights = pk.coupling_assay_weights(
+        [1, 4],
+        np.array(
+            [
+                [0, 1, 1],
+                [0, 1, 1],
+            ],
+            dtype=np.int64,
+        ),
+    )
+
+    assert calls == [["11", "21", "12", "22"]]
+    assert weights.shape == (2, 2)
 
 
 def test_split_cluster_preserves_explicit_max_cut_edges_through_recursion(monkeypatch):

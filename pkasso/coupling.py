@@ -48,6 +48,34 @@ def construct_state_vectors_single(indices: list[int], q_options: NDArray[np.int
     return state_vecs
 
 
+def construct_state_vectors_coupling(indices: list[int], q_options: NDArray[np.int64]) -> list[NDArray[np.int64]]:
+    """
+    Construct all states required for free-energy coupling screening.
+
+    The thermodynamic-cycle comparison for a single perturbed site requires:
+    the reference state, every single-site perturbation, and every valid double
+    perturbation formed from two different single-site perturbations.
+    """
+
+    state_vecs_single = construct_state_vectors_single(indices, q_options)
+    state_vecs_by_str = {_pack_state_vec(state_vec): state_vec for state_vec in state_vecs_single}
+
+    for state_vec0, state_vec1 in itertools.combinations(state_vecs_single[1:], 2):
+        changed0 = np.where(state_vec0 != 1)[0]
+        changed1 = np.where(state_vec1 != 1)[0]
+        if len(changed0) != 1 or len(changed1) != 1:
+            continue
+        if changed0[0] == changed1[0]:
+            continue
+
+        state_vec = np.ones(len(indices), dtype=np.int64)
+        state_vec[changed0[0]] = state_vec0[changed0[0]]
+        state_vec[changed1[0]] = state_vec1[changed1[0]]
+        state_vecs_by_str.setdefault(_pack_state_vec(state_vec), state_vec)
+
+    return list(state_vecs_by_str.values())
+
+
 def compare_pkas(
     indices: list[int],
     q_options: NDArray[np.int64],
