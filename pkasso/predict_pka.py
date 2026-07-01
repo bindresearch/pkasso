@@ -42,16 +42,26 @@ def get_acid_neighbors(mol_h: Mol, acid: dict[int, float]) -> dict[int, float]:
     return acid_heavy
 
 def get_acid_id_neighbors(mol_h: Mol, acid_ids: list[int]) -> list[int]:
-    """Find heavy-atom neighbour ids for acidic proton."""
+    """Find acidic heavy-atom map ids.
+
+    MolGpKa SMARTS patterns identify acidic hydrogens, while Uni-pKa patterns
+    identify the titrating heavy atom. Support both conventions.
+    """
     acid_heavy_ids = []
 
     for at_idx in acid_ids:
-        H_acid = mol_h.GetAtomWithIdx(at_idx)
-        for bond in H_acid.GetBonds():
-            neighbor = bond.GetOtherAtom(H_acid)
+        atom = mol_h.GetAtomWithIdx(at_idx)
+        if atom.GetAtomicNum() != 1:
+            map_idx = atom.GetAtomMapNum()
+            if map_idx > 0:
+                acid_heavy_ids.append(map_idx)
+            continue
+        for bond in atom.GetBonds():
+            neighbor = bond.GetOtherAtom(atom)
             neighbor_map_idx = neighbor.GetAtomMapNum()
-            acid_heavy_ids.append(neighbor_map_idx)
-    return acid_heavy_ids
+            if neighbor_map_idx > 0:
+                acid_heavy_ids.append(neighbor_map_idx)
+    return sorted(set(acid_heavy_ids))
 
 def convert_base_map_idx(mol_h: Mol, base_res: dict[int, float]) -> dict[int, float]:
     base_res_map_ids: dict[int, float] = {}
@@ -62,12 +72,13 @@ def convert_base_map_idx(mol_h: Mol, base_res: dict[int, float]) -> dict[int, fl
     return base_res_map_ids
 
 def convert_base_ids_to_map_ids(mol_h: Mol, base_ids: list[int]) -> list[int]:
-    base_map_ids: list[int] = {}
+    base_map_ids: list[int] = []
     for aid in base_ids:
         atom = mol_h.GetAtomWithIdx(aid)
         map_idx = atom.GetAtomMapNum()
-        base_map_ids.append(map_idx)
-    return base_map_ids
+        if map_idx > 0:
+            base_map_ids.append(map_idx)
+    return sorted(set(base_map_ids))
 
 class Predictor(ABC):
     def __init__(self, mol: Mol, device: str = "cpu"):
@@ -375,67 +386,30 @@ class MolgpkaPredictor(Predictor):
 ###########################################################################
 
 class UnipkaPredictor(Predictor):
-    model_file: ClassVar[Path] = ROOT / "checkpoint_best.pt"
     smarts_pattern: ClassVar[Path] = ROOT / "smarts_pattern_unipka.tsv"
-    _model_cache: ClassVar[dict[tuple[type, str], tuple[GCNNet, GCNNet]]] = {}
 
     def __init__(self, mol: Mol, device: str = "cpu") -> None:
         super().__init__(mol, device=device)
-        self.model = self._load_models(device)
         self.mol_h = Chem.rdmolops.AddHs(Chem.Mol(mol))
-        self.atom_indices = [atom.GetIdx() for atom in mol.GetAtoms()]
-        self.qs = np.array([at.GetFormalCharge() for at in mol.GetAtoms()])
-
-    @classmethod
-    def _load_models(cls, device: str) -> tuple[GCNNet, GCNNet]:
-        cache_key = (cls, device)
-        if cache_key not in cls._model_cache:
-            model = load_model(cls.model_file, device=device)
-            cls._model_cache[cache_key] = model
-        return cls._model_cache[cache_key]
 
     def exclude_sites(self) -> tuple[list[int], list[int]]:
         return [], []
 
     def pred_acid(self) -> dict[int, float]:
-        acid = self._predict_acid_raw()
-        return self._curate_acid(acid)
+        return {}
 
     def pred_acid_ids(self) -> list[int]:
         acid_ids = get_ionization_aid(self.mol_h, "acid", self.smarts_pattern)
-        acid_map_ids = get_acid_id_neighbors(acid_ids)
+        acid_map_ids = get_acid_id_neighbors(self.mol_h, acid_ids)
         return acid_map_ids
-    
-    def _predict_acid_raw(self) -> dict[int, float]:
-        """Run acid prediction and convert results to atom map indices."""
-
-        acid_idxs = get_ionization_aid(self.mol_h, "acid", self.smarts_pattern)
-        acid_map_ids = get_acid_id_neighbors(acid_idxs)
-
-        # Note:
-        # Wire in the creation of smiles corresponding to the acid_map_ids upstream!
-        # Ideally the smiles strings are created at the start in parallel to construct_mols (e.g. construct_smiles)
-        # Possibly break the ABC concept here as they need such different input?
-        # The predictor only needs to be passed the original smiles string (corresponding to self.mol_h)
-        # as well as the smiles strings corresponding to the changes in acid map ids
-
-        acid = unipka_predict_acid(self.mol_h, self.model, device=self.device)
-        return get_acid_neighbors(self.mol_h, acid)
 
     def pred_base(self) -> dict[int, float]:
-        base = self._predict_base_raw()
-        return base
+        return {}
 
     def pred_base_ids(self) -> list[int]:
         base_ids = get_ionization_aid(self.mol_h, "base", self.smarts_pattern)
         base_map_ids = convert_base_ids_to_map_ids(self.mol_h, base_ids)
         return base_map_ids
-
-    def _predict_base_raw(self) -> dict[int, float]:
-        """Run base prediction and convert results to atom map indices."""
-
-        base_aid = unipka_predict_base(self.mol_h, self.model_base, device=self.device)
-        return convert_base_map_idx(self.mol_h, base_aid)
 
 ############################################################################
 

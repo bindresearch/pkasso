@@ -1,7 +1,7 @@
 from __future__ import division, unicode_literals
 
-import os
 # from importlib import resources
+from pathlib import Path
 
 import pandas as pd
 from pandas import DataFrame
@@ -45,6 +45,7 @@ def match_acid(df_smarts_acid: DataFrame, mol: Mol) -> list[int]:
         match = mol.GetSubstructMatches(pattern)
         if len(match) == 0:
             continue
+        index = str(index)
         if len(index) > 2:
             index = index.split(",")
             index = [int(i) for i in index]
@@ -72,7 +73,7 @@ def match_base(df_smarts_base: DataFrame, mol: Mol) -> list[int]:
         match = mol.GetSubstructMatches(pattern)
         if len(match) == 0:
             continue
-        index_split = indexs.split(",")
+        index_split = str(indexs).split(",")
         for index in index_split:
             index = int(index)
             for m in match:

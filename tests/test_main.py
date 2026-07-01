@@ -92,12 +92,8 @@ main = load_main_module()
 
 
 def test_find_candidate_sites():
-    base = {
-        0: 2.0,
-        1: 7.0,
-        2: 12.0,
-    }
-    acid = {0: 4.0, 3: 12.0}
+    base = [0, 1, 2]
+    acid = [0, 3]
     exclude_base_indices = []
     exclude_acid_indices = []
     charged_indices = []
@@ -115,15 +111,8 @@ def test_find_candidate_sites():
 
 
 def test_find_candidate_sites_respects_excluded_and_charged_indices():
-    base = {
-        0: 2.0,
-        1: 7.0,
-        2: 12.0,
-    }
-    acid = {
-        0: 4.0,
-        3: 12.0,
-    }
+    base = [0, 1, 2]
+    acid = [0, 3]
     indices, q_options = main.find_candidate_sites(
         base,
         acid,
