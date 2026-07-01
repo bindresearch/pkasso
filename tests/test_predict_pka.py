@@ -38,4 +38,3 @@ def test_unipka_predictor_ammonium_site_ids():
 def test_resolve_predictor_cls_accepts_public_model_keys():
     assert resolve_predictor_cls("molgpka") is MolgpkaPredictor
     assert resolve_predictor_cls("unipka") is UnipkaPredictor
-    assert resolve_predictor_cls(UnipkaPredictor) is UnipkaPredictor

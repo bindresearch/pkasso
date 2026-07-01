@@ -26,7 +26,6 @@ def load_main_module():
     predict_pka.Predictor = Predictor
     predict_pka.MolgpkaPredictor = MolgpkaPredictor
     predict_pka.ThermodynamicPredictionMode = str
-    predict_pka.resolve_predictor_cls = lambda predictor: predictor
 
     postprocess = types.ModuleType("pkasso.postprocess")
     postprocess.Molecule = type("Molecule", (), {})

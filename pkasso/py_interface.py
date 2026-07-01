@@ -9,30 +9,27 @@ from rdkit.Chem import MolToSmiles
 from rdkit.Chem.rdchem import Mol
 
 from .main import pKasso
-from .predict_pka import Predictor, PredictorKey, resolve_predictor_cls
+from .predict_pka import PredictorKey, resolve_predictor_cls
 from .postprocess import Scan
 
 
 def _resolve_model_kwargs(
     kwargs: dict[str, Any],
-    model: PredictorKey | str | type[Predictor] | None,
+    model: PredictorKey | str,
 ) -> dict[str, Any]:
     """Resolve public model keys before constructing pKasso."""
 
     pkasso_kwargs = dict(kwargs)
-    if model is not None and "pka_predictor_cls" in pkasso_kwargs:
-        raise ValueError("Pass either model or pka_predictor_cls, not both.")
-    if model is not None:
-        pkasso_kwargs["pka_predictor_cls"] = resolve_predictor_cls(model)
-    elif "pka_predictor_cls" in pkasso_kwargs:
-        pkasso_kwargs["pka_predictor_cls"] = resolve_predictor_cls(pkasso_kwargs["pka_predictor_cls"])
+    if "pka_predictor_cls" in pkasso_kwargs:
+        raise ValueError("Python entry points accept model keys. Pass pka_predictor_cls directly to pKasso.")
+    pkasso_kwargs["pka_predictor_cls"] = resolve_predictor_cls(model)
     return pkasso_kwargs
 
 
 def protonate(
     inp: str | Mol,
     pH: float = 7.0,
-    model: PredictorKey | str | type[Predictor] | None = None,
+    model: PredictorKey | str = "molgpka",
     **kwargs: Any,
 ) -> tuple[tuple[str, ...], tuple[Mol, ...]]:
     """
@@ -64,7 +61,7 @@ def protonate(
 def batch_protonate(
         input_list: list[str | Mol],
         pH: float = 7.0,
-        model: PredictorKey | str | type[Predictor] | None = None,
+        model: PredictorKey | str = "molgpka",
         **kwargs: Any
 ) -> tuple[list[tuple[str, ...]], list[tuple[Mol, ...]]]:
     """
@@ -100,7 +97,7 @@ def batch_protonate(
 def scan_pH(
     inp: str | Mol,
     pHs: NDArray[np.float64] | list[float] = np.arange(0, 14.1, 0.25, dtype=np.float64),
-    model: PredictorKey | str | type[Predictor] | None = None,
+    model: PredictorKey | str = "molgpka",
     **kwargs: Any,
 ) -> Scan:
     """

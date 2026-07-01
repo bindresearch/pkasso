@@ -15,7 +15,7 @@ from rdkit.Chem.MolStandardize import rdMolStandardize
 from rdkit.Chem.rdchem import Mol
 
 from . import coupling, special_cases, utils
-from .predict_pka import MolgpkaPredictor, Predictor, ThermodynamicPredictionMode, resolve_predictor_cls
+from .predict_pka import MolgpkaPredictor, Predictor, ThermodynamicPredictionMode
 from .postprocess import Molecule, Scan, combine_results
 from .transitions import (
     calc_freqs_from_states,
@@ -739,7 +739,7 @@ class pKasso:
     cutoff_export: float = 1.0
     matrix_def: str = "dG"
     device: str = "cpu"  # fixed!
-    pka_predictor_cls: type[Predictor] | str = MolgpkaPredictor
+    pka_predictor_cls: type[Predictor] = MolgpkaPredictor
     tautomer_search: bool = True
     max_tautomers: int = 20
     num_confs: int = 10
@@ -750,9 +750,6 @@ class pKasso:
     num_threads: int = 1
     standard_free_energy_config: Any | None = None
     standard_free_energy_predictor: Callable[[list[Mol]], Any] | None = None
-
-    def __post_init__(self) -> None:
-        self.pka_predictor_cls = resolve_predictor_cls(self.pka_predictor_cls)
 
     def pka_predictor(self, mol: Mol) -> Predictor:
         """Create the configured molecule-specific pKa predictor."""

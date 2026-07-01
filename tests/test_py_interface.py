@@ -30,6 +30,6 @@ def test_protonate_resolves_model_key_to_predictor_class(monkeypatch):
     assert captured["pka_predictor_cls"] is UnipkaPredictor
 
 
-def test_model_key_conflicts_with_predictor_class():
-    with pytest.raises(ValueError, match="Pass either model or pka_predictor_cls"):
+def test_entry_points_reject_predictor_class_kwargs():
+    with pytest.raises(ValueError, match="entry points accept model keys"):
         py_interface.protonate("C", model="unipka", pka_predictor_cls=UnipkaPredictor)

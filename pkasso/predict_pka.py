@@ -437,16 +437,14 @@ PREDICTOR_CLASSES: dict[PredictorKey, type[Predictor]] = {
 }
 
 
-def resolve_predictor_cls(predictor: PredictorKey | str | type[Predictor]) -> type[Predictor]:
-    """Resolve a public predictor key or predictor class to a predictor class."""
+def resolve_predictor_cls(model: PredictorKey | str) -> type[Predictor]:
+    """Resolve a public model key to a predictor class."""
 
-    if isinstance(predictor, str):
-        try:
-            return PREDICTOR_CLASSES[predictor]
-        except KeyError as exc:
-            valid_keys = ", ".join(sorted(PREDICTOR_CLASSES))
-            raise ValueError(f"Unknown pKa predictor {predictor!r}. Valid predictors: {valid_keys}.") from exc
-    return predictor
+    try:
+        return PREDICTOR_CLASSES[model]
+    except KeyError as exc:
+        valid_keys = ", ".join(sorted(PREDICTOR_CLASSES))
+        raise ValueError(f"Unknown pKa predictor {model!r}. Valid predictors: {valid_keys}.") from exc
 
 
 def predict_acid(
