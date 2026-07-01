@@ -1,6 +1,6 @@
 from rdkit import Chem
 
-from pkasso.predict_pka import UnipkaPredictor
+from pkasso.predict_pka import MolgpkaPredictor, UnipkaPredictor, resolve_predictor_cls
 
 
 def mapped_mol(smiles: str):
@@ -33,3 +33,9 @@ def test_unipka_predictor_ammonium_site_ids():
 
     assert predictor.pred_acid_ids() == [1]
     assert predictor.pred_base_ids() == []
+
+
+def test_resolve_predictor_cls_accepts_public_model_keys():
+    assert resolve_predictor_cls("molgpka") is MolgpkaPredictor
+    assert resolve_predictor_cls("unipka") is UnipkaPredictor
+    assert resolve_predictor_cls(UnipkaPredictor) is UnipkaPredictor

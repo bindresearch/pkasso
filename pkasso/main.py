@@ -15,7 +15,7 @@ from rdkit.Chem.MolStandardize import rdMolStandardize
 from rdkit.Chem.rdchem import Mol
 
 from . import coupling, special_cases, utils
-from .predict_pka import MolgpkaPredictor, Predictor
+from .predict_pka import MolgpkaPredictor, Predictor, ThermodynamicPredictionMode, resolve_predictor_cls
 from .postprocess import Molecule, Scan, combine_results
 from .transitions import (
     calc_freqs_from_states,
@@ -739,7 +739,7 @@ class pKasso:
     cutoff_export: float = 1.0
     matrix_def: str = "dG"
     device: str = "cpu"  # fixed!
-    pka_predictor_cls: type[Predictor] = MolgpkaPredictor
+    pka_predictor_cls: type[Predictor] | str = MolgpkaPredictor
     tautomer_search: bool = True
     max_tautomers: int = 20
     num_confs: int = 10
@@ -751,6 +751,9 @@ class pKasso:
     standard_free_energy_config: Any | None = None
     standard_free_energy_predictor: Callable[[list[Mol]], Any] | None = None
 
+    def __post_init__(self) -> None:
+        self.pka_predictor_cls = resolve_predictor_cls(self.pka_predictor_cls)
+
     def pka_predictor(self, mol: Mol) -> Predictor:
         """Create the configured molecule-specific pKa predictor."""
 
@@ -759,7 +762,21 @@ class pKasso:
     def uses_standard_free_energies(self) -> bool:
         """Return whether this run should use direct microstate free energies."""
 
-        return self.standard_free_energy_predictor is not None or self.pka_predictor_cls.__name__ == "UnipkaPredictor"
+        return self.thermodynamic_prediction_mode() == "standard_free_energy"
+
+    def thermodynamic_prediction_mode(self) -> ThermodynamicPredictionMode:
+        """Return the thermodynamic model route selected for this run."""
+
+        if self.standard_free_energy_predictor is not None:
+            return "standard_free_energy"
+
+        mode = getattr(self.pka_predictor_cls, "thermodynamic_prediction", None)
+        if mode not in ("pka", "standard_free_energy"):
+            raise ValueError(
+                "pka_predictor_cls must define thermodynamic_prediction as "
+                "'pka' or 'standard_free_energy'."
+            )
+        return mode
 
     def standard_free_energy_target_mean(self) -> float:
         """Return the training-set pH offset used by the Uni-pKa free-energy head."""
@@ -775,9 +792,10 @@ class pKasso:
         if self.standard_free_energy_predictor is not None:
             result = self.standard_free_energy_predictor(mols)
         else:
-            from .external.unipka.pka_predictor import predict_standard_free_energies
-
-            result = predict_standard_free_energies(mols, config=self.standard_free_energy_config)
+            result = self.pka_predictor_cls.predict_standard_free_energies(
+                mols,
+                config=self.standard_free_energy_config,
+            )
 
         return _coerce_standard_free_energy_values(result, len(mols))
 

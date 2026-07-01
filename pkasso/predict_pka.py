@@ -4,7 +4,7 @@
 from abc import ABC, abstractmethod
 from importlib import resources
 from pathlib import Path
-from typing import ClassVar
+from typing import Any, ClassVar, Literal
 
 import numpy as np
 from rdkit import Chem
@@ -27,6 +27,8 @@ from .external.molgpka.ionization_group import get_ionization_aid
 pkg_base = resources.files("pkasso")
 
 ROOT = Path(f"{pkg_base}/data")
+ThermodynamicPredictionMode = Literal["pka", "standard_free_energy"]
+PredictorKey = Literal["molgpka", "unipka"]
 
 
 def get_acid_neighbors(mol_h: Mol, acid: dict[int, float]) -> dict[int, float]:
@@ -81,6 +83,8 @@ def convert_base_ids_to_map_ids(mol_h: Mol, base_ids: list[int]) -> list[int]:
     return sorted(set(base_map_ids))
 
 class Predictor(ABC):
+    thermodynamic_prediction: ClassVar[ThermodynamicPredictionMode]
+
     def __init__(self, mol: Mol, device: str = "cpu"):
         self.mol = mol
         self.device = device
@@ -110,7 +114,14 @@ class Predictor(ABC):
         """Return base and acid atom map indices to exclude for this backend."""
         ...
 
+    @classmethod
+    def predict_standard_free_energies(cls, mols: list[Mol], *, config: Any | None = None) -> Any:
+        """Predict standard free energies for a batch of microstate molecules."""
+
+        raise NotImplementedError(f"{cls.__name__} does not provide standard free-energy predictions.")
+
 class MolgpkaPredictor(Predictor):
+    thermodynamic_prediction: ClassVar[ThermodynamicPredictionMode] = "pka"
     model_file_base: ClassVar[Path] = ROOT / "weight_base.pth"
     model_file_acid: ClassVar[Path] = ROOT / "weight_acid.pth"
     smarts_pattern: ClassVar[Path] = ROOT / "smarts_pattern_molgpka.tsv"
@@ -386,6 +397,7 @@ class MolgpkaPredictor(Predictor):
 ###########################################################################
 
 class UnipkaPredictor(Predictor):
+    thermodynamic_prediction: ClassVar[ThermodynamicPredictionMode] = "standard_free_energy"
     smarts_pattern: ClassVar[Path] = ROOT / "smarts_pattern_unipka.tsv"
 
     def __init__(self, mol: Mol, device: str = "cpu") -> None:
@@ -411,7 +423,31 @@ class UnipkaPredictor(Predictor):
         base_map_ids = convert_base_ids_to_map_ids(self.mol_h, base_ids)
         return base_map_ids
 
+    @classmethod
+    def predict_standard_free_energies(cls, mols: list[Mol], *, config: Any | None = None) -> Any:
+        from .external.unipka.pka_predictor import predict_standard_free_energies
+
+        return predict_standard_free_energies(mols, config=config)
+
 ############################################################################
+
+PREDICTOR_CLASSES: dict[PredictorKey, type[Predictor]] = {
+    "molgpka": MolgpkaPredictor,
+    "unipka": UnipkaPredictor,
+}
+
+
+def resolve_predictor_cls(predictor: PredictorKey | str | type[Predictor]) -> type[Predictor]:
+    """Resolve a public predictor key or predictor class to a predictor class."""
+
+    if isinstance(predictor, str):
+        try:
+            return PREDICTOR_CLASSES[predictor]
+        except KeyError as exc:
+            valid_keys = ", ".join(sorted(PREDICTOR_CLASSES))
+            raise ValueError(f"Unknown pKa predictor {predictor!r}. Valid predictors: {valid_keys}.") from exc
+    return predictor
+
 
 def predict_acid(
     mol: Mol,

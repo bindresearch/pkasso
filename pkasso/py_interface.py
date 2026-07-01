@@ -9,10 +9,32 @@ from rdkit.Chem import MolToSmiles
 from rdkit.Chem.rdchem import Mol
 
 from .main import pKasso
+from .predict_pka import Predictor, PredictorKey, resolve_predictor_cls
 from .postprocess import Scan
 
 
-def protonate(inp: str | Mol, pH: float = 7.0, **kwargs: Any) -> tuple[tuple[str, ...], tuple[Mol, ...]]:
+def _resolve_model_kwargs(
+    kwargs: dict[str, Any],
+    model: PredictorKey | str | type[Predictor] | None,
+) -> dict[str, Any]:
+    """Resolve public model keys before constructing pKasso."""
+
+    pkasso_kwargs = dict(kwargs)
+    if model is not None and "pka_predictor_cls" in pkasso_kwargs:
+        raise ValueError("Pass either model or pka_predictor_cls, not both.")
+    if model is not None:
+        pkasso_kwargs["pka_predictor_cls"] = resolve_predictor_cls(model)
+    elif "pka_predictor_cls" in pkasso_kwargs:
+        pkasso_kwargs["pka_predictor_cls"] = resolve_predictor_cls(pkasso_kwargs["pka_predictor_cls"])
+    return pkasso_kwargs
+
+
+def protonate(
+    inp: str | Mol,
+    pH: float = 7.0,
+    model: PredictorKey | str | type[Predictor] | None = None,
+    **kwargs: Any,
+) -> tuple[tuple[str, ...], tuple[Mol, ...]]:
     """
     Helper function to run pkasso via:
 
@@ -33,7 +55,7 @@ def protonate(inp: str | Mol, pH: float = 7.0, **kwargs: Any) -> tuple[tuple[str
     else:
         smiles = inp
 
-    ap = pKasso(smiles, **kwargs)
+    ap = pKasso(smiles, **_resolve_model_kwargs(kwargs, model))
     molecule = ap.run_single(pH=pH)
 
     return molecule.smiles, molecule.mols
@@ -42,6 +64,7 @@ def protonate(inp: str | Mol, pH: float = 7.0, **kwargs: Any) -> tuple[tuple[str
 def batch_protonate(
         input_list: list[str | Mol],
         pH: float = 7.0,
+        model: PredictorKey | str | type[Predictor] | None = None,
         **kwargs: Any
 ) -> tuple[list[tuple[str, ...]], list[tuple[Mol, ...]]]:
     """
@@ -65,7 +88,7 @@ def batch_protonate(
     batch_mols: list[tuple[Mol, ...]] = []
 
     for inp in tqdm(input_list):
-        ap = pKasso(inp, **kwargs)
+        ap = pKasso(inp, **_resolve_model_kwargs(kwargs, model))
         molecule = ap.run_single(pH=pH)
 
         batch_smiles.append(molecule.smiles)
@@ -75,7 +98,10 @@ def batch_protonate(
 
 
 def scan_pH(
-    inp: str | Mol, pHs: NDArray[np.float64] | list[float] = np.arange(0, 14.1, 0.25, dtype=np.float64), **kwargs: Any
+    inp: str | Mol,
+    pHs: NDArray[np.float64] | list[float] = np.arange(0, 14.1, 0.25, dtype=np.float64),
+    model: PredictorKey | str | type[Predictor] | None = None,
+    **kwargs: Any,
 ) -> Scan:
     """
     Run pkasso pH scan
@@ -99,5 +125,5 @@ def scan_pH(
 
     pHs_arr: NDArray[np.float64] = np.array(pHs)
 
-    ap = pKasso(inp, **kwargs)
+    ap = pKasso(inp, **_resolve_model_kwargs(kwargs, model))
     return ap.run_scan(pHs=pHs_arr)

@@ -17,8 +17,16 @@ def load_main_module():
     package.__path__ = [str(root / "pkasso")]
 
     predict_pka = types.ModuleType("pkasso.predict_pka")
-    predict_pka.Predictor = object
-    predict_pka.MolgpkaPredictor = object
+    class Predictor:
+        thermodynamic_prediction = "pka"
+
+    class MolgpkaPredictor(Predictor):
+        pass
+
+    predict_pka.Predictor = Predictor
+    predict_pka.MolgpkaPredictor = MolgpkaPredictor
+    predict_pka.ThermodynamicPredictionMode = str
+    predict_pka.resolve_predictor_cls = lambda predictor: predictor
 
     postprocess = types.ModuleType("pkasso.postprocess")
     postprocess.Molecule = type("Molecule", (), {})
@@ -222,6 +230,38 @@ def test_process_cluster_uses_batched_standard_free_energies_for_unipka_path():
     assert calls == [["0", "1", "2"]]
     assert freqs_by_state["0"] > freqs_by_state["1"] > freqs_by_state["2"]
     assert np.sum(dist.state_freqs) == pytest.approx(1.0)
+
+
+def test_process_cluster_can_use_standard_free_energy_predictor_class():
+    mol = Chem.MolFromSmiles("N")
+    for atom in mol.GetAtoms():
+        atom.SetAtomMapNum(atom.GetIdx() + 1)
+
+    calls = []
+
+    class StandardFreeEnergyPredictor(main.Predictor):
+        thermodynamic_prediction = "standard_free_energy"
+
+        @classmethod
+        def predict_standard_free_energies(cls, mols, *, config=None):
+            calls.append(([mol.GetProp("_Name") for mol in mols], config.target_mean))
+            return [0.0 for _ in mols]
+
+    pk = main.pKasso(
+        "N",
+        tautomer_search=False,
+        pka_predictor_cls=StandardFreeEnergyPredictor,
+        standard_free_energy_config=types.SimpleNamespace(target_mean=6.0),
+    )
+    pk.mol0 = mol
+    space = main.ProtonationIndexSpace(
+        indices=[1],
+        q_options=np.array([[1, 1, 1]], dtype=np.int64),
+    )
+
+    pk.process_cluster(space, pH=7.0, sfreq_cutoff_individual=0.0, max_states_individual=10)
+
+    assert calls == [(["0", "1", "2"], 6.0)]
 
 
 def test_coupling_assay_weights_batches_double_states_for_unipka_path():
