@@ -159,11 +159,28 @@ class InferFreeEnergyLoss(UnicoreLoss):
         2) the sample size, which is used as the denominator for the gradient
         3) logging outputs to display while training
         """
-        net_output = model(
-            **sample["net_input"],
-            classification_head_name=self.args.classification_head_name,
-            features_only=True,
-        )
+        net_input = sample["net_input"]
+        try:
+            net_output = model(
+                **net_input,
+                classification_head_name=self.args.classification_head_name,
+                features_only=True,
+            )
+        except TypeError:
+            src_tokens = net_input["src_tokens"]
+            input_metadata = (
+                src_tokens,
+                net_input["src_charges"],
+                net_input["src_coord"],
+                net_input["src_distance"],
+                net_input["src_edge_type"],
+                [1] * src_tokens.size(0),
+            )
+            net_output = model(
+                input_metadata,
+                classification_head_name=self.args.classification_head_name,
+                features_only=True,
+            )
         reg_output = net_output[0]
         loss = torch.tensor([0.01], device=sample["target"]["finetune_target"].device)
         sample_size = sample["target"]["finetune_target"].size(0)
