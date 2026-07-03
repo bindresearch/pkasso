@@ -119,7 +119,7 @@ def best_tautomer_smiles(
         return str(Chem.MolToSmiles(tautomers[0]))
 
     if len(tautomers) > max_tautomers:
-        logger.warning(f"Exceeding max tautomers, using input SMILES {smiles}.")
+        logger.info(f"{len(tautomers)} exceeds max tautomers {max_tautomers}, using input SMILES {smiles}.")
         return smiles
 
     # ---------------------------------------------------------

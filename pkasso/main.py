@@ -864,11 +864,14 @@ class pKasso:
         self.base0 = pka_predictor.pred_base()  # returns pkas for map indices
 
         if len(self.acid0) + len(self.base0) > self.total_max_sites:
-            raise ValueError(f'Molecule must contain <={self.total_max_sites} protonation sites.')
-
-        self.indices0, self.q_options0 = find_candidate_sites(
-            self.base0, self.acid0, self.exclude_base_indices, self.exclude_acid_indices, self.charged_indices
-        )
+            logger.warning(f'Molecule has >{self.total_max_sites} protonation sites. Returning processed input molecule.')
+            # raise ValueError(f'Molecule must contain <={self.total_max_sites} protonation sites.')
+            self.indices0 = []
+            self.q_options0 = np.array([])
+        else:
+            self.indices0, self.q_options0 = find_candidate_sites(
+                self.base0, self.acid0, self.exclude_base_indices, self.exclude_acid_indices, self.charged_indices
+            )
 
         self.indices0_str = pack_indices(self.indices0)
         self.index_space0 = self.index_spaces.get_or_create(self.indices0, self.q_options0)
