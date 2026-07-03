@@ -9,9 +9,13 @@ from pathlib import Path
 from typing import Any
 
 import click
+from joblib import Parallel, delayed
 
 COMMANDS = {"single", "batch", "scan"}
 
+def _compute_protonate(idx, smiles, name='molecule', **kwargs):
+    smiles_out, mols_out = protonate(smiles, **kwargs)
+    return idx, name, smiles_out, mols_out
 
 def protonate(*args: Any, **kwargs: Any) -> Any:
     from .py_interface import protonate as _protonate
@@ -225,6 +229,14 @@ def single(
     show_default=True,
     help="Min. probability of microstate w.r.t. highest probable microstate to be included for export",
 )
+@click.option(
+    "--nproc",
+    required=False,
+    type=int,
+    default=1,
+    show_default=True,
+    help="Number of parallel CPU processes",
+)
 @common_options
 def batch(
     smi: Path,
@@ -232,6 +244,7 @@ def batch(
     path_out: Path,
     overwrite: bool,
     cutoff_export: float,
+    nproc: int,
     matrix_def: str,
     cutoff_states: int,
     tautomer_search: bool,
@@ -245,8 +258,9 @@ def batch(
 
     batch_input = read_smi(smi)
 
-    for name, smiles in batch_input.items():
-        smiles_out, mols_out = protonate(
+    results_parallel = Parallel(n_jobs=nproc, prefer="processes")(
+        delayed(_compute_protonate)(
+            idx,
             smiles,
             name=name,
             pH=ph,
@@ -257,7 +271,13 @@ def batch(
             max_tautomers=max_tautomers,
             num_confs=num_confs,
         )
-        print(name, smiles_out)
+        for idx, (name, smiles) in enumerate(batch_input.items()))
+
+    for idx, name, smiles_out, mols_out in results_parallel:
+        if len(smiles_out) == 1:
+            print(idx, name, smiles_out[0])
+        else:
+            print(idx, name, smiles_out)
 
         # Save sdf files
         if path_out:
