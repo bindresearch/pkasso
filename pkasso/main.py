@@ -102,6 +102,19 @@ def preprocess(
     logger.debug("Canonical")
     logger.debug(smiles)
 
+    logger.debug("Formal charges before cleanup")
+    charges = [at.GetFormalCharge() for at in mol.GetAtoms()]
+    logger.debug(charges)
+
+    mol = rdMolStandardize.Normalize(mol)
+    uncharger = rdMolStandardize.Uncharger(force=True)
+
+    # load/save cycles to clean up the mol atom ordering
+    mol = uncharger.uncharge(mol)
+    smiles = Chem.MolToSmiles(mol, canonical=True)
+    mol = Chem.MolFromSmiles(smiles, sanitize=True)
+    smiles = Chem.MolToSmiles(mol, canonical=True)
+
     if tautomer_search:
         smiles = best_tautomer_smiles(
             smiles,
@@ -111,19 +124,6 @@ def preprocess(
             num_threads=num_threads,
         )
     mol = Chem.MolFromSmiles(smiles, sanitize=True)
-
-    logger.debug("Formal charges before cleanup")
-    charges = [at.GetFormalCharge() for at in mol.GetAtoms()]
-    logger.debug(charges)
-
-    mol = rdMolStandardize.Cleanup(mol)
-    uncharger = rdMolStandardize.Uncharger(force=True)
-
-    # load/save cycles to clean up the mol atom ordering
-    mol = uncharger.uncharge(mol)
-    smiles = Chem.MolToSmiles(mol, canonical=True)
-    mol = Chem.MolFromSmiles(smiles, sanitize=True)
-    smiles = Chem.MolToSmiles(mol, canonical=True)
 
     mol = Chem.MolFromSmiles(smiles, sanitize=True)
     smiles = Chem.MolToSmiles(mol, canonical=True)
