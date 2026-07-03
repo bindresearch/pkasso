@@ -58,6 +58,7 @@ def preprocess(
     strip_fragments: bool = True,
     score_window: int = 0,
     num_threads: int = 1,
+    min_fragment_heavy_atoms: int = 6
 ) -> tuple[Mol, str]:
     """
     Construct and standardize an RDKit molecule from a SMILES string.
@@ -87,12 +88,13 @@ def preprocess(
         raise ValueError(f"Invalid SMILES: {smiles_raw}")
     
     if strip_fragments:
-        sizeable = sizeable_organic_fragments(mol)
+        sizeable = sizeable_organic_fragments(mol,min_heavy_atoms=min_fragment_heavy_atoms)
         if len(sizeable) > 1:
-            raise ValueError(
-                "Input SMILES contains multiple sizeable organic fragments:",
-                sizeable
-            )
+            logger.warning(f"Input SMILES contains multiple sizeable organic fragments: {sizeable}")
+            # raise ValueError(
+                # "Input SMILES contains multiple sizeable organic fragments:",
+                # sizeable
+            # )
         # Remove ions and covalent fragments
         chooser = rdMolStandardize.LargestFragmentChooser()
         mol = chooser.choose(mol)
@@ -784,6 +786,7 @@ class pKasso:
     strip_fragments: bool = True
     score_window: int = 0
     num_threads: int = 1
+    fragment_warning_heavy_atoms: int = 6
 
     def pka_predictor(self, mol: Mol) -> Predictor:
         """Create the configured molecule-specific pKa predictor."""
@@ -845,6 +848,7 @@ class pKasso:
             strip_fragments=self.strip_fragments,
             score_window=self.score_window,
             num_threads=self.num_threads,
+            min_fragment_heavy_atoms=self.fragment_warning_heavy_atoms
         )
 
         self.charged_indices = special_cases.find_charged(self.mol0)
