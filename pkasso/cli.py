@@ -10,10 +10,16 @@ from typing import Any
 
 import click
 from joblib import Parallel, delayed
+from rdkit.Chem.rdchem import Mol
 
 COMMANDS = {"single", "batch", "scan"}
 
-def _compute_protonate(idx, smiles, name='molecule', **kwargs):
+def _compute_protonate(
+        idx: int,
+        smiles: str,
+        name: str = 'molecule',
+        **kwargs: Any,
+    ) -> tuple[int, str, list[str], list[Mol]]:
     smiles_out, mols_out = protonate(smiles, **kwargs)
     return idx, name, smiles_out, mols_out
 
