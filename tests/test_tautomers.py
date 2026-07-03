@@ -110,10 +110,11 @@ def test_hydroxamate_filter_keeps_hydroxamate_motif():
     )
 
 
-def test_max_tautomers_falls_back_to_input_smiles(capsys):
+def test_max_tautomers_falls_back_to_input_smiles(caplog):
     tautomers = load_tautomers_module()
 
     smiles = "O=C(NC(=O)c1ccccc1)c1ccccc1"
+    caplog.set_level("INFO", logger=tautomers.__name__)
 
     assert (
         tautomers.best_tautomer_smiles(
@@ -124,7 +125,7 @@ def test_max_tautomers_falls_back_to_input_smiles(capsys):
         == smiles
     )
 
-    assert "Exceeding max tautomers" in capsys.readouterr().out
+    assert f"exceeds max tautomers 1, using input SMILES {smiles}" in caplog.text
 
 
 def test_returns_input_smiles_when_conformer_generation_fails(monkeypatch):
