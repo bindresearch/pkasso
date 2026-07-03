@@ -108,9 +108,9 @@ def preprocess(
 
     mol = rdMolStandardize.Normalize(mol)
     uncharger = rdMolStandardize.Uncharger(force=True)
-
-    # load/save cycles to clean up the mol atom ordering
     mol = uncharger.uncharge(mol)
+    
+    # load/save cycles to clean up the mol atom ordering
     smiles = Chem.MolToSmiles(mol, canonical=True)
     mol = Chem.MolFromSmiles(smiles, sanitize=True)
     smiles = Chem.MolToSmiles(mol, canonical=True)
@@ -123,7 +123,6 @@ def preprocess(
             score_window=score_window,
             num_threads=num_threads,
         )
-    mol = Chem.MolFromSmiles(smiles, sanitize=True)
 
     mol = Chem.MolFromSmiles(smiles, sanitize=True)
     smiles = Chem.MolToSmiles(mol, canonical=True)
