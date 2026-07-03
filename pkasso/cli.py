@@ -62,7 +62,7 @@ def _common_option_conflicts(ctx: click.Context) -> None:
     if ctx.params["cutoff_states"] < 1:
         raise click.UsageError("--cutoff-states must be >= 1.")
 
-    if (ctx.params["cutoff_export"] < 0) or (ctx.params["cutoff_export"] > 1):
+    if "cutoff_export" in ctx.params and ((ctx.params["cutoff_export"] < 0) or (ctx.params["cutoff_export"] > 1)):
         raise click.UsageError("--cutoff-export must be >= 0 and <= 1.")
 
 
