@@ -17,6 +17,7 @@ from .special_cases import (
     has_phosphate,
     match_smarts,
     oh_ring_sulfonate,
+    has_double_nplus_ring
 )
 from .external.molgpka.net import GCNNet
 from .external.molgpka.pka import load_model
@@ -399,14 +400,31 @@ class MolgpkaPredictor(Predictor):
 
 class UnipkaPredictor(Predictor):
     thermodynamic_prediction: ClassVar[ThermodynamicPredictionMode] = "standard_free_energy"
-    smarts_pattern: ClassVar[Path] = ROOT / "smarts_pattern_unipka.tsv"
+    # smarts_pattern: ClassVar[Path] = ROOT / "smarts_pattern_unipka.tsv"
+    smarts_pattern: ClassVar[Path] = ROOT / "simple_smarts_pattern.tsv"
 
     def __init__(self, mol: Mol, device: str = "cpu") -> None:
         super().__init__(mol, device=device)
         self.mol_h = Chem.rdmolops.AddHs(Chem.Mol(mol))
+        self.atom_indices = [atom.GetIdx() for atom in mol.GetAtoms()]
 
     def exclude_sites(self) -> tuple[list[int], list[int]]:
-        return [], []
+        exclude_base_indices: set[int] = set()
+        exclude_acid_indices: set[int] = set()
+
+        smarts_nnn = "nnn"
+
+        for atom in self.mol.GetAtoms():
+            if atom.GetFormalCharge() != 0:
+                continue
+
+            if atom.GetSymbol() == "N" and atom.GetIsAromatic():
+                exclude_base_indices = add_exclusion(exclude_base_indices, self.mol, atom, smarts_nnn)
+
+                if atom.GetTotalNumHs() > 0 or atom.GetDegree() == 3:
+                    exclude_base_indices.add(atom.GetAtomMapNum())
+
+        return sorted(exclude_base_indices), sorted(exclude_acid_indices)
 
     def pred_acid(self) -> dict[int, float]:
         return {}
@@ -424,11 +442,34 @@ class UnipkaPredictor(Predictor):
         base_map_ids = convert_base_ids_to_map_ids(self.mol_h, base_ids)
         return base_map_ids
 
+    def _curate_free_energy(self, standard_free_energy: float) -> float:
+        """Apply molecule-specific corrections to a Uni-pKa free-energy prediction."""
+
+        fe_out = standard_free_energy
+
+        # if has_double_nplus_ring(self.mol):
+            # fe_out += 5.
+
+        return fe_out
+
     @classmethod
     def predict_standard_free_energies(cls, mols: list[Mol], *, config: Any | None = None) -> Any:
         from .external.unipka.pka_predictor import predict_standard_free_energies
 
-        return predict_standard_free_energies(mols, config=config)
+        results = predict_standard_free_energies(mols, config=config)
+
+        if hasattr(results, "columns") and "standard_free_energy" in results.columns:
+            standard_free_energies = results["standard_free_energy"].tolist()
+            if len(standard_free_energies) != len(mols):
+                raise ValueError(f"Expected {len(mols)} standard free energies, got {len(standard_free_energies)}.")
+
+            results = results.copy()
+            results["standard_free_energy"] = [
+                cls(mol)._curate_free_energy(float(standard_free_energy))
+                for mol, standard_free_energy in zip(mols, standard_free_energies)
+            ]
+
+        return results
 
 ############################################################################
 

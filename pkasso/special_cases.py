@@ -293,3 +293,32 @@ def has_nplus_base_proximity(map_idx: int, mol: Mol, max_distance: int = 3) -> i
             count += 1
 
     return count
+
+def has_double_nplus_ring(mol: Mol) -> int:
+    """
+    Detec if two positively charged nitrogens are in the same ring system
+    """
+
+    rings = [set(r) for r in mol.GetRingInfo().AtomRings()]
+    systems = []
+
+    for ring in rings:
+        hits = [s for s in systems if s & ring]
+
+        if hits:
+            merged = set(ring)
+            for h in hits:
+                merged |= h
+                systems.remove(h)
+            systems.append(merged)
+        else:
+            systems.append(ring)
+
+    return any(
+        sum(
+            mol.GetAtomWithIdx(i).GetAtomicNum() == 7
+            and mol.GetAtomWithIdx(i).GetFormalCharge() > 0
+            for i in system
+        ) >= 2
+        for system in systems
+    )
