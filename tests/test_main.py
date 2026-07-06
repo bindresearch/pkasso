@@ -165,6 +165,62 @@ def test_count_state_combinations():
     assert main.count_state_combinations(q_options) == 6
 
 
+def test_preprocess_warns_and_keeps_largest_sizeable_fragment(caplog):
+    caplog.set_level("WARNING", logger=main.__name__)
+
+    mol, smiles = main.preprocess(
+        "CCCCCC.CCCCCCC",
+        strip_fragments=True,
+        min_fragment_heavy_atoms=6,
+    )
+
+    assert smiles == "CCCCCCC"
+    assert mol.GetNumHeavyAtoms() == 7
+    assert "Input SMILES contains multiple sizeable organic fragments" in caplog.text
+
+
+def test_setup_returns_processed_input_space_when_site_limit_exceeded(monkeypatch, caplog):
+    class TooManySitesPredictor:
+        def __init__(self, mol, device=None):
+            pass
+
+        def exclude_sites(self):
+            return [], []
+
+        def pred_acid(self):
+            return {1: 4.0}
+
+        def pred_base(self):
+            return {2: 8.0}
+
+    seen_clusters = []
+
+    def screen_clusters(self, indices0, q_options0):
+        seen_clusters.append((indices0, q_options0.copy()))
+        return []
+
+    monkeypatch.setattr(main.pKasso, "screen_clusters", screen_clusters)
+    caplog.set_level("WARNING", logger=main.__name__)
+
+    pk = main.pKasso(
+        "CCN",
+        pka_predictor_cls=TooManySitesPredictor,
+        total_max_sites=1,
+        tautomer_search=False,
+    )
+
+    pk._setup()
+
+    assert pk.indices0 == []
+    assert np.array_equal(pk.q_options0, np.array([]))
+    assert pk.index_space0.indices == []
+    assert np.array_equal(pk.index_space0.q_options, np.array([]))
+    assert len(seen_clusters) == 1
+    assert seen_clusters[0][0] == []
+    assert np.array_equal(seen_clusters[0][1], np.array([]))
+    assert "Returning processed input molecule" in caplog.text
+
+
 def test_split_cluster_preserves_explicit_max_cut_edges_through_recursion(monkeypatch):
     q_options = np.ones((4, 3), dtype=np.int64)
     weights = np.zeros((4, 4), dtype=np.float64)

@@ -9,9 +9,19 @@ from pathlib import Path
 from typing import Any
 
 import click
+from joblib import Parallel, delayed
+from rdkit.Chem.rdchem import Mol
 
 COMMANDS = {"single", "batch", "scan"}
 
+def _compute_protonate(
+        idx: int,
+        smiles: str,
+        name: str = 'molecule',
+        **kwargs: Any,
+    ) -> tuple[int, str, list[str], list[Mol]]:
+    smiles_out, mols_out = protonate(smiles, **kwargs)
+    return idx, name, smiles_out, mols_out
 
 def protonate(*args: Any, **kwargs: Any) -> Any:
     from .py_interface import protonate as _protonate
@@ -40,6 +50,7 @@ def save_sdf(*args: Any, **kwargs: Any) -> Any:
 def _common_option_conflicts(ctx: click.Context) -> None:
     """Raise a Click error for explicitly incompatible shared CLI options."""
 
+    params = ctx.params
     commandline = click.core.ParameterSource.COMMANDLINE
     max_tautomers_source = ctx.get_parameter_source("max_tautomers")
     tautomer_search_source = ctx.get_parameter_source("tautomer_search")
@@ -48,23 +59,31 @@ def _common_option_conflicts(ctx: click.Context) -> None:
     if (
         max_tautomers_source == commandline
         and tautomer_search_source == commandline
-        and ctx.params["tautomer_search"] is False
+        and params.get("tautomer_search") is False
     ):
         raise click.UsageError("--max-tautomers cannot be used with --no-tautomer-search.")
 
     if (
         num_confs_source == commandline
         and tautomer_search_source == commandline
-        and ctx.params["tautomer_search"] is False
+        and params.get("tautomer_search") is False
     ):
         raise click.UsageError("--num-confs cannot be used with --no-tautomer-search.")
 
-    if ctx.params["cutoff_states"] < 1:
+    cutoff_states = params.get("cutoff_states")
+    if cutoff_states is not None and cutoff_states < 1:
         raise click.UsageError("--cutoff-states must be >= 1.")
 
-    if (ctx.params["cutoff_export"] < 0) or (ctx.params["cutoff_export"] > 1):
+    cutoff_export = params.get("cutoff_export")
+    if cutoff_export is not None and ((cutoff_export < 0) or (cutoff_export > 1)):
         raise click.UsageError("--cutoff-export must be >= 0 and <= 1.")
 
+    min_ph = params.get("min_ph")
+    max_ph = params.get("max_ph")
+
+    if (min_ph is not None) and (max_ph is not None):
+        if min_ph > max_ph:
+            raise click.UsageError("--max-ph must not be smaller than --min-ph.")
 
 
 COMMON_OPTIONS = [
@@ -216,6 +235,14 @@ def single(
     show_default=True,
     help="Min. probability of microstate w.r.t. highest probable microstate to be included for export",
 )
+@click.option(
+    "--nproc",
+    required=False,
+    type=int,
+    default=1,
+    show_default=True,
+    help="Number of parallel CPU processes",
+)
 @common_options
 def batch(
     smi: Path,
@@ -223,6 +250,7 @@ def batch(
     path_out: Path,
     overwrite: bool,
     cutoff_export: float,
+    nproc: int,
     matrix_def: str,
     cutoff_states: int,
     tautomer_search: bool,
@@ -236,8 +264,9 @@ def batch(
 
     batch_input = read_smi(smi)
 
-    for name, smiles in batch_input.items():
-        smiles_out, mols_out = protonate(
+    results_parallel = Parallel(n_jobs=nproc, prefer="processes")(
+        delayed(_compute_protonate)(
+            idx,
             smiles,
             name=name,
             pH=ph,
@@ -248,7 +277,13 @@ def batch(
             max_tautomers=max_tautomers,
             num_confs=num_confs,
         )
-        print(name, smiles_out)
+        for idx, (name, smiles) in enumerate(batch_input.items()))
+
+    for idx, name, smiles_out, mols_out in results_parallel:
+        if len(smiles_out) == 1:
+            print(idx, name, smiles_out[0])
+        else:
+            print(idx, name, smiles_out)
 
         # Save sdf files
         if path_out:

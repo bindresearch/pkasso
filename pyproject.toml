@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pkasso"
-version = "0.5.3"
+version = "0.5.4"
 description = "Prediction of protonation states for small molecules"
 readme = "README.md"
 license = { text = "MIT" }
@@ -35,6 +35,7 @@ dependencies = [
     "click>=8.1,<9",
     "networkx>=3.1,<4",
     "ipython>=8.39,<9",
+    "joblib<2",
 ]
 
 [project.optional-dependencies]

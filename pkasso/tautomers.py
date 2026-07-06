@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import logging
 from typing import TypedDict
 
 from rdkit import Chem
 from rdkit.Chem import AllChem
 from rdkit.Chem.MolStandardize import rdMolStandardize
 
+logger = logging.getLogger(__name__)
 
 IMIDIC_ACID_PATTERN = Chem.MolFromSmarts("[NX2;!$([N+])]=[CX3]([OX2H1])")
 THIOIMIDIC_ACID_PATTERN = Chem.MolFromSmarts("[NX2;!$([N+])]=[CX3]([SX2H1])")
@@ -117,7 +119,7 @@ def best_tautomer_smiles(
         return str(Chem.MolToSmiles(tautomers[0]))
 
     if len(tautomers) > max_tautomers:
-        print("Exceeding max tautomers, using input smiles.")
+        logger.info(f"{len(tautomers)} exceeds max tautomers {max_tautomers}, using input SMILES {smiles}.")
         return smiles
 
     # ---------------------------------------------------------

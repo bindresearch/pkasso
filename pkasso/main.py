@@ -58,6 +58,7 @@ def preprocess(
     strip_fragments: bool = True,
     score_window: int = 0,
     num_threads: int = 1,
+    min_fragment_heavy_atoms: int = 6
 ) -> tuple[Mol, str]:
     """
     Construct and standardize an RDKit molecule from a SMILES string.
@@ -87,12 +88,13 @@ def preprocess(
         raise ValueError(f"Invalid SMILES: {smiles_raw}")
     
     if strip_fragments:
-        sizeable = sizeable_organic_fragments(mol)
+        sizeable = sizeable_organic_fragments(mol,min_heavy_atoms=min_fragment_heavy_atoms)
         if len(sizeable) > 1:
-            raise ValueError(
-                "Input SMILES contains multiple sizeable organic fragments:",
-                sizeable
-            )
+            logger.warning(f"Input SMILES contains multiple sizeable organic fragments: {sizeable}")
+            # raise ValueError(
+                # "Input SMILES contains multiple sizeable organic fragments:",
+                # sizeable
+            # )
         # Remove ions and covalent fragments
         chooser = rdMolStandardize.LargestFragmentChooser()
         mol = chooser.choose(mol)
@@ -102,6 +104,19 @@ def preprocess(
     logger.debug("Canonical")
     logger.debug(smiles)
 
+    logger.debug("Formal charges before cleanup")
+    charges = [at.GetFormalCharge() for at in mol.GetAtoms()]
+    logger.debug(charges)
+
+    mol = rdMolStandardize.Normalize(mol)
+    uncharger = rdMolStandardize.Uncharger(force=True)
+    mol = uncharger.uncharge(mol)
+    
+    # load/save cycles to clean up the mol atom ordering
+    smiles = Chem.MolToSmiles(mol, canonical=True)
+    mol = Chem.MolFromSmiles(smiles, sanitize=True)
+    smiles = Chem.MolToSmiles(mol, canonical=True)
+
     if tautomer_search:
         smiles = best_tautomer_smiles(
             smiles,
@@ -110,20 +125,6 @@ def preprocess(
             score_window=score_window,
             num_threads=num_threads,
         )
-    mol = Chem.MolFromSmiles(smiles, sanitize=True)
-
-    logger.debug("Formal charges before cleanup")
-    charges = [at.GetFormalCharge() for at in mol.GetAtoms()]
-    logger.debug(charges)
-
-    mol = rdMolStandardize.Cleanup(mol)
-    uncharger = rdMolStandardize.Uncharger(force=True)
-
-    # load/save cycles to clean up the mol atom ordering
-    mol = uncharger.uncharge(mol)
-    smiles = Chem.MolToSmiles(mol, canonical=True)
-    mol = Chem.MolFromSmiles(smiles, sanitize=True)
-    smiles = Chem.MolToSmiles(mol, canonical=True)
 
     mol = Chem.MolFromSmiles(smiles, sanitize=True)
     smiles = Chem.MolToSmiles(mol, canonical=True)
@@ -785,6 +786,7 @@ class pKasso:
     strip_fragments: bool = True
     score_window: int = 0
     num_threads: int = 1
+    fragment_warning_heavy_atoms: int = 6
 
     def pka_predictor(self, mol: Mol) -> Predictor:
         """Create the configured molecule-specific pKa predictor."""
@@ -846,6 +848,7 @@ class pKasso:
             strip_fragments=self.strip_fragments,
             score_window=self.score_window,
             num_threads=self.num_threads,
+            min_fragment_heavy_atoms=self.fragment_warning_heavy_atoms
         )
 
         self.charged_indices = special_cases.find_charged(self.mol0)
@@ -861,11 +864,14 @@ class pKasso:
         self.base0 = pka_predictor.pred_base()  # returns pkas for map indices
 
         if len(self.acid0) + len(self.base0) > self.total_max_sites:
-            raise ValueError(f'Molecule must contain <={self.total_max_sites} protonation sites.')
-
-        self.indices0, self.q_options0 = find_candidate_sites(
-            self.base0, self.acid0, self.exclude_base_indices, self.exclude_acid_indices, self.charged_indices
-        )
+            logger.warning(f'Molecule has >{self.total_max_sites} protonation sites. Returning processed input molecule.')
+            # raise ValueError(f'Molecule must contain <={self.total_max_sites} protonation sites.')
+            self.indices0: list[int] = []
+            self.q_options0: NDArray[np.int64] = np.array([])
+        else:
+            self.indices0, self.q_options0 = find_candidate_sites(
+                self.base0, self.acid0, self.exclude_base_indices, self.exclude_acid_indices, self.charged_indices
+            )
 
         self.indices0_str = pack_indices(self.indices0)
         self.index_space0 = self.index_spaces.get_or_create(self.indices0, self.q_options0)
