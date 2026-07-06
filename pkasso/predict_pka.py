@@ -125,6 +125,7 @@ class MolgpkaPredictor(Predictor):
     model_file_base: ClassVar[Path] = ROOT / "weight_base.pth"
     model_file_acid: ClassVar[Path] = ROOT / "weight_acid.pth"
     smarts_pattern: ClassVar[Path] = ROOT / "smarts_pattern_molgpka.tsv"
+    opposite_charge_influence = False
 
     _model_cache: ClassVar[dict[tuple[type, str], tuple[GCNNet, GCNNet]]] = {}
 

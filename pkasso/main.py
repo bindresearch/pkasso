@@ -774,6 +774,10 @@ class pKasso:
                 "'pka' or 'standard_free_energy'."
             )
         return mode
+    
+    def opposite_charge_influence_mode(self) -> bool:
+        mode = getattr(self.pka_predictor_cls, "opposite_charge_influence", True)
+        return mode
 
     def standard_free_energy_target_mean(self) -> float:
         """Return the training-set pH offset used by the Uni-pKa free-energy head."""
@@ -1463,15 +1467,15 @@ class pKasso:
         space
             Fixed protonation site space that owns the pKa caches.
         """
-
+        
         for state_str, state_vec in zip(state_strs, state_vecs):
             if state_str in space.base_lib:
                 continue
 
             logger.debug(state_str)
 
-            # Note: This is still molgpka specific!
-            state_vec_base = np.maximum(state_vec, 1)  # disregard de-protonations of other sites to assess base probability
+            if not self.opposite_charge_influence_mode():
+                state_vec_base = np.maximum(state_vec, 1)  # disregard de-protonations of other sites to assess base probability
 
             state_str_base = pack_vec(state_vec_base)
 
@@ -1488,8 +1492,8 @@ class pKasso:
                 ):  # Only consider predicted protonation/de-protonation predictions from neutral state
                     base[map_idx] = b
 
-            # Note: This is still molgpka specific!
-            state_vec_acid = np.minimum(state_vec, 1)  # disregard protonations of other sites to assess acid probability
+            if not self.opposite_charge_influence_mode():
+                state_vec_acid = np.minimum(state_vec, 1)  # disregard protonations of other sites to assess acid probability
             state_str_acid = pack_vec(state_vec_acid)
 
             mol_acid = space.mols_lib[state_str_acid]
