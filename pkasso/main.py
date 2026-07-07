@@ -2,8 +2,8 @@
 
 import itertools
 import logging
-from collections.abc import Callable
-from dataclasses import dataclass, field
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass, field, fields
 from typing import Any
 
 import networkx as nx
@@ -322,15 +322,34 @@ class IndexSpaceRegistry:
 
 
 @dataclass
-class MicrostateDistribution:
-    """pH-dependent microstate distribution over one fixed index space."""
+class RawMicrostateEnergies:
+    """Raw pH-dependent microstate free energies before population analysis."""
 
     index_space: ProtonationIndexSpace
     pH: float
     state_strs: list[str]
     state_vecs: list[NDArray[np.int64]]
-    # state_freqs: list[float] | NDArray[np.float64]
     Gs: list[float] | NDArray[np.float64]
+
+    @property
+    def indices(self) -> list[int]:
+        return self.index_space.indices
+
+    @property
+    def mols_lib(self) -> dict[str, Mol]:
+        return self.index_space.mols_lib
+
+
+@dataclass
+class MicrostateDistribution:
+    """Final pH-dependent microstate distribution over one fixed index space."""
+
+    index_space: ProtonationIndexSpace
+    pH: float
+    state_strs: list[str]
+    state_vecs: list[NDArray[np.int64]]
+    Gs: list[float] | NDArray[np.float64]
+    state_freqs: list[float] | NDArray[np.float64]
     state_qs: dict[str, int] | None = None
     net_charge: float | None = None
     freqs_macro: dict[int, float] | None = None
@@ -354,6 +373,9 @@ class MicrostateDistribution:
             state_freqs_by_state,
             self.mols_lib,
         )
+        self.state_freqs = np.asarray(self.state_freqs, dtype=np.float64)
+        self.Gs = -np.log(self.state_freqs)
+        self.Gs -= np.min(self.Gs)
         self.state_vecs = [unpack_vec(state_str) for state_str in self.state_strs]
 
     def assign_macro_props(self) -> None:
@@ -384,47 +406,40 @@ class PHScanDistribution:
 
 
 def combine_cluster_distributions(
-    cluster_dists: list[MicrostateDistribution],
+    cluster_dists: list[RawMicrostateEnergies],
     index_space: ProtonationIndexSpace,
     pH: float,
     free_energy_cutoff_combined: float = 7.0,
     max_states_combined: int = 100,
-) -> MicrostateDistribution:
+) -> RawMicrostateEnergies:
     """
-    Combine microstate probabilities from independent pKa clusters.
+    Combine microstate free energies from independent pKa clusters.
 
     Microstates from different clusters are combined assuming statistical
-    independence, with the combined microstate probability calculated as:
+    independence, with the combined microstate free energy calculated as:
 
-        p(AB) = p(A) * p(B)
+        G(AB) = G(A) + G(B)
 
-    Prior to combination, low-frequency states are filtered within each
-    cluster using ``sfreq_cutoff_individual``. After generating all possible
-    combinations, a second filter is applied using
-    ``sfreq_cutoff_combined``. Remaining probabilities are renormalized to
-    sum to 1.
+    After generating all possible combinations, high-energy states are
+    filtered relative to the lowest-energy combination.
 
     Parameters
     ----------
     cluster_dists
-        pH-dependent microstate distributions for independent clusters.
+        pH-dependent microstate free energies for independent clusters.
     index_space
         Combined protonation state space that the output distribution belongs to.
     pH
         Current pH value.
-    sfreq_cutoff_individual
-        Minimum relative frequency required for a state to be considered during
-        cluster-wise filtering. Default is 0.01.
-    sfreq_cutoff_combined
-        Minimum relative frequency required for a combined microstate to be kept.
-        Default is 0.001.
+    free_energy_cutoff_combined
+        Maximum relative free energy for a combined microstate to be kept.
     max_states_combined
         Max. number of microstates at given pH value
 
     Returns
     -------
-    microstate_distribution
-        Combined microstate distribution over ``index_space``.
+    microstate_energies
+        Combined raw microstate free energies over ``index_space``.
     """
 
     state_strs_clusters = [dist.state_strs for dist in cluster_dists]
@@ -449,7 +464,6 @@ def combine_cluster_distributions(
         raise ValueError(f"indices_str {indices_str} not equal to full indices list {index_space.indices_str}")
 
     Gs_min = float(np.sum([np.min(Gs_cl) for Gs_cl in Gs_clusters]))
-    # state_freq_cutoff = sfreq_cutoff_combined * state_freq_max
     G_cutoff = Gs_min + free_energy_cutoff_combined
     sort_state_str = not np.array_equal(ps, np.arange(len(ps)))
 
@@ -479,14 +493,106 @@ def combine_cluster_distributions(
         Gs = Gs[ps_state_strs][:max_states_combined]
 
     logger.debug(f"N chosen microstate combinations: {len(state_strs)}")
-    # Correct freqs for removal of very unlikely states
-    # state_freqs /= np.sum(state_freqs)
-
-    return MicrostateDistribution(
+    return RawMicrostateEnergies(
         index_space=index_space,
         pH=pH,
         state_strs=state_strs,
         state_vecs=[unpack_vec(state_str) for state_str in state_strs],
+        Gs=Gs,
+    )
+
+
+def _normalized_weights(
+    weights: Sequence[float] | None,
+    n_weights: int,
+) -> NDArray[np.float64]:
+    if weights is None:
+        return np.full(n_weights, 1.0 / n_weights, dtype=np.float64)
+
+    weights_arr = np.asarray(weights, dtype=np.float64)
+    if weights_arr.shape != (n_weights,):
+        raise ValueError(f"Expected {n_weights} expert weights, got {len(weights_arr)}.")
+    if np.any(weights_arr <= 0.0):
+        raise ValueError("Expert weights must be positive.")
+    weight_sum = float(np.sum(weights_arr))
+    return weights_arr / weight_sum
+
+
+def combine_expert_energies(
+    raw_dists: Sequence[RawMicrostateEnergies],
+    *,
+    index_space: ProtonationIndexSpace | None = None,
+    method: str = "product_of_experts",
+    weights: Sequence[float] | None = None,
+) -> RawMicrostateEnergies:
+    """Combine aligned raw free-energy predictions from multiple experts."""
+
+    if not raw_dists:
+        raise ValueError("At least one raw distribution is required.")
+    if len(raw_dists) == 1:
+        raw = raw_dists[0]
+        if index_space is None or index_space is raw.index_space:
+            return raw
+        return RawMicrostateEnergies(
+            index_space=index_space,
+            pH=raw.pH,
+            state_strs=list(raw.state_strs),
+            state_vecs=list(raw.state_vecs),
+            Gs=np.asarray(raw.Gs, dtype=np.float64),
+        )
+
+    reference = raw_dists[0]
+    reference_states = list(reference.state_strs)
+    reference_state_set = set(reference_states)
+    reference_indices = reference.index_space.indices
+    reference_q_options = reference.index_space.q_options
+    pH = reference.pH
+
+    G_rows: list[NDArray[np.float64]] = []
+    for raw in raw_dists:
+        if raw.index_space.indices != reference_indices or not np.array_equal(raw.index_space.q_options, reference_q_options):
+            raise ValueError("Expert raw distributions use different protonation index spaces.")
+        if set(raw.state_strs) != reference_state_set:
+            raise ValueError("Expert raw distributions must contain the same microstate strings.")
+        if not np.isclose(raw.pH, pH):
+            raise ValueError("Expert raw distributions must use the same pH.")
+
+        G_by_state = {
+            state_str: float(G) for state_str, G in zip(raw.state_strs, raw.Gs)
+        }
+        G_row = np.array([G_by_state[state_str] for state_str in reference_states], dtype=np.float64)
+        finite = np.isfinite(G_row)
+        if not np.any(finite):
+            raise ValueError("Expert raw distribution contains no finite free energies.")
+        G_row = G_row - np.min(G_row[finite])
+        G_rows.append(G_row)
+
+    weights_arr = _normalized_weights(weights, len(raw_dists))
+    G_matrix = np.vstack(G_rows)
+
+    if method == "product_of_experts":
+        Gs = np.sum(weights_arr[:, None] * G_matrix, axis=0)
+    elif method == "mixture_of_experts":
+        pops_matrix = np.vstack([calc_populations(G_row) for G_row in G_matrix])
+        mixed_pops = np.sum(weights_arr[:, None] * pops_matrix, axis=0)
+        positive = mixed_pops > 0.0
+        if not np.any(positive):
+            raise ValueError("Mixture of experts produced no positive populations.")
+        Gs = np.full_like(mixed_pops, np.inf, dtype=np.float64)
+        Gs[positive] = -np.log(mixed_pops[positive])
+    else:
+        raise ValueError("expert_combination must be 'product_of_experts' or 'mixture_of_experts'.")
+
+    finite = np.isfinite(Gs)
+    if not np.any(finite):
+        raise ValueError("Combined expert distribution contains no finite free energies.")
+    Gs -= np.min(Gs[finite])
+
+    return RawMicrostateEnergies(
+        index_space=index_space or reference.index_space,
+        pH=pH,
+        state_strs=reference_states,
+        state_vecs=list(reference.state_vecs),
         Gs=Gs,
     )
 
@@ -723,8 +829,9 @@ class pKasso:
 
         Pipeline parameters:
             name, cutoff_states, device,
-            pka_predictor_cls,
-            sfreq_cutoff_individual, sfreq_cutoff_combined,
+            pka_predictor_cls, pka_predictor_classes,
+            free_energy_cutoff_individual, free_energy_cutoff_combined,
+            expert_combination, expert_weights,
             matrix_def, cutoff_export
 
     """
@@ -742,6 +849,9 @@ class pKasso:
     matrix_def: str = "dG"
     device: str = "cpu"  # fixed!
     pka_predictor_cls: type[Predictor] = MolgpkaPredictor
+    pka_predictor_classes: Sequence[type[Predictor]] | None = None
+    expert_combination: str = "product_of_experts"
+    expert_weights: Sequence[float] | None = None
     tautomer_search: bool = True
     max_tautomers: int = 20
     num_confs: int = 10
@@ -753,10 +863,24 @@ class pKasso:
     standard_free_energy_config: Any | None = None
     standard_free_energy_predictor: Callable[[list[Mol]], Any] | None = None
 
+    def model_classes(self) -> tuple[type[Predictor], ...]:
+        """Return the configured model classes in evaluation order."""
+
+        if self.pka_predictor_classes is None:
+            return (self.pka_predictor_cls,)
+        if not self.pka_predictor_classes:
+            raise ValueError("pka_predictor_classes must contain at least one model class.")
+        return tuple(self.pka_predictor_classes)
+
+    def primary_predictor_cls(self) -> type[Predictor]:
+        """Return the model used for setup and the first raw-energy pass."""
+
+        return self.model_classes()[0]
+
     def pka_predictor(self, mol: Mol) -> Predictor:
         """Create the configured molecule-specific pKa predictor."""
 
-        return self.pka_predictor_cls(mol, device=self.device)
+        return self.primary_predictor_cls()(mol, device=self.device)
 
     def uses_standard_free_energies(self) -> bool:
         """Return whether this run should use direct microstate free energies."""
@@ -769,7 +893,7 @@ class pKasso:
         if self.standard_free_energy_predictor is not None:
             return "standard_free_energy"
 
-        mode = getattr(self.pka_predictor_cls, "thermodynamic_prediction", None)
+        mode = getattr(self.primary_predictor_cls(), "thermodynamic_prediction", None)
         if mode not in ("pka", "standard_free_energy"):
             raise ValueError(
                 "pka_predictor_cls must define thermodynamic_prediction as "
@@ -778,7 +902,7 @@ class pKasso:
         return mode
     
     def opposite_charge_influence_mode(self) -> bool:
-        mode = getattr(self.pka_predictor_cls, "opposite_charge_influence", True)
+        mode = getattr(self.primary_predictor_cls(), "opposite_charge_influence", True)
         return mode
 
     def standard_free_energy_target_mean(self) -> float:
@@ -795,12 +919,34 @@ class pKasso:
         if self.standard_free_energy_predictor is not None:
             result = self.standard_free_energy_predictor(mols)
         else:
-            result = self.pka_predictor_cls.predict_standard_free_energies(
+            result = self.primary_predictor_cls().predict_standard_free_energies(
                 mols,
                 config=self.standard_free_energy_config,
             )
 
         return _coerce_standard_free_energy_values(result, len(mols))
+
+    def _clone_for_model(self, model_cls: type[Predictor]) -> "pKasso":
+        kwargs = {
+            field_def.name: getattr(self, field_def.name)
+            for field_def in fields(self)
+            if field_def.init
+        }
+        kwargs["pka_predictor_cls"] = model_cls
+        kwargs["pka_predictor_classes"] = None
+        kwargs["expert_weights"] = None
+        return type(self)(**kwargs)
+
+    def _setup_expert_models(self) -> None:
+        """Prepare additional expert models with isolated prediction caches."""
+
+        self.expert_models: list["pKasso"] = []
+        for model_cls in self.model_classes()[1:]:
+            expert = self._clone_for_model(model_cls)
+            expert._setup()
+            if expert.indices0 != self.indices0 or not np.array_equal(expert.q_options0, self.q_options0):
+                raise ValueError("Expert models produced different protonation site spaces.")
+            self.expert_models.append(expert)
 
     def run_single(self, pH: float = 7.0) -> Molecule:
         """
@@ -814,11 +960,6 @@ class pKasso:
         self.pH = pH
         self._setup()
         dist = self._calc_microstates(self.pH)
-        
-        # Symmetry (combine frequencies for chemically identical microstates)
-        dist.apply_symmetry()
-        # Macro-pka properties from combined microstates
-        dist.assign_macro_props()
         molecule = self.prep_single_output(dist)
         return molecule
 
@@ -900,21 +1041,21 @@ class pKasso:
             for cluster in self.clusters
         ]
         logger.debug(f"Clusters: {self.clusters}")
+        self._setup_expert_models()
 
-    def _calc_microstates(self, pH: float) -> MicrostateDistribution:
-        """Calc microstate frequencies given a pH value"""
+    def _calc_microstates_raw_current(self, pH: float) -> RawMicrostateEnergies:
+        """Calculate raw microstate free energies for this configured model."""
 
         # indices0_curated, q_options0 = self.calc_curated_indices(pH)
 
-        cluster_dists: list[MicrostateDistribution] = []
+        cluster_dists: list[RawMicrostateEnergies] = []
 
         for cluster_space in self.cluster_spaces:
             cluster_dists.append(self.process_cluster(cluster_space, pH, 
-                                                      sfreq_cutoff_individual=self.free_energy_cutoff_individual,
+                                                      free_energy_cutoff_individual=self.free_energy_cutoff_individual,
                                                       max_states_individual=self.max_states_individual))
 
-        # Combine clusters and their frequencies
-        dist = combine_cluster_distributions(
+        return combine_cluster_distributions(
             cluster_dists,
             self.index_space0,
             pH,
@@ -922,10 +1063,49 @@ class pKasso:
             max_states_combined=self.max_states_combined,
         )
 
+    def _calc_microstates_raw(self, pH: float) -> RawMicrostateEnergies:
+        """Calculate raw microstate free energies, combining experts if configured."""
+
+        raw_dists = [self._calc_microstates_raw_current(pH)]
+        raw_dists.extend(
+            expert._calc_microstates_raw_current(pH)
+            for expert in getattr(self, "expert_models", [])
+        )
+        return combine_expert_energies(
+            raw_dists,
+            index_space=self.index_space0,
+            method=self.expert_combination,
+            weights=self.expert_weights,
+        )
+
+    def _finalize_microstates(self, raw: RawMicrostateEnergies) -> MicrostateDistribution:
+        """Convert raw free energies to final populations and macro properties."""
+
+        Gs = np.asarray(raw.Gs, dtype=np.float64)
+        finite = np.isfinite(Gs)
+        if not np.any(finite):
+            raise ValueError("Raw microstate distribution contains no finite free energies.")
+        Gs = Gs - np.min(Gs[finite])
+        state_freqs = calc_populations(Gs)
+
+        dist = MicrostateDistribution(
+            index_space=raw.index_space,
+            pH=raw.pH,
+            state_strs=list(raw.state_strs),
+            state_vecs=list(raw.state_vecs),
+            Gs=Gs,
+            state_freqs=state_freqs,
+        )
+
         self.construct_mols(dist.index_space, dist.state_strs, dist.state_vecs)
-
-
+        dist.apply_symmetry()
+        dist.assign_macro_props()
         return dist
+
+    def _calc_microstates(self, pH: float) -> MicrostateDistribution:
+        """Calculate finalized microstate frequencies for one pH value."""
+
+        return self._finalize_microstates(self._calc_microstates_raw(pH))
 
     def _scan_pH(self, pHs: NDArray[np.float64]) -> PHScanDistribution:
         """
@@ -935,13 +1115,9 @@ class pKasso:
 
         - Identifies curated candidate titration sites
         - Screens residue coupling and builds clusters of coupled sites
-        - Processes each cluster to generate microstates and frequencies
-        - Optionally injects phosphate-specific clusters
-        - Combines cluster results into global state distributions
-        - Applies symmetry reduction
-        - Computes macrostate properties (net charge and macro-pKa data)
+        - Runs the finalized single-pH microstate calculation
+        - Collects macrostate properties (net charge and macro-pKa data)
         - Stores results for later visualization
-        - Optionally exports pH-specific outputs
         """
 
         net_charges: list[float] = []
@@ -1079,7 +1255,7 @@ class pKasso:
         free_energy_cutoff_individual: float = 7.0,
         max_states_individual: int = 100,
 
-    ) -> MicrostateDistribution:
+    ) -> RawMicrostateEnergies:
         """
         Generate and evaluate microstates for a single protonation cluster at a given pH value.
 
@@ -1092,8 +1268,8 @@ class pKasso:
 
         Returns
         -------
-        microstate_distribution
-            pH-dependent microstate distribution for this cluster.
+        microstate_energies
+            pH-dependent raw microstate free energies for this cluster.
         """
 
         state_vecs = construct_state_vectors(space.q_options, self.cutoff_states)
@@ -1115,7 +1291,6 @@ class pKasso:
                 self.standard_free_energy_target_mean(),
             )
             Gs -= np.min(Gs)
-            # state_freqs = calc_populations(Gs - np.min(Gs))
         else:
             self.run_acid_base_calcs(space, state_strs, state_vecs)
             
@@ -1156,13 +1331,12 @@ class pKasso:
         Gs = np.array(Gs_list)
 
         state_vecs = [unpack_vec(state_str) for state_str in state_strs]
-        return MicrostateDistribution(
+        return RawMicrostateEnergies(
             index_space=space,
             pH=pH,
             state_strs=state_strs,
             state_vecs=state_vecs,
             Gs=Gs,
-            # state_freqs=state_freqs,
         )
 
     #########################

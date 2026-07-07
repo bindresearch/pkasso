@@ -223,7 +223,8 @@ def test_process_cluster_uses_batched_standard_free_energies_for_unipka_path():
         q_options=np.array([[1, 1, 1]], dtype=np.int64),
     )
 
-    dist = pk.process_cluster(space, pH=7.0, sfreq_cutoff_individual=0.0, max_states_individual=10)
+    raw = pk.process_cluster(space, pH=7.0, free_energy_cutoff_individual=np.inf, max_states_individual=10)
+    dist = pk._finalize_microstates(raw)
     freqs_by_state = dict(zip(dist.state_strs, dist.state_freqs))
 
     assert calls == [["0", "1", "2"]]
@@ -258,7 +259,7 @@ def test_process_cluster_can_use_standard_free_energy_predictor_class():
         q_options=np.array([[1, 1, 1]], dtype=np.int64),
     )
 
-    pk.process_cluster(space, pH=7.0, sfreq_cutoff_individual=0.0, max_states_individual=10)
+    pk.process_cluster(space, pH=7.0, free_energy_cutoff_individual=np.inf, max_states_individual=10)
 
     assert calls == [(["0", "1", "2"], 6.0)]
 
