@@ -407,22 +407,103 @@ class UnipkaPredictor(Predictor):
         super().__init__(mol, device=device)
         self.mol_h = Chem.rdmolops.AddHs(Chem.Mol(mol))
         self.atom_indices = [atom.GetIdx() for atom in mol.GetAtoms()]
+        self.qs = np.array([at.GetFormalCharge() for at in mol.GetAtoms()])
+
+    # def exclude_sites(self) -> tuple[list[int], list[int]]:
+    #     exclude_base_indices: set[int] = set()
+    #     exclude_acid_indices: set[int] = set()
+
+    #     smarts_nnn = "nnn"
+
+    #     for atom in self.mol.GetAtoms():
+    #         if atom.GetFormalCharge() != 0:
+    #             continue
+
+    #         if atom.GetSymbol() == "N" and atom.GetIsAromatic():
+    #             exclude_base_indices = add_exclusion(exclude_base_indices, self.mol, atom, smarts_nnn)
+
+    #             if atom.GetTotalNumHs() > 0 or atom.GetDegree() == 3:
+    #                 exclude_base_indices.add(atom.GetAtomMapNum())
+
+    #     return sorted(exclude_base_indices), sorted(exclude_acid_indices)
 
     def exclude_sites(self) -> tuple[list[int], list[int]]:
-        exclude_base_indices: set[int] = set()
+        """
+        Exclude sites where predictions are not used directly.
+
+        Exclusions act on the q_options level and are tracked separately
+        for protonation (base behavior) and deprotonation (acid behavior).
+        """
+
         exclude_acid_indices: set[int] = set()
+        exclude_base_indices: set[int] = set()
 
+        smarts_imine = "NC(=N)"
+        matches_imine = match_smarts(self.mol, smarts_imine)
+
+        smarts_sulfonamide = "NS(=O)(=O)"
+
+        smarts_Ncnn = "Nc(n)n"
+        smarts_Nccn = "Nc(c)n"
+        smarts_Nccn2 = "Nccn"
         smarts_nnn = "nnn"
+        smarts_ncnn = "ncnn"
+        smarts_cnnc = "cnnc"
+        smarts_cNO = "C=NO"
+        smarts_NNC = "N-N=C"
+        smarts_carbonyl = "[#7]~[#6X3](=[#8])"
 
-        for atom in self.mol.GetAtoms():
-            if atom.GetFormalCharge() != 0:
+        smarts_ONphos = "OC=NP(=O)(O)O"
+        matches_ONphos = match_smarts(self.mol, smarts_ONphos)
+        smarts_ONO = "[O]-[N+]([O-])"
+        smarts_ONCO1 = "O=N-C=O"
+        smarts_ONCO2 = "C=C(N=O)O"
+
+        for at_idx, q in zip(self.atom_indices, self.qs):
+            atom = self.mol.GetAtomWithIdx(at_idx)
+            map_idx = atom.GetAtomMapNum()
+
+            if q != 0:
                 continue
+            if atom.GetSymbol() == "O":
+                for mat in matches_ONphos:
+                    if atom.GetIdx() in mat:
+                        correct_O = False
+                        neighbors = atom.GetNeighbors()
+                        for nbr in neighbors:
+                            if nbr.GetSymbol() == "C":
+                                correct_O = True  # O=CN part of the match
+                        if correct_O:
+                            exclude_acid_indices.add(map_idx)
+                for smarts in [smarts_ONO, smarts_ONCO1, smarts_ONCO2]:
+                    exclude_acid_indices = add_exclusion(exclude_acid_indices, self.mol, atom, smarts)
 
-            if atom.GetSymbol() == "N" and atom.GetIsAromatic():
-                exclude_base_indices = add_exclusion(exclude_base_indices, self.mol, atom, smarts_nnn)
+            if atom.GetSymbol() == "N":
+                exclude_base_indices = add_exclusion(exclude_base_indices, self.mol, atom, smarts_carbonyl)
+                # aromatic n
+                if atom.GetIsAromatic():
+                    for smarts in [
+                        smarts_nnn,smarts_cnnc,
+                    ]:
+                        exclude_base_indices = add_exclusion(exclude_base_indices, self.mol, atom, smarts)
+                    if not any(neigh.GetAtomicNum() == 7 for neigh in atom.GetNeighbors()):
+                        exclude_base_indices = add_exclusion(exclude_base_indices, self.mol, atom, smarts_ncnn)
 
-                if atom.GetTotalNumHs() > 0 or atom.GetDegree() == 3:
-                    exclude_base_indices.add(atom.GetAtomMapNum())
+                    # ring Ns contributing to pi system
+                    if (atom.GetTotalNumHs() > 0) or (atom.GetDegree() == 3):
+                        exclude_base_indices.add(map_idx)
+                # non-aromatic N
+                else:
+                    for smarts in [smarts_sulfonamide, smarts_Ncnn, smarts_Nccn, smarts_Nccn2, smarts_cNO, smarts_NNC]:
+                        exclude_base_indices = add_exclusion(exclude_base_indices, self.mol, atom, smarts)
+                    for mat in matches_imine:  # ...N-C(=N)...
+                        if atom.GetIdx() in mat:
+                            accept = True
+                            for bond in atom.GetBonds():  # Find the correct of the two Ns
+                                if bond.GetBondType() == Chem.BondType.DOUBLE:
+                                    accept = False
+                            if accept:
+                                exclude_base_indices.add(map_idx)
 
         return sorted(exclude_base_indices), sorted(exclude_acid_indices)
 

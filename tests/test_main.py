@@ -250,6 +250,58 @@ def test_combine_expert_energies_requires_shared_finite_state():
         main.combine_expert_energies([raw_a, raw_b])
 
 
+def test_combine_expert_energies_pads_different_index_spaces_with_neutral_state():
+    space_a = main.ProtonationIndexSpace(
+        indices=[1],
+        q_options=np.array([[1, 1, 0]], dtype=np.int64),
+    )
+    space_b = main.ProtonationIndexSpace(
+        indices=[2],
+        q_options=np.array([[1, 1, 0]], dtype=np.int64),
+    )
+    raw_a = main.RawMicrostateEnergies(
+        index_space=space_a,
+        pH=7.0,
+        state_strs=["0", "1"],
+        state_vecs=[np.array([0]), np.array([1])],
+        Gs=np.array([2.0, 0.0]),
+    )
+    raw_b = main.RawMicrostateEnergies(
+        index_space=space_b,
+        pH=7.0,
+        state_strs=["0", "1"],
+        state_vecs=[np.array([0]), np.array([1])],
+        Gs=np.array([3.0, 1.0]),
+    )
+
+    combined = main.combine_expert_energies([raw_a, raw_b])
+
+    assert combined.index_space.indices == [1, 2]
+    assert combined.index_space.q_options.tolist() == [[1, 1, 0], [1, 1, 0]]
+    assert combined.state_strs == ["01", "10", "11"]
+    assert combined.Gs.tolist() == pytest.approx([2.0, 2.0, 0.0])
+
+
+def test_bind_combined_context_space_uses_union_of_predictor_indices():
+    pk = main.pKasso("CC", tautomer_search=False)
+    context_a = main.PredictorContext(predictor_cls=main.MolgpkaPredictor)
+    context_a.indices0 = [2]
+    context_a.q_options0 = np.array([[1, 1, 0]], dtype=np.int64)
+    context_a.clusters = [[0]]
+    context_b = main.PredictorContext(predictor_cls=main.MolgpkaPredictor)
+    context_b.indices0 = [1]
+    context_b.q_options0 = np.array([[0, 1, 1]], dtype=np.int64)
+    context_b.clusters = [[0]]
+    pk.predictor_contexts = [context_a, context_b]
+    pk.primary_context = context_a
+
+    pk._bind_combined_context_space()
+
+    assert pk.indices0 == [1, 2]
+    assert pk.q_options0.tolist() == [[0, 1, 1], [1, 1, 0]]
+    assert pk.index_space0.indices == [1, 2]
+
+
 def test_process_cluster_uses_batched_standard_free_energies_for_unipka_path():
     mol = Chem.MolFromSmiles("N")
     for atom in mol.GetAtoms():

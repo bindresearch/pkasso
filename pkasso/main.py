@@ -562,20 +562,47 @@ def combine_expert_energies(
         )
 
     reference = raw_dists[0]
-    reference_indices = reference.index_space.indices
-    reference_q_options = reference.index_space.q_options
     pH = reference.pH
+    combined_indices = sorted({
+        idx
+        for raw in raw_dists
+        for idx in raw.index_space.indices
+    })
+    combined_q_options = np.zeros((len(combined_indices), 3), dtype=np.int64)
+    combined_q_options[:, 1] = 1
+    for raw in raw_dists:
+        for rel_idx, map_idx in enumerate(raw.index_space.indices):
+            combined_rel_idx = combined_indices.index(map_idx)
+            combined_q_options[combined_rel_idx] = np.maximum(
+                combined_q_options[combined_rel_idx],
+                raw.index_space.q_options[rel_idx],
+            )
+
+    if index_space is not None and index_space.indices == combined_indices:
+        combined_index_space = index_space
+    else:
+        combined_index_space = ProtonationIndexSpace(
+            indices=combined_indices,
+            q_options=combined_q_options,
+        )
 
     G_by_state_rows: list[dict[str, float]] = []
     state_sets: list[set[str]] = []
     for raw in raw_dists:
-        if raw.index_space.indices != reference_indices or not np.array_equal(raw.index_space.q_options, reference_q_options):
-            raise ValueError("Expert raw distributions use different protonation index spaces.")
         if not np.isclose(raw.pH, pH):
             raise ValueError("Expert raw distributions must use the same pH.")
 
+        state_map = {
+            state_str: "".join(
+                state_str[raw.index_space.indices.index(map_idx)]
+                if map_idx in raw.index_space.indices
+                else "1"
+                for map_idx in combined_indices
+            )
+            for state_str in raw.state_strs
+        }
         G_by_state = {
-            state_str: float(G) for state_str, G in zip(raw.state_strs, raw.Gs)
+            state_map[state_str]: float(G) for state_str, G in zip(raw.state_strs, raw.Gs)
         }
         finite_states = {state_str for state_str, G in G_by_state.items() if np.isfinite(G)}
         if not finite_states:
@@ -585,7 +612,7 @@ def combine_expert_energies(
 
     shared_states = set.intersection(*state_sets)
     if not shared_states:
-        raise ValueError("Expert raw distributions do not share any finite microstate strings.")
+        raise ValueError(f"Expert raw distributions do not share any finite microstate strings. {state_sets}")
 
     shared_anchor_state = min(
         shared_states,
@@ -648,7 +675,7 @@ def combine_expert_energies(
     Gs -= np.min(Gs[finite])
 
     return RawMicrostateEnergies(
-        index_space=index_space or reference.index_space,
+        index_space=combined_index_space,
         pH=pH,
         state_strs=union_states,
         state_vecs=[state_vec_by_str[state_str] for state_str in union_states],
@@ -1066,13 +1093,7 @@ class pKasso:
             for predictor_cls in self.model_classes()
         ]
         self.primary_context = self.predictor_contexts[0]
-        self._bind_primary_context(self.primary_context)
-
-        for context in self.predictor_contexts[1:]:
-            if context.indices0 != self.indices0:
-                raise ValueError("Expert models produced different protonation site indices.")
-            if context.q_options0 is None or not np.array_equal(context.q_options0, self.q_options0):
-                raise ValueError("Expert models produced different protonation state options.")
+        self._bind_combined_context_space()
 
     def _setup_predictor_context(self, predictor_cls: type[Predictor]) -> PredictorContext:
         """Create model-specific site, cluster, and cache state."""
@@ -1120,25 +1141,40 @@ class pKasso:
         logger.debug(f"Clusters: {context.clusters}")
         return context
 
-    def _bind_primary_context(self, context: PredictorContext) -> None:
-        """Expose the primary model context through legacy pKasso attributes."""
+    def _bind_combined_context_space(self) -> None:
+        """Expose the pH-independent union space through legacy attributes."""
 
-        if context.q_options0 is None or context.index_space0 is None:
-            raise ValueError("Primary predictor context is incomplete.")
+        combined_indices = sorted({
+            idx
+            for context in self.predictor_contexts
+            for idx in context.indices0
+        })
+        combined_q_options = np.zeros((len(combined_indices), 3), dtype=np.int64)
+        combined_q_options[:, 1] = 1
+        for context in self.predictor_contexts:
+            if context.q_options0 is None:
+                raise ValueError("Predictor context is incomplete.")
+            for rel_idx, map_idx in enumerate(context.indices0):
+                combined_rel_idx = combined_indices.index(map_idx)
+                combined_q_options[combined_rel_idx] = np.maximum(
+                    combined_q_options[combined_rel_idx],
+                    context.q_options0[rel_idx],
+                )
 
-        self.index_spaces = context.index_spaces
-        self.exclude_base_indices = context.exclude_base_indices
-        self.exclude_acid_indices = context.exclude_acid_indices
-        self.acid_map_ids = context.acid_map_ids
-        self.base_map_ids = context.base_map_ids
-        self.acid0 = context.acid0
-        self.base0 = context.base0
-        self.indices0 = context.indices0
-        self.q_options0 = context.q_options0
+        self.index_spaces = IndexSpaceRegistry()
+        self.indices0 = combined_indices
+        self.q_options0 = combined_q_options
         self.indices0_str = pack_indices(self.indices0)
-        self.index_space0 = context.index_space0
-        self.clusters = context.clusters
-        self.cluster_spaces = context.cluster_spaces
+        self.index_space0 = self.index_spaces.get_or_create(self.indices0, self.q_options0)
+
+        self.exclude_base_indices = self.primary_context.exclude_base_indices
+        self.exclude_acid_indices = self.primary_context.exclude_acid_indices
+        self.acid_map_ids = self.primary_context.acid_map_ids
+        self.base_map_ids = self.primary_context.base_map_ids
+        self.acid0 = self.primary_context.acid0
+        self.base0 = self.primary_context.base0
+        self.clusters = self.primary_context.clusters
+        self.cluster_spaces = self.primary_context.cluster_spaces
 
     def _calc_microstates_raw_for_context(
         self,
@@ -1781,7 +1817,9 @@ class pKasso:
             logger.debug(state_str)
 
             state_vec_base = state_vec.copy()
-            if not self.opposite_charge_influence_mode(context):
+            if self.opposite_charge_influence_mode(context):
+                state_vec_base = state_vec
+            else:
                 state_vec_base = np.maximum(state_vec, 1)  # disregard de-protonations of other sites to assess base probability
 
             state_str_base = pack_vec(state_vec_base)
@@ -1800,7 +1838,9 @@ class pKasso:
                     base[map_idx] = b
 
             state_vec_acid = state_vec.copy()
-            if not self.opposite_charge_influence_mode(context):
+            if self.opposite_charge_influence_mode(context):
+                state_vec_acid = state_vec
+            else:
                 state_vec_acid = np.minimum(state_vec, 1)  # disregard protonations of other sites to assess acid probability
             state_str_acid = pack_vec(state_vec_acid)
 
