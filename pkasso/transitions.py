@@ -281,6 +281,13 @@ def calc_freqs_from_states(
     if matrix_def == "msm":
         tmatrix = calc_tmatrix(state_strs, state_vecs, ps_all, N_states)
         state_freqs = calc_state_freqs_sparse(tmatrix)
+        state_freqs = np.asarray(state_freqs, dtype=np.float64)
+        positive = state_freqs > 0.0
+        if not np.any(positive):
+            raise ValueError("MSM produced no positive state frequencies.")
+        Gs = np.full_like(state_freqs, np.inf, dtype=np.float64)
+        Gs[positive] = -np.log(state_freqs[positive])
+        Gs -= np.min(Gs[positive])
     elif matrix_def == "dG":
         dGmatrix = calc_dGmatrix(state_strs, state_vecs, ps_all, N_states)
         dG_clusters = find_dGclusters(dGmatrix)
@@ -289,10 +296,12 @@ def calc_freqs_from_states(
         if not is_connected:
             raise ValueError("Matrix not connected (or not symmetric)")
         Gs = reconstruct_free_energies_weighted(dGmatrix)
-        state_freqs = calc_populations(Gs)
+        Gs -= np.min(Gs)
+        # state_freqs = calc_populations(Gs)
     else:
         raise ValueError
-    return state_strs, state_freqs
+    # return state_strs, state_freqs
+    return state_strs, Gs
 
 
 def calc_state_diffs(

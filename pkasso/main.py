@@ -329,7 +329,8 @@ class MicrostateDistribution:
     pH: float
     state_strs: list[str]
     state_vecs: list[NDArray[np.int64]]
-    state_freqs: list[float] | NDArray[np.float64]
+    # state_freqs: list[float] | NDArray[np.float64]
+    Gs: list[float] | NDArray[np.float64]
     state_qs: dict[str, int] | None = None
     net_charge: float | None = None
     freqs_macro: dict[int, float] | None = None
@@ -386,7 +387,7 @@ def combine_cluster_distributions(
     cluster_dists: list[MicrostateDistribution],
     index_space: ProtonationIndexSpace,
     pH: float,
-    sfreq_cutoff_combined: float = 0.01,
+    free_energy_cutoff_combined: float = 7.0,
     max_states_combined: int = 100,
 ) -> MicrostateDistribution:
     """
@@ -427,13 +428,13 @@ def combine_cluster_distributions(
     """
 
     state_strs_clusters = [dist.state_strs for dist in cluster_dists]
-    state_freqs_clusters = [np.asarray(dist.state_freqs, dtype=np.float64) for dist in cluster_dists]
+    Gs_clusters = [np.asarray(dist.Gs, dtype=np.float64) for dist in cluster_dists]
     indices_clusters = [dist.indices for dist in cluster_dists]
 
     logger.debug(state_strs_clusters)
-    logger.debug(state_freqs_clusters)
+    logger.debug(Gs_clusters)
 
-    cluster_state_ids = [range(len(state_freqs_cl)) for state_freqs_cl in state_freqs_clusters]
+    cluster_state_ids = [range(len(Gs_cl)) for Gs_cl in Gs_clusters]
     n_combinations = int(np.prod([len(state_ids) for state_ids in cluster_state_ids]))
     logger.debug(f"N microstate combinations from clusters: {n_combinations}")
 
@@ -447,45 +448,46 @@ def combine_cluster_distributions(
     if indices_str != index_space.indices_str:
         raise ValueError(f"indices_str {indices_str} not equal to full indices list {index_space.indices_str}")
 
-    state_freq_max = float(np.prod([np.max(state_freqs_cl) for state_freqs_cl in state_freqs_clusters]))
-    state_freq_cutoff = sfreq_cutoff_combined * state_freq_max
+    Gs_min = float(np.sum([np.min(Gs_cl) for Gs_cl in Gs_clusters]))
+    # state_freq_cutoff = sfreq_cutoff_combined * state_freq_max
+    G_cutoff = Gs_min + free_energy_cutoff_combined
     sort_state_str = not np.array_equal(ps, np.arange(len(ps)))
 
     state_strs = []
-    state_freqs_list = []
+    Gs_list = []
 
     combinations = itertools.product(*cluster_state_ids)
     for s_idxs in combinations:
-        state_freq = 1.0
+        G_comb = 0.0
         state_str_parts = []
         for c_idx, s_idx in enumerate(s_idxs):
             state_str_parts.append(state_strs_clusters[c_idx][s_idx])
-            state_freq *= float(state_freqs_clusters[c_idx][s_idx])
+            G_comb += float(Gs_clusters[c_idx][s_idx])
 
-        if state_freq >= state_freq_cutoff:
+        if G_comb <= G_cutoff:
             state_str = "".join(state_str_parts)
             if sort_state_str:
                 state_str = utils.sort_string(state_str, ps)  # match sorted indices
             state_strs.append(state_str)
-            state_freqs_list.append(state_freq)
+            Gs_list.append(G_comb)
 
-    state_freqs = np.array(state_freqs_list)
+    Gs = np.array(Gs_list)
 
     if len(state_strs) > max_states_combined:
-        ps_state_strs = np.argsort(state_freqs)[::-1] # descending freq
+        ps_state_strs = np.argsort(Gs)
         state_strs = [state_strs[p] for p in ps_state_strs][:max_states_combined]
-        state_freqs = state_freqs[ps_state_strs][:max_states_combined]
+        Gs = Gs[ps_state_strs][:max_states_combined]
 
     logger.debug(f"N chosen microstate combinations: {len(state_strs)}")
     # Correct freqs for removal of very unlikely states
-    state_freqs /= np.sum(state_freqs)
+    # state_freqs /= np.sum(state_freqs)
 
     return MicrostateDistribution(
         index_space=index_space,
         pH=pH,
         state_strs=state_strs,
         state_vecs=[unpack_vec(state_str) for state_str in state_strs],
-        state_freqs=state_freqs,
+        Gs=Gs,
     )
 
 def mol2hash(mol: Mol) -> str:
@@ -732,9 +734,9 @@ class pKasso:
 
     # Internal options
     cutoff_states: int = 200
-    sfreq_cutoff_individual: float = 0.01
+    free_energy_cutoff_individual: float = 7.0
     max_states_individual: int = 20
-    sfreq_cutoff_combined: float = 0.01
+    free_energy_cutoff_combined: float = 7.0
     max_states_combined: int = 20
     cutoff_export: float = 1.0
     matrix_def: str = "dG"
@@ -811,8 +813,13 @@ class pKasso:
 
         self.pH = pH
         self._setup()
-        distribution = self._calc_microstates(self.pH)
-        molecule = self.prep_single_output(distribution)
+        dist = self._calc_microstates(self.pH)
+        
+        # Symmetry (combine frequencies for chemically identical microstates)
+        dist.apply_symmetry()
+        # Macro-pka properties from combined microstates
+        dist.assign_macro_props()
+        molecule = self.prep_single_output(dist)
         return molecule
 
     def run_scan(
@@ -903,7 +910,7 @@ class pKasso:
 
         for cluster_space in self.cluster_spaces:
             cluster_dists.append(self.process_cluster(cluster_space, pH, 
-                                                      sfreq_cutoff_individual=self.sfreq_cutoff_individual,
+                                                      sfreq_cutoff_individual=self.free_energy_cutoff_individual,
                                                       max_states_individual=self.max_states_individual))
 
         # Combine clusters and their frequencies
@@ -911,17 +918,12 @@ class pKasso:
             cluster_dists,
             self.index_space0,
             pH,
-            sfreq_cutoff_combined=self.sfreq_cutoff_combined,
+            free_energy_cutoff_combined=self.free_energy_cutoff_combined,
             max_states_combined=self.max_states_combined,
         )
 
         self.construct_mols(dist.index_space, dist.state_strs, dist.state_vecs)
 
-        # Symmetry (combine frequencies for chemically identical microstates)
-        dist.apply_symmetry()
-
-        # Macro-pka properties from combined microstates
-        dist.assign_macro_props()
 
         return dist
 
@@ -1074,7 +1076,7 @@ class pKasso:
         self,
         space: ProtonationIndexSpace,
         pH: float,
-        sfreq_cutoff_individual: float = 0.01,
+        free_energy_cutoff_individual: float = 7.0,
         max_states_individual: int = 100,
 
     ) -> MicrostateDistribution:
@@ -1112,10 +1114,11 @@ class pKasso:
                 pH,
                 self.standard_free_energy_target_mean(),
             )
-            state_freqs = calc_populations(Gs - np.min(Gs))
+            Gs -= np.min(Gs)
+            # state_freqs = calc_populations(Gs - np.min(Gs))
         else:
             self.run_acid_base_calcs(space, state_strs, state_vecs)
-
+            
             ps_all = calc_state_diffs(
                 state_strs,
                 state_vecs,
@@ -1125,8 +1128,8 @@ class pKasso:
                 pH=pH,
                 matrix_def=self.matrix_def,
             )
-
-            state_strs, state_freqs = calc_freqs_from_states(
+            
+            state_strs, Gs = calc_freqs_from_states(
                 state_strs,
                 state_vecs,
                 ps_all,
@@ -1135,22 +1138,22 @@ class pKasso:
 
         # Cull
 
-        ps = np.argsort(state_freqs)[::-1]
+        ps = np.argsort(Gs)
         state_strs = [state_strs[p] for p in ps][:max_states_individual]
-        state_freqs = state_freqs[ps][:max_states_individual]
+        Gs = Gs[ps][:max_states_individual]
 
-        max_state_freqs = np.max(state_freqs)
+        min_G = np.min(Gs)
 
         state_strs_list = []
-        state_freqs_list = []
+        Gs_list = []
 
-        for state_str, state_freq in zip(state_strs, state_freqs):
-            if (state_freq / max_state_freqs) >= sfreq_cutoff_individual:
+        for state_str, G in zip(state_strs, Gs):
+            if (G - min_G) <= free_energy_cutoff_individual:
                 state_strs_list.append(state_str)
-                state_freqs_list.append(state_freq)
+                Gs_list.append(G)
 
         state_strs = state_strs_list
-        state_freqs = np.array(state_freqs_list)
+        Gs = np.array(Gs_list)
 
         state_vecs = [unpack_vec(state_str) for state_str in state_strs]
         return MicrostateDistribution(
@@ -1158,7 +1161,8 @@ class pKasso:
             pH=pH,
             state_strs=state_strs,
             state_vecs=state_vecs,
-            state_freqs=state_freqs,
+            Gs=Gs,
+            # state_freqs=state_freqs,
         )
 
     #########################
