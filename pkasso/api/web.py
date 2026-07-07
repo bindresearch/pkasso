@@ -59,6 +59,7 @@ def form_payload(
     nmols_export: str,
     tautomer_search: str | None,
     scan_enabled: str | None = None,
+    precision_mode: str | None = None,
 ) -> dict[str, str]:
     return {
         "ligand": ligand,
@@ -67,6 +68,7 @@ def form_payload(
         "nmols_export": nmols_export,
         "tautomer_search": "on" if tautomer_search else "",
         "scan_enabled": "on" if scan_enabled else "",
+        "precision_mode": "on" if precision_mode else "",
     }
 
 
@@ -157,12 +159,21 @@ async def predict(
     nmols_export: Annotated[str, Form()] = "3",
     tautomer_search: Annotated[str | None, Form()] = None,
     scan_enabled: Annotated[str | None, Form()] = None,
+    precision_mode: Annotated[str | None, Form()] = None,
 ) -> HTMLResponse:
     state = session_state(request)
     root_path = request_root_path(request)
     update_state_from_form(
         state,
-        form_payload(ligand, smiles, ph, nmols_export, tautomer_search, scan_enabled),
+        form_payload(
+            ligand,
+            smiles,
+            ph,
+            nmols_export,
+            tautomer_search,
+            scan_enabled,
+            precision_mode,
+        ),
     )
 
     if not state.smiles:
@@ -187,10 +198,21 @@ async def scan(
     ph: Annotated[str, Form()] = "7.0",
     nmols_export: Annotated[str, Form()] = "3",
     tautomer_search: Annotated[str | None, Form()] = None,
+    precision_mode: Annotated[str | None, Form()] = None,
 ) -> HTMLResponse:
     state = session_state(request)
     root_path = request_root_path(request)
-    update_state_from_form(state, form_payload(ligand, smiles, ph, nmols_export, tautomer_search))
+    update_state_from_form(
+        state,
+        form_payload(
+            ligand,
+            smiles,
+            ph,
+            nmols_export,
+            tautomer_search,
+            precision_mode=precision_mode,
+        ),
+    )
     state.scan_enabled = True
 
     if not state.smiles:

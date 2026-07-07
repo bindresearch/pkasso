@@ -13,6 +13,7 @@ class AppState:
     ph: float = 7.0
     nmols_export: int = 3
     tautomer_search: bool = True
+    precision_mode: bool = False
     scan_enabled: bool = False
     smiles_out: list[str] = field(default_factory=list)
     mols_out: list[Any] = field(default_factory=list)
@@ -28,6 +29,7 @@ def update_state_from_form(state: AppState, form: dict[str, str]) -> None:
     state.ligand = form.get("ligand", DEFAULT_LIGAND).strip() or DEFAULT_LIGAND
     state.smiles = form.get("smiles", DEFAULT_SMILES).strip()
     state.tautomer_search = form.get("tautomer_search") == "on"
+    state.precision_mode = form.get("precision_mode") == "on"
     state.scan_enabled = form.get("scan_enabled") == "on"
 
     try:

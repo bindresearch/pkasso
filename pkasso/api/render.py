@@ -37,6 +37,7 @@ def render_alert(message: str) -> str:
 def render_form(state: AppState, root_path: str = "") -> str:
     tautomer_checked = "checked" if state.tautomer_search else ""
     scan_checked = "checked" if state.scan_enabled else ""
+    precision_checked = "checked" if state.precision_mode else ""
     predict_url = prefixed_path(root_path, "/predict")
     return f"""
     <form id="pkasso-form"
@@ -66,6 +67,12 @@ def render_form(state: AppState, root_path: str = "") -> str:
           <label class="flex min-w-0 cursor-pointer items-center gap-3 rounded-lg border border-[color:var(--bind-border)] bg-[color:var(--bind-soft)] px-3 py-2">
             <input name="scan_enabled" type="checkbox" class="bind-toggle" {scan_checked} />
             <span class="min-w-0 text-sm font-medium">Full pH scan</span>
+            <span class="bind-toggle-state ml-auto text-[11px] font-bold uppercase tracking-[0.12em] text-[color:var(--bind-muted)]"></span>
+          </label>
+
+          <label class="flex min-w-0 cursor-pointer items-center gap-3 rounded-lg border border-[color:var(--bind-border)] bg-[color:var(--bind-soft)] px-3 py-2">
+            <input name="precision_mode" type="checkbox" class="bind-toggle" {precision_checked} />
+            <span class="min-w-0 text-sm font-medium">Precision Mode</span>
             <span class="bind-toggle-state ml-auto text-[11px] font-bold uppercase tracking-[0.12em] text-[color:var(--bind-muted)]"></span>
           </label>
         </div>

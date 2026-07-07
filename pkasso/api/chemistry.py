@@ -8,13 +8,32 @@ from typing import Any
 from rdkit.Chem import AllChem
 from rdkit import Chem
 
-from .config import CUTOFF_STATES
+from .config import CUTOFF_STATES, UNIPKA_MODEL_FOLDER
 from .state import AppState
 
 from ..py_interface import scan_pH, protonate
 from ..postprocess import draw_mols
 
 os.environ.setdefault("MPLCONFIGDIR", "/tmp/matplotlib-pkasso")
+
+PRECISION_MODELS = ["molgpka", "unipka"]
+
+
+def prediction_kwargs(state: AppState) -> dict[str, Any]:
+    if not state.precision_mode:
+        return {}
+
+    from pkasso.external.unipka.pka_predictor import FreeEnergyPredictionConfig
+
+    cfg = FreeEnergyPredictionConfig(
+        model_dir=UNIPKA_MODEL_FOLDER,
+        batch_size=16,
+        conf_size=11,
+    )
+    return {
+        "model": PRECISION_MODELS,
+        "standard_free_energy_config": cfg,
+    }
 
 
 def _pyplot() -> Any:
@@ -55,6 +74,7 @@ def compute_prediction(state: AppState) -> None:
         cutoff_export=0.0,
         cutoff_states=CUTOFF_STATES,
         tautomer_search=state.tautomer_search,
+        **prediction_kwargs(state),
     )
     state.smiles_out = list(smiles_out[: state.nmols_export])
     state.mols_out = list(mols_out[: state.nmols_export])
@@ -71,6 +91,7 @@ def compute_scan(state: AppState) -> None:
         cutoff_states=CUTOFF_STATES,
         tautomer_search=state.tautomer_search,
         pHs=np.arange(0, 14.1, 0.25, dtype=np.float64),
+        **prediction_kwargs(state),
     )
     state.scan_figures.clear()
 
