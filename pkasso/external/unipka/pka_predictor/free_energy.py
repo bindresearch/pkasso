@@ -37,6 +37,7 @@ class FreeEnergyPredictionConfig(PredictionConfig):
 
     model_dir: Path = PKASSO_DATA
     dict_dir: Path = PKASSO_DATA
+    folds: tuple[int, ...] | None = None
     target_mean: float = 6.497260103383458
     loss_func: str = "infer_free_energy"
     valid_subset: str = "valid"
@@ -91,8 +92,19 @@ def predict_standard_free_energies(
 
         _write_free_energy_lmdb(smiles, task, processed_dir, cfg)
         _copy_dictionaries(_resolve(cfg.dict_dir), processed_dir)
-        _run_free_energy_inference(processed_dir, results_dir, task, cfg)
-        return _read_free_energy_results(results_dir, cfg.fold, len(smiles), cfg.conf_size)
+
+        fold_results = []
+        folds = _prediction_folds(cfg)
+        for fold in folds:
+            fold_cfg = replace(cfg, fold=fold)
+            _run_free_energy_inference(processed_dir, results_dir, task, fold_cfg)
+            fold_results.append(
+                _read_free_energy_results(results_dir, fold, len(smiles), cfg.conf_size)
+            )
+
+        if len(fold_results) == 1:
+            return fold_results[0]
+        return _aggregate_fold_free_energy_predictions(fold_results, folds, len(smiles))
 
 
 def _write_free_energy_lmdb(
@@ -274,6 +286,75 @@ def _aggregate_free_energy_predictions(conformer_results: pd.DataFrame, n_molecu
     observed = results["molecule_index"].tolist()
     if observed != expected:
         raise ValueError(f"Expected molecule indices {expected}, got {observed}.")
+    return results
+
+
+def _prediction_folds(cfg: FreeEnergyPredictionConfig) -> tuple[int, ...]:
+    if cfg.folds is None:
+        return _discover_prediction_folds(cfg)
+
+    folds = tuple(int(fold) for fold in cfg.folds)
+    if not folds:
+        raise ValueError("folds must contain at least one fold.")
+    return folds
+
+
+def _discover_prediction_folds(cfg: FreeEnergyPredictionConfig) -> tuple[int, ...]:
+    model_path = _resolve(cfg.model_dir)
+    if model_path.suffix == ".pt" or (model_path / "checkpoint_best.pt").exists():
+        return (cfg.fold,)
+
+    folds = []
+    for checkpoint in model_path.glob("fold_*/checkpoint_best.pt"):
+        fold_name = checkpoint.parent.name
+        try:
+            folds.append(int(fold_name.removeprefix("fold_")))
+        except ValueError:
+            continue
+
+    if folds:
+        return tuple(sorted(folds))
+    return (cfg.fold,)
+
+
+def _aggregate_fold_free_energy_predictions(
+    fold_results: Sequence[pd.DataFrame],
+    folds: Sequence[int],
+    n_molecules: int,
+) -> pd.DataFrame:
+    if not fold_results:
+        raise ValueError("At least one fold result is required.")
+    if len(fold_results) != len(folds):
+        raise ValueError(f"Expected {len(folds)} fold result(s), got {len(fold_results)}.")
+
+    expected_indices = list(range(n_molecules))
+    expected_smiles = fold_results[0]["smiles"].tolist()
+
+    rows = []
+    for fold, result in zip(folds, fold_results):
+        molecule_indices = result["molecule_index"].tolist()
+        if molecule_indices != expected_indices:
+            raise ValueError(f"Expected molecule indices {expected_indices}, got {molecule_indices}.")
+        smiles = result["smiles"].tolist()
+        if smiles != expected_smiles:
+            raise ValueError(f"Fold {fold} returned SMILES {smiles}, expected {expected_smiles}.")
+
+        fold_result = result.copy()
+        fold_result["fold"] = fold
+        rows.append(fold_result)
+
+    combined = pd.concat(rows, ignore_index=True)
+    grouped = combined.groupby("molecule_index", sort=True)
+    results = grouped.agg(
+        smiles=("smiles", "first"),
+        standard_free_energy=("standard_free_energy", "mean"),
+        standard_free_energy_fold_std=("standard_free_energy", "std"),
+        n_folds=("standard_free_energy", "size"),
+        standard_free_energy_std=("standard_free_energy_std", "mean"),
+        n_conformers=("n_conformers", "first"),
+    ).reset_index(drop=False)
+    results["standard_free_energy_fold_std"] = results["standard_free_energy_fold_std"].fillna(0.0)
+
     return results
 
 
