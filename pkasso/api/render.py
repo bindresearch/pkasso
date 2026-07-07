@@ -72,7 +72,7 @@ def render_form(state: AppState, root_path: str = "") -> str:
 
           <label class="flex min-w-0 cursor-pointer items-center gap-3 rounded-lg border border-[color:var(--bind-border)] bg-[color:var(--bind-soft)] px-3 py-2">
             <input name="precision_mode" type="checkbox" class="bind-toggle" {precision_checked} />
-            <span class="min-w-0 text-sm font-medium">Precision Mode</span>
+            <span class="min-w-0 text-sm font-medium">Precision Mode (slower)</span>
             <span class="bind-toggle-state ml-auto text-[11px] font-bold uppercase tracking-[0.12em] text-[color:var(--bind-muted)]"></span>
           </label>
         </div>

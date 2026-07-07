@@ -74,6 +74,8 @@ def compute_prediction(state: AppState) -> None:
         cutoff_export=0.0,
         cutoff_states=CUTOFF_STATES,
         tautomer_search=state.tautomer_search,
+        free_energy_cutoff_individual = 100,
+        free_energy_cutoff_combined = 100,
         **prediction_kwargs(state),
     )
     state.smiles_out = list(smiles_out[: state.nmols_export])
@@ -90,6 +92,8 @@ def compute_scan(state: AppState) -> None:
         name=state.ligand,
         cutoff_states=CUTOFF_STATES,
         tautomer_search=state.tautomer_search,
+        free_energy_cutoff_individual = 100,
+        free_energy_cutoff_combined = 100,
         pHs=np.arange(0, 14.1, 0.25, dtype=np.float64),
         **prediction_kwargs(state),
     )
