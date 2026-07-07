@@ -200,6 +200,56 @@ def test_count_state_combinations():
     assert main.count_state_combinations(q_options) == 6
 
 
+def test_combine_expert_energies_aligns_on_lowest_shared_state_and_keeps_union():
+    space = main.ProtonationIndexSpace(
+        indices=[1, 2],
+        q_options=np.array([[1, 1, 0], [1, 1, 0]], dtype=np.int64),
+    )
+    raw_a = main.RawMicrostateEnergies(
+        index_space=space,
+        pH=7.0,
+        state_strs=["00", "01", "11"],
+        state_vecs=[np.array([0, 0]), np.array([0, 1]), np.array([1, 1])],
+        Gs=np.array([0.0, 3.0, 2.0]),
+    )
+    raw_b = main.RawMicrostateEnergies(
+        index_space=space,
+        pH=7.0,
+        state_strs=["10", "11", "00"],
+        state_vecs=[np.array([1, 0]), np.array([1, 1]), np.array([0, 0])],
+        Gs=np.array([3.0, 5.0, 1.0]),
+    )
+
+    combined = main.combine_expert_energies([raw_a, raw_b])
+
+    assert combined.state_strs == ["00", "01", "10", "11"]
+    assert combined.Gs.tolist() == pytest.approx([0.0, 3.0, 2.0, 3.0])
+
+
+def test_combine_expert_energies_requires_shared_finite_state():
+    space = main.ProtonationIndexSpace(
+        indices=[1],
+        q_options=np.array([[1, 1, 0]], dtype=np.int64),
+    )
+    raw_a = main.RawMicrostateEnergies(
+        index_space=space,
+        pH=7.0,
+        state_strs=["0"],
+        state_vecs=[np.array([0])],
+        Gs=np.array([0.0]),
+    )
+    raw_b = main.RawMicrostateEnergies(
+        index_space=space,
+        pH=7.0,
+        state_strs=["1"],
+        state_vecs=[np.array([1])],
+        Gs=np.array([0.0]),
+    )
+
+    with pytest.raises(ValueError, match="do not share any finite microstate"):
+        main.combine_expert_energies([raw_a, raw_b])
+
+
 def test_process_cluster_uses_batched_standard_free_energies_for_unipka_path():
     mol = Chem.MolFromSmiles("N")
     for atom in mol.GetAtoms():

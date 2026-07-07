@@ -562,38 +562,77 @@ def combine_expert_energies(
         )
 
     reference = raw_dists[0]
-    reference_states = list(reference.state_strs)
-    reference_state_set = set(reference_states)
     reference_indices = reference.index_space.indices
     reference_q_options = reference.index_space.q_options
     pH = reference.pH
 
-    G_rows: list[NDArray[np.float64]] = []
+    G_by_state_rows: list[dict[str, float]] = []
+    state_sets: list[set[str]] = []
     for raw in raw_dists:
         if raw.index_space.indices != reference_indices or not np.array_equal(raw.index_space.q_options, reference_q_options):
             raise ValueError("Expert raw distributions use different protonation index spaces.")
-        if set(raw.state_strs) != reference_state_set:
-            raise ValueError("Expert raw distributions must contain the same microstate strings.")
         if not np.isclose(raw.pH, pH):
             raise ValueError("Expert raw distributions must use the same pH.")
 
         G_by_state = {
             state_str: float(G) for state_str, G in zip(raw.state_strs, raw.Gs)
         }
-        G_row = np.array([G_by_state[state_str] for state_str in reference_states], dtype=np.float64)
-        finite = np.isfinite(G_row)
-        if not np.any(finite):
+        finite_states = {state_str for state_str, G in G_by_state.items() if np.isfinite(G)}
+        if not finite_states:
             raise ValueError("Expert raw distribution contains no finite free energies.")
-        G_row = G_row - np.min(G_row[finite])
-        G_rows.append(G_row)
+        G_by_state_rows.append(G_by_state)
+        state_sets.append(finite_states)
+
+    shared_states = set.intersection(*state_sets)
+    if not shared_states:
+        raise ValueError("Expert raw distributions do not share any finite microstate strings.")
+
+    shared_anchor_state = min(
+        shared_states,
+        key=lambda state_str: sum(G_by_state[state_str] for G_by_state in G_by_state_rows),
+    )
+
+    aligned_rows: list[dict[str, float]] = []
+    for G_by_state in G_by_state_rows:
+        anchor_G = G_by_state[shared_anchor_state]
+        aligned_rows.append({
+            state_str: G - anchor_G
+            for state_str, G in G_by_state.items()
+            if np.isfinite(G)
+        })
+
+    union_states = sorted(set.union(*state_sets))
+    state_vec_by_str = {
+        state_str: unpack_vec(state_str)
+        for state_str in union_states
+    }
 
     weights_arr = _normalized_weights(weights, len(raw_dists))
-    G_matrix = np.vstack(G_rows)
 
     if method == "product_of_experts":
-        Gs = np.sum(weights_arr[:, None] * G_matrix, axis=0)
+        Gs_list = []
+        for state_str in union_states:
+            available = [
+                row_idx for row_idx, G_by_state in enumerate(aligned_rows)
+                if state_str in G_by_state
+            ]
+            available_weights = weights_arr[available]
+            available_weights = available_weights / np.sum(available_weights)
+            Gs_list.append(float(np.sum([
+                available_weights[idx] * aligned_rows[row_idx][state_str]
+                for idx, row_idx in enumerate(available)
+            ])))
+        Gs = np.array(Gs_list, dtype=np.float64)
     elif method == "mixture_of_experts":
-        pops_matrix = np.vstack([calc_populations(G_row) for G_row in G_matrix])
+        pops_rows = []
+        for G_by_state in aligned_rows:
+            state_strs = list(G_by_state)
+            pops = calc_populations(np.array([G_by_state[state_str] for state_str in state_strs], dtype=np.float64))
+            pops_rows.append(dict(zip(state_strs, pops)))
+        pops_matrix = np.array([
+            [pops_by_state.get(state_str, 0.0) for state_str in union_states]
+            for pops_by_state in pops_rows
+        ], dtype=np.float64)
         mixed_pops = np.sum(weights_arr[:, None] * pops_matrix, axis=0)
         positive = mixed_pops > 0.0
         if not np.any(positive):
@@ -611,8 +650,8 @@ def combine_expert_energies(
     return RawMicrostateEnergies(
         index_space=index_space or reference.index_space,
         pH=pH,
-        state_strs=reference_states,
-        state_vecs=list(reference.state_vecs),
+        state_strs=union_states,
+        state_vecs=[state_vec_by_str[state_str] for state_str in union_states],
         Gs=Gs,
     )
 
