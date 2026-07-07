@@ -60,7 +60,7 @@ pkasso-web = "pkasso.api.app:main"
 "pkasso" = [
     "data/*.csv",
     "data/*.pth",
-    "data/*.tsv"]
+    "data/*.tsv",
     "data/*.pt"]
 "pkasso.api" = [
     "templates/*.html",

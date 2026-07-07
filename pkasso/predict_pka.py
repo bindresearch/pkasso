@@ -538,9 +538,16 @@ class UnipkaPredictor(Predictor):
 
     @classmethod
     def predict_standard_free_energies(cls, mols: list[Mol], *, config: Any | None = None) -> Any:
-        from .external.unipka.pka_predictor import predict_standard_free_energies
+        from .external.unipka.pka_predictor import (
+            FreeEnergyPredictionConfig,
+            get_standard_free_energy_session,
+            predict_standard_free_energies,
+        )
 
-        results = predict_standard_free_energies(mols, config=config)
+        if config is None or isinstance(config, FreeEnergyPredictionConfig):
+            results = get_standard_free_energy_session(config).predict_standard_free_energies(mols)
+        else:
+            results = predict_standard_free_energies(mols, config=config)
 
         if hasattr(results, "columns") and "standard_free_energy" in results.columns:
             standard_free_energies = results["standard_free_energy"].tolist()

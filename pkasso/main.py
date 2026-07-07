@@ -1004,6 +1004,9 @@ class pKasso:
     def standard_free_energy_target_mean(self) -> float:
         """Return the training-set pH offset used by the Uni-pKa free-energy head."""
 
+        if self.standard_free_energy_config is None:
+            predictor_config = getattr(self.standard_free_energy_predictor, "config", None)
+            return float(getattr(predictor_config, "target_mean", 6.497260103383458))
         return float(getattr(self.standard_free_energy_config, "target_mean", 6.497260103383458))
 
     def predict_standard_free_energy_values(
