@@ -426,6 +426,9 @@ class UnipkaPredictor(Predictor):
 
         return sorted(exclude_base_indices), sorted(exclude_acid_indices)
 
+    # def exclude_sites(self) -> tuple[list[int], list[int]]:
+    #     return {}, {}
+
     def pred_acid(self) -> dict[int, float]:
         return {}
 
@@ -447,8 +450,8 @@ class UnipkaPredictor(Predictor):
 
         fe_out = standard_free_energy
 
-        # if has_double_nplus_ring(self.mol):
-            # fe_out += 5.
+        if has_double_nplus_ring(self.mol):
+            fe_out += 5.
 
         return fe_out
 
