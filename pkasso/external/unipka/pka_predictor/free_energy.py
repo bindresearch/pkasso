@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import pickle
 import subprocess
+import sys
 import tempfile
 from collections.abc import Sequence
 from contextlib import ExitStack
@@ -42,6 +43,7 @@ class FreeEnergyPredictionConfig(PredictionConfig):
     loss_func: str = "infer_free_energy"
     valid_subset: str = "valid"
     conformer_gen_mode: str = "mmff"
+    verbose: bool = False
 
 
 def predict_standard_free_energy(
@@ -235,7 +237,26 @@ def _run_free_energy_inference(
         cmd.append("--cpu")
 
     _log(cfg, f"Running standard free-energy inference with fold_{cfg.fold}")
-    subprocess.run(cmd, cwd=REPO_ROOT, check=True)
+    _run_inference_subprocess(cmd, cfg)
+
+
+def _run_inference_subprocess(cmd: list[str], cfg: FreeEnergyPredictionConfig) -> None:
+    if cfg.verbose:
+        subprocess.run(cmd, cwd=REPO_ROOT, check=True)
+        return
+
+    completed = subprocess.run(
+        cmd,
+        cwd=REPO_ROOT,
+        text=True,
+        capture_output=True,
+    )
+    if completed.returncode != 0:
+        if completed.stdout:
+            sys.stdout.write(completed.stdout)
+        if completed.stderr:
+            sys.stderr.write(completed.stderr)
+        completed.check_returncode()
 
 
 def _read_free_energy_results(

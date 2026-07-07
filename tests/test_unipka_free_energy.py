@@ -7,6 +7,7 @@ from pkasso.external.unipka.pka_predictor.free_energy import (
     FreeEnergyPredictionConfig,
     _aggregate_free_energy_predictions,
     _aggregate_fold_free_energy_predictions,
+    _run_inference_subprocess,
     _mol_to_unmapped_smiles,
     predict_standard_free_energies,
 )
@@ -119,3 +120,41 @@ def test_predict_standard_free_energies_runs_all_discovered_folds(monkeypatch, t
     assert read_folds == [0, 1, 2, 3, 4]
     assert results["standard_free_energy"].tolist() == [2.0]
     assert results["n_folds"].tolist() == [5]
+
+
+def test_run_inference_subprocess_is_quiet_by_default(monkeypatch):
+    captured = {}
+
+    class CompletedProcess:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    def mock_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        captured["kwargs"] = kwargs
+        return CompletedProcess()
+
+    monkeypatch.setattr(free_energy_module.subprocess, "run", mock_run)
+
+    _run_inference_subprocess(["python", "infer.py"], FreeEnergyPredictionConfig())
+
+    assert captured["cmd"] == ["python", "infer.py"]
+    assert captured["kwargs"]["capture_output"] is True
+    assert captured["kwargs"]["text"] is True
+
+
+def test_run_inference_subprocess_respects_verbose(monkeypatch):
+    captured = {}
+
+    def mock_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        captured["kwargs"] = kwargs
+
+    monkeypatch.setattr(free_energy_module.subprocess, "run", mock_run)
+
+    _run_inference_subprocess(["python", "infer.py"], FreeEnergyPredictionConfig(verbose=True))
+
+    assert captured["cmd"] == ["python", "infer.py"]
+    assert captured["kwargs"]["check"] is True
+    assert "capture_output" not in captured["kwargs"]
