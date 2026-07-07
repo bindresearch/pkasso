@@ -1,5 +1,6 @@
 """High-level Python interface for running pKasso predictions."""
 
+from collections.abc import Sequence
 from typing import Any
 
 import numpy as np
@@ -12,24 +13,37 @@ from .main import pKasso
 from .predict_pka import PredictorKey, resolve_predictor_cls
 from .postprocess import Scan
 
+ModelInput = PredictorKey | str | Sequence[PredictorKey | str]
+
 
 def _resolve_model_kwargs(
     kwargs: dict[str, Any],
-    model: PredictorKey | str,
+    model: ModelInput,
 ) -> dict[str, Any]:
     """Resolve public model keys before constructing pKasso."""
 
     pkasso_kwargs = dict(kwargs)
-    if "pka_predictor_cls" in pkasso_kwargs:
-        raise ValueError("Python entry points accept model keys. Pass pka_predictor_cls directly to pKasso.")
-    pkasso_kwargs["pka_predictor_cls"] = resolve_predictor_cls(model)
+    if "pka_predictor_cls" in pkasso_kwargs or "pka_predictor_classes" in pkasso_kwargs:
+        raise ValueError("Python entry points accept model keys. Pass predictor classes directly to pKasso.")
+
+    if isinstance(model, str):
+        pkasso_kwargs["pka_predictor_cls"] = resolve_predictor_cls(model)
+        return pkasso_kwargs
+
+    model_classes = tuple(resolve_predictor_cls(model_key) for model_key in model)
+    if not model_classes:
+        raise ValueError("At least one model key is required.")
+    if len(model_classes) == 1:
+        pkasso_kwargs["pka_predictor_cls"] = model_classes[0]
+    else:
+        pkasso_kwargs["pka_predictor_classes"] = model_classes
     return pkasso_kwargs
 
 
 def protonate(
     inp: str | Mol,
     pH: float = 7.0,
-    model: PredictorKey | str = "molgpka",
+    model: ModelInput = "molgpka",
     **kwargs: Any,
 ) -> tuple[tuple[str, ...], tuple[Mol, ...]]:
     """
@@ -61,7 +75,7 @@ def protonate(
 def batch_protonate(
         input_list: list[str | Mol],
         pH: float = 7.0,
-        model: PredictorKey | str = "molgpka",
+        model: ModelInput = "molgpka",
         **kwargs: Any
 ) -> tuple[list[tuple[str, ...]], list[tuple[Mol, ...]]]:
     """
@@ -97,7 +111,7 @@ def batch_protonate(
 def scan_pH(
     inp: str | Mol,
     pHs: NDArray[np.float64] | list[float] = np.arange(0, 14.1, 0.25, dtype=np.float64),
-    model: PredictorKey | str = "molgpka",
+    model: ModelInput = "molgpka",
     **kwargs: Any,
 ) -> Scan:
     """
