@@ -269,7 +269,7 @@ class Scan:
                     np.clip((sfreq - sfreq_sigma) * 100, 0.0, 100.0),
                     np.clip((sfreq + sfreq_sigma) * 100, 0.0, 100.0),
                     color=color,
-                    alpha=0.25 * alpha,
+                    alpha=0.2 * alpha,
                     linewidth=0,
                 )
             ax[0].plot(self.pHs, sfreq * 100, style, label=state_str, color=color, alpha=alpha, lw=lw)

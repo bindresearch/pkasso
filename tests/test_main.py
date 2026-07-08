@@ -248,6 +248,67 @@ def test_screen_clusters_runs_coupling_when_full_state_space_exceeds_cutoff(monk
     assert np.array_equal(calls[0][1], q_options)
 
 
+def test_screen_clusters_decouples_phosphate_groups_after_coupling(monkeypatch):
+    mol = Chem.MolFromSmiles("CCOP(=O)(O)O")
+    for atom in mol.GetAtoms():
+        atom.SetAtomMapNum(atom.GetIdx() + 1)
+
+    _, phosphate_groups = main.special_cases.has_phosphate(mol)
+    phosphate_ohs = next(iter(phosphate_groups.values()))
+    indices = [1, *phosphate_ohs]
+    q_options = np.tile(np.array([[1, 1, 0]], dtype=np.int64), (len(indices), 1))
+
+    pk = main.pKasso("CCOP(=O)(O)O", cutoff_states=100)
+    pk.mol0 = mol
+    calls = []
+
+    def coupling_assay_weights(indices_arg, q_options_arg, context=None):
+        calls.append((indices_arg, q_options_arg.copy(), context))
+        weights = np.ones((len(indices_arg), len(indices_arg)), dtype=np.float64)
+        np.fill_diagonal(weights, 0.0)
+        return weights
+
+    def coupling_weights_to_graph(coupling_weights, coupling_cutoff, nodes=None):
+        graph = nx.Graph()
+        graph.add_nodes_from(range(coupling_weights.shape[0]) if nodes is None else nodes)
+        for idx, i in enumerate(graph.nodes):
+            for j in list(graph.nodes)[idx + 1:]:
+                if max(coupling_weights[i, j], coupling_weights[j, i]) >= coupling_cutoff:
+                    graph.add_edge(i, j)
+        return graph
+
+    monkeypatch.setattr(pk, "coupling_assay_weights", coupling_assay_weights)
+    monkeypatch.setattr(main.coupling, "coupling_weights_to_graph", coupling_weights_to_graph, raising=False)
+
+    assert pk.screen_clusters(indices, q_options) == [[0], list(range(1, len(indices)))]
+    assert len(calls) == 1
+
+
+def test_screen_clusters_does_not_decouple_phosphates_for_non_molgpka_context(monkeypatch):
+    class OtherPredictor(main.Predictor):
+        pass
+
+    mol = Chem.MolFromSmiles("CCOP(=O)(O)O")
+    for atom in mol.GetAtoms():
+        atom.SetAtomMapNum(atom.GetIdx() + 1)
+
+    _, phosphate_groups = main.special_cases.has_phosphate(mol)
+    phosphate_ohs = next(iter(phosphate_groups.values()))
+    indices = [1, *phosphate_ohs]
+    q_options = np.tile(np.array([[1, 1, 0]], dtype=np.int64), (len(indices), 1))
+
+    pk = main.pKasso("CCOP(=O)(O)O", cutoff_states=100)
+    pk.mol0 = mol
+    context = main.PredictorContext(predictor_cls=OtherPredictor)
+
+    def coupling_assay_weights(*args, **kwargs):
+        raise AssertionError("coupling assay should be skipped")
+
+    monkeypatch.setattr(pk, "coupling_assay_weights", coupling_assay_weights)
+
+    assert pk.screen_clusters(indices, q_options, context=context) == [list(range(len(indices)))]
+
+
 def test_combine_expert_energies_aligns_on_lowest_shared_state_and_keeps_union():
     space = main.ProtonationIndexSpace(
         indices=[1, 2],

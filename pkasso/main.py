@@ -1175,6 +1175,63 @@ class pKasso:
         mode = getattr(predictor_cls, "opposite_charge_influence", True)
         return mode
 
+    def molgpka_prediction_mode(self, context: PredictorContext | None = None) -> bool:
+        """Return whether the current predictor context uses MolGpKa."""
+
+        predictor_cls = context.predictor_cls if context is not None else self.primary_predictor_cls()
+        return issubclass(predictor_cls, MolgpkaPredictor)
+
+    def phosphate_relative_clusters(self, indices0: list[int]) -> list[list[int]]:
+        """Return phosphate OH groups as relative site indices in ``indices0``."""
+
+        if not hasattr(self, "mol0"):
+            return []
+
+        _, phosphate_groups = special_cases.has_phosphate(self.mol0)
+        phosphate_clusters: list[list[int]] = []
+
+        for oh_map_ids in phosphate_groups.values():
+            phosphate_rel_indices = sorted(
+                {
+                    indices0.index(oh_map_idx)
+                    for oh_map_idx in oh_map_ids
+                    if oh_map_idx in indices0
+                }
+            )
+            if phosphate_rel_indices:
+                phosphate_clusters.append(phosphate_rel_indices)
+
+        return phosphate_clusters
+
+    def decouple_phosphate_clusters(
+        self,
+        clusters: list[list[int]],
+        phosphate_clusters: list[list[int]],
+    ) -> list[list[int]]:
+        """Extract phosphate OH sites from existing clusters into phosphate-only clusters."""
+
+        if not phosphate_clusters:
+            return clusters
+
+        phosphate_rel_indices = {
+            rel_idx
+            for phosphate_cluster in phosphate_clusters
+            for rel_idx in phosphate_cluster
+        }
+
+        decoupled_clusters = []
+        for cluster in clusters:
+            non_phosphate_cluster = [
+                rel_idx
+                for rel_idx in cluster
+                if rel_idx not in phosphate_rel_indices
+            ]
+            if non_phosphate_cluster:
+                decoupled_clusters.append(non_phosphate_cluster)
+
+        decoupled_clusters.extend(phosphate_clusters)
+        return sorted(decoupled_clusters, key=lambda cluster: cluster[0])
+
     def standard_free_energy_target_mean(self) -> float:
         """Return the training-set pH offset used by the Uni-pKa free-energy head."""
 
@@ -1948,7 +2005,13 @@ class pKasso:
             Final set of stable coupling clusters.
         """
 
-        if count_state_combinations(q_options0) <= self.cutoff_states:
+        phosphate_clusters = (
+            self.phosphate_relative_clusters(indices0)
+            if self.molgpka_prediction_mode(context)
+            else []
+        )
+
+        if count_state_combinations(q_options0) <= self.cutoff_states and not phosphate_clusters:
             if len(indices0) == 0:
                 return []
             return [list(range(len(indices0)))]
@@ -1969,7 +2032,7 @@ class pKasso:
                     max_cut_edges=self.max_cut_edges
                 )
             )
-        return split_clusters
+        return self.decouple_phosphate_clusters(split_clusters, phosphate_clusters)
 
     def construct_mols(
         self,
@@ -2070,7 +2133,8 @@ class pKasso:
             if self.opposite_charge_influence_mode(context):
                 state_vec_base = state_vec
             else:
-                state_vec_base = np.maximum(state_vec, 1)  # disregard de-protonations of other sites to assess base probability
+                # Disregard deprotonations of other sites to assess base probability.
+                state_vec_base = np.maximum(state_vec, 1)
 
             state_str_base = pack_vec(state_vec_base)
 
