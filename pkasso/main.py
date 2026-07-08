@@ -583,22 +583,57 @@ def _normalized_weights(
     return weights_arr / weight_sum
 
 
+def _state_population_map(G_by_state: dict[str, float]) -> dict[str, float]:
+    """Compute Boltzmann populations over one expert's finite state set."""
+
+    finite_items = [
+        (state_str, G)
+        for state_str, G in G_by_state.items()
+        if np.isfinite(G)
+    ]
+    if not finite_items:
+        return {}
+
+    state_strs = [state_str for state_str, _ in finite_items]
+    Gs = np.array([G for _, G in finite_items], dtype=np.float64)
+    Gs -= np.min(Gs)
+    pops = calc_populations(Gs)
+    return dict(zip(state_strs, map(float, pops)))
+
+
 def _align_energy_rows(
     G_by_state_rows: list[dict[str, float]],
     shared_states: set[str],
 ) -> list[dict[str, float]]:
-    """Align model free-energy ladders to the first model using all shared states."""
+    """Align model free-energy ladders to the first model.
+
+    The offset is fitted over shared states, weighted by the geometric mean of
+    each model's population over its full finite state set. This keeps the
+    gauge alignment anchored to thermodynamically relevant shared states.
+    """
 
     reference_row = G_by_state_rows[0]
+    population_rows = [_state_population_map(G_by_state) for G_by_state in G_by_state_rows]
     aligned_rows: list[dict[str, float]] = []
     for row_idx, G_by_state in enumerate(G_by_state_rows):
         if row_idx == 0:
             offset = 0.0
         else:
-            offset = float(np.mean([
+            diffs = np.array([
                 G_by_state[state_str] - reference_row[state_str]
                 for state_str in shared_states
-            ]))
+            ], dtype=np.float64)
+            weights = np.array([
+                np.sqrt(
+                    population_rows[0].get(state_str, 0.0)
+                    * population_rows[row_idx].get(state_str, 0.0)
+                )
+                for state_str in shared_states
+            ], dtype=np.float64)
+            if np.sum(weights) > 0.0:
+                offset = float(np.average(diffs, weights=weights))
+            else:
+                offset = float(np.mean(diffs))
         aligned_rows.append({
             state_str: G - offset
             for state_str, G in G_by_state.items()

@@ -188,7 +188,13 @@ def test_free_energy_inference_session_deduplicates_smiles_and_reuses_runner(mon
 
 def test_free_energy_inference_session_runs_and_averages_five_folds(monkeypatch, tmp_path):
     monkeypatch.setattr(free_energy_module, "_copy_dictionaries", lambda dict_dir, processed_dir: None)
-    monkeypatch.setattr(free_energy_module, "_write_free_energy_lmdb", lambda *args, **kwargs: None)
+
+    def mock_write_free_energy_lmdb(smiles, task_name, processed_dir, cfg):
+        lmdb_path = processed_dir / task_name / f"{cfg.valid_subset}.lmdb"
+        lmdb_path.parent.mkdir(parents=True, exist_ok=True)
+        lmdb_path.write_bytes(b"")
+
+    monkeypatch.setattr(free_energy_module, "_write_free_energy_lmdb", mock_write_free_energy_lmdb)
 
     runner_load_folds = []
     runner_predict_folds = []

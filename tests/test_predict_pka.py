@@ -15,11 +15,18 @@ def test_unipka_predictor_carboxylic_acid_site_ids():
     predictor = UnipkaPredictor(mapped_mol("CCCCC(=O)O"))
 
     assert predictor.pred_acid_ids() == [7]
-    assert predictor.pred_base_ids() == [6]
+    assert predictor.pred_base_ids() == []
     assert predictor.exclude_sites() == ([], [])
     assert predictor.pred_acid() == {}
     assert predictor.pred_base() == {}
     assert not hasattr(predictor, "model")
+
+
+def test_unipka_predictor_carboxylate_base_site_ids():
+    predictor = UnipkaPredictor(mapped_mol("CCCCC(=O)[O-]"))
+
+    assert predictor.pred_acid_ids() == []
+    assert predictor.pred_base_ids() == [7]
 
 
 def test_unipka_predictor_amine_site_ids():
