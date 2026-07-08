@@ -232,15 +232,15 @@ class Scan:
         fig_scan, ax = plt.subplots(2, 1, figsize=(820 * px, 600 * px), height_ratios=[0.6, 0.4])
 
         for idx, (sfreq, sfreq_sigma) in enumerate(zip(self.sfreqs_not_relevant, self.sfreqs_not_relevant_sigmas)):
-            if np.any(sfreq_sigma > 0):
-                ax[0].fill_between(
-                    self.pHs,
-                    np.clip((sfreq - sfreq_sigma) * 100, 0.0, 100.0),
-                    np.clip((sfreq + sfreq_sigma) * 100, 0.0, 100.0),
-                    color="gray",
-                    alpha=0.08,
-                    linewidth=0,
-                )
+            # if np.any(sfreq_sigma > 0):
+            #     ax[0].fill_between(
+            #         self.pHs,
+            #         np.clip((sfreq - sfreq_sigma) * 100, 0.0, 100.0),
+            #         np.clip((sfreq + sfreq_sigma) * 100, 0.0, 100.0),
+            #         color="gray",
+            #         alpha=0.08,
+            #         linewidth=0,
+            #     )
             ax[0].plot(self.pHs, sfreq * 100, style, color="gray", lw=1.0, alpha=0.3)
 
         for idx, (state_str, sfreq, sfreq_sigma) in enumerate(
@@ -269,7 +269,7 @@ class Scan:
                     np.clip((sfreq - sfreq_sigma) * 100, 0.0, 100.0),
                     np.clip((sfreq + sfreq_sigma) * 100, 0.0, 100.0),
                     color=color,
-                    alpha=0.15 * alpha,
+                    alpha=0.25 * alpha,
                     linewidth=0,
                 )
             ax[0].plot(self.pHs, sfreq * 100, style, label=state_str, color=color, alpha=alpha, lw=lw)
@@ -294,6 +294,8 @@ class Scan:
         ax[1].plot(self.pHs, self.net_charges, style, color="black")
 
         for idx, (q, pka) in enumerate(self.pkas_macro.items()):
+            if (pka < self.pHs[0]) or (pka > self.pHs[-1]):
+                continue
             x = np.argmin(np.abs(self.pHs - pka))
             if q + 1 > 0:
                 color_rb = "tab:blue"
