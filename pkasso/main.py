@@ -725,7 +725,7 @@ def combine_pkas_macro(
                 freq1 = freqs_macro[q]
                 freq2 = freqs_macro[q + 1]
                 pka_macro = np.log10(freq2 / freq1) + pH
-                pka_weight = 1.0 / (freq1**2 + freq2**2)
+                pka_weight = (freq1 * freq2) / (freq1 + freq2)
                 if q in pkas_macro:
                     pkas_macro[q].append(pka_macro)
                     pkas_weights[q].append(pka_weight)
