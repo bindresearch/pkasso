@@ -881,7 +881,6 @@ def combine_pkas_macro(
                 freq1 = freqs_macro[q]
                 freq2 = freqs_macro[q + 1]
                 pka_macro = np.log10(freq2 / freq1) + pH
-                # pka_weight = 1.0 / (freq1**2 + freq2**2)
                 pka_weight = (freq1 * freq2) / (freq1 + freq2)
                 if q in pkas_macro:
                     pkas_macro[q].append(pka_macro)
@@ -928,9 +927,9 @@ class pKasso:
 
     # Internal options
     cutoff_states: int = 200
-    free_energy_cutoff_individual: float = 7.0
+    free_energy_cutoff_individual: float = 100.
     max_states_individual: int = 20
-    free_energy_cutoff_combined: float = 7.0
+    free_energy_cutoff_combined: float = 100.
     max_states_combined: int = 20
     cutoff_export: float = 1.0
     matrix_def: str = "dG"
@@ -1706,6 +1705,11 @@ class pKasso:
         clusters
             Final set of stable coupling clusters.
         """
+
+        if count_state_combinations(q_options0) <= self.cutoff_states:
+            if len(indices0) == 0:
+                return []
+            return [list(range(len(indices0)))]
 
         coupling_cutoff = 0.1
         coupling_weights = self.coupling_assay_weights(indices0, q_options0, context=context)

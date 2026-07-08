@@ -200,6 +200,53 @@ def test_count_state_combinations():
     assert main.count_state_combinations(q_options) == 6
 
 
+def test_screen_clusters_skips_coupling_when_full_state_space_fits(monkeypatch):
+    q_options = np.array(
+        [
+            [0, 1, 1],
+            [1, 1, 1],
+        ],
+        dtype=np.int64,
+    )
+    pk = main.pKasso("CC", cutoff_states=6)
+
+    def coupling_assay_weights(*args, **kwargs):
+        raise AssertionError("coupling assay should be skipped")
+
+    monkeypatch.setattr(pk, "coupling_assay_weights", coupling_assay_weights)
+
+    assert pk.screen_clusters([1, 2], q_options) == [[0, 1]]
+
+
+def test_screen_clusters_runs_coupling_when_full_state_space_exceeds_cutoff(monkeypatch):
+    q_options = np.array(
+        [
+            [0, 1, 1],
+            [1, 1, 1],
+        ],
+        dtype=np.int64,
+    )
+    pk = main.pKasso("CC", cutoff_states=5)
+    calls = []
+
+    def coupling_assay_weights(indices, q_options, context=None):
+        calls.append((indices, q_options.copy(), context))
+        return np.zeros((len(indices), len(indices)), dtype=np.float64)
+
+    def coupling_weights_to_graph(coupling_weights, coupling_cutoff, nodes=None):
+        graph = nx.Graph()
+        graph.add_nodes_from(range(coupling_weights.shape[0]) if nodes is None else nodes)
+        return graph
+
+    monkeypatch.setattr(pk, "coupling_assay_weights", coupling_assay_weights)
+    monkeypatch.setattr(main.coupling, "coupling_weights_to_graph", coupling_weights_to_graph, raising=False)
+
+    assert pk.screen_clusters([1, 2], q_options) == [[0], [1]]
+    assert len(calls) == 1
+    assert calls[0][0] == [1, 2]
+    assert np.array_equal(calls[0][1], q_options)
+
+
 def test_combine_expert_energies_aligns_on_lowest_shared_state_and_keeps_union():
     space = main.ProtonationIndexSpace(
         indices=[1, 2],
