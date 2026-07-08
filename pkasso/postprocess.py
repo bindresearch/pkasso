@@ -75,6 +75,7 @@ class Microstate:
     smiles: str
     freq: float
     q: int
+    freq_sigma: float | None = None
 
 
 @dataclass(frozen=True)
@@ -85,12 +86,14 @@ class Molecule:
     smiles: tuple[str, ...] = field(init=False)
     mols: tuple[Mol, ...] = field(init=False)
     freqs: tuple[float, ...] = field(init=False)
+    freqs_sigmas: tuple[float | None, ...] = field(init=False)
     qs: tuple[int, ...] = field(init=False)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "smiles", tuple(m.smiles for m in self.microstates))
         object.__setattr__(self, "mols", tuple(m.mol for m in self.microstates))
         object.__setattr__(self, "freqs", tuple(m.freq for m in self.microstates))
+        object.__setattr__(self, "freqs_sigmas", tuple(m.freq_sigma for m in self.microstates))
         object.__setattr__(self, "qs", tuple(m.q for m in self.microstates))
 
 def combine_results(
@@ -99,16 +102,21 @@ def combine_results(
     state_freqs: list[float],
     mols_lib: dict[str, Mol],
     state_qs: dict[str, int],
+    state_freqs_sigmas: list[float | None] | None = None,
 ) -> Molecule:
     """Clean up smiles and mols for output."""
 
     microstates: list[Microstate] = []
+    if state_freqs_sigmas is None:
+        state_freqs_sigmas = [None for _ in state_freqs]
 
-    for e_idx, (state_str, sfreq) in enumerate(zip(state_strs, state_freqs)):
+    for e_idx, (state_str, sfreq, sfreq_sigma) in enumerate(zip(state_strs, state_freqs, state_freqs_sigmas)):
         name_state = f"{name}_{e_idx}"
         mol = copy.deepcopy(mols_lib[state_str])
         mol.SetProp("_Name", name_state)
         mol.SetProp("Probability", f"{sfreq}")
+        if sfreq_sigma is not None:
+            mol.SetProp("Probability_sigma", f"{sfreq_sigma}")
         mol.SetProp("state_str", state_str)
         for atom in mol.GetAtoms():
             atom.SetAtomMapNum(0)
@@ -116,10 +124,19 @@ def combine_results(
         smiles = Chem.MolToSmiles(mol)
         mol.SetProp("SMILES", smiles)
         sfreq_out = sfreq / np.sum(state_freqs)
+        sfreq_sigma_out = None if sfreq_sigma is None else sfreq_sigma / np.sum(state_freqs)
         q = state_qs[state_str]
         mol.SetProp("net_charge", f"{q:.5f}")
 
-        res = Microstate(name, name_state, mol, smiles, float(sfreq_out), q)
+        res = Microstate(
+            name,
+            name_state,
+            mol,
+            smiles,
+            float(sfreq_out),
+            q,
+            None if sfreq_sigma_out is None else float(sfreq_sigma_out),
+        )
         microstates.append(res)
 
     molecule = Molecule(name, tuple(microstates))
@@ -138,10 +155,14 @@ class Scan:
     state_strs_relevant: list[str]
     mols_relevant: list[Mol]
     sfreqs_relevant: list[NDArray[np.float64]]
+    sfreqs_relevant_sigmas: list[NDArray[np.float64]]
     pHs: NDArray[np.float64]
     net_charges: NDArray[np.float64]
+    net_charge_sigmas: NDArray[np.float64]
     sfreqs_not_relevant: list[NDArray[np.float64]]
+    sfreqs_not_relevant_sigmas: list[NDArray[np.float64]]
     pkas_macro: dict[int, float]
+    pkas_macro_sigmas: dict[int, float] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self.state_strs_conv = [state_str_to_q(state_str) for state_str in self.state_strs_relevant]
@@ -149,15 +170,20 @@ class Scan:
     def export_macro_pkas(self, file: Path) -> None:
         """Write macro pKas from pooled microstates."""
         with open(file, "w") as f:
-            f.write("idx,q0,q1,pka\n")
+            f.write("idx,q0,q1,pka,pka_sigma\n")
             for idx, (q, pka) in enumerate(self.pkas_macro.items()):
-                f.write(f"pKa{idx + 1},{q},{q + 1},{pka:.5f}\n")
+                pka_sigma = self.pkas_macro_sigmas.get(q, np.nan)
+                f.write(f"pKa{idx + 1},{q},{q + 1},{pka:.5f},{pka_sigma:.5f}\n")
 
     def print_macro_pkas(self) -> None:
         """Print macro pKa values."""
         print("Macro-pKa values:")
         for idx, (q, pka) in enumerate(self.pkas_macro.items()):
-            print(f"pKa{idx + 1} | {q + 1} --> {q} | {pka:.3f}")
+            pka_sigma = self.pkas_macro_sigmas.get(q)
+            if pka_sigma is None:
+                print(f"pKa{idx + 1} | {q + 1} --> {q} | {pka:.3f}")
+            else:
+                print(f"pKa{idx + 1} | {q + 1} --> {q} | {pka:.3f} +/- {pka_sigma:.3f}")
 
     def plot_mols(self, size_x: int = 200, size_y: int = 175, molsPerRow: int = 4) -> Any:
         """Plot rdkit molecules for relevant states together with state strings.
@@ -205,10 +231,21 @@ class Scan:
 
         fig_scan, ax = plt.subplots(2, 1, figsize=(820 * px, 600 * px), height_ratios=[0.6, 0.4])
 
-        for idx, sfreq in enumerate(self.sfreqs_not_relevant):
+        for idx, (sfreq, sfreq_sigma) in enumerate(zip(self.sfreqs_not_relevant, self.sfreqs_not_relevant_sigmas)):
+            if np.any(sfreq_sigma > 0):
+                ax[0].fill_between(
+                    self.pHs,
+                    np.clip((sfreq - sfreq_sigma) * 100, 0.0, 100.0),
+                    np.clip((sfreq + sfreq_sigma) * 100, 0.0, 100.0),
+                    color="gray",
+                    alpha=0.08,
+                    linewidth=0,
+                )
             ax[0].plot(self.pHs, sfreq * 100, style, color="gray", lw=1.0, alpha=0.3)
 
-        for idx, (state_str, sfreq) in enumerate(zip(self.state_strs_conv, self.sfreqs_relevant)):
+        for idx, (state_str, sfreq, sfreq_sigma) in enumerate(
+            zip(self.state_strs_conv, self.sfreqs_relevant, self.sfreqs_relevant_sigmas)
+        ):
             if len(self.state_strs_conv) > 1:
                 if len(self.state_strs_conv) == 3 and idx == 1:
                     color = cmap((idx - 0.3) / (len(self.state_strs_conv) - 1))  # avoid invisible yellow
@@ -226,6 +263,15 @@ class Scan:
                     color = to_rgba("gray")
                     alpha = 0.3
                     lw = 1.0
+            if np.any(sfreq_sigma > 0):
+                ax[0].fill_between(
+                    self.pHs,
+                    np.clip((sfreq - sfreq_sigma) * 100, 0.0, 100.0),
+                    np.clip((sfreq + sfreq_sigma) * 100, 0.0, 100.0),
+                    color=color,
+                    alpha=0.15 * alpha,
+                    linewidth=0,
+                )
             ax[0].plot(self.pHs, sfreq * 100, style, label=state_str, color=color, alpha=alpha, lw=lw)
         if len(self.state_strs_conv) > 8:
             ax[0].legend(ncol=2, fontsize=8)
@@ -236,6 +282,15 @@ class Scan:
         ax[0].set_ylabel("Probability [%]", fontsize=12)
         ax[0].grid(alpha=0.3)
 
+        if np.any(self.net_charge_sigmas > 0):
+            ax[1].fill_between(
+                self.pHs,
+                self.net_charges - self.net_charge_sigmas,
+                self.net_charges + self.net_charge_sigmas,
+                color="black",
+                alpha=0.12,
+                linewidth=0,
+            )
         ax[1].plot(self.pHs, self.net_charges, style, color="black")
 
         for idx, (q, pka) in enumerate(self.pkas_macro.items()):
@@ -245,7 +300,9 @@ class Scan:
             else:
                 color_rb = "tab:red"
             ax[1].plot(self.pHs[x], self.net_charges[x], "o", color=color_rb, markersize=5)
-            ax[1].text(self.pHs[x] + 0.1, self.net_charges[x] + 0.05, f"{pka:.2f}", fontsize=12)
+            pka_sigma = self.pkas_macro_sigmas.get(q)
+            pka_label = f"{pka:.2f}" if pka_sigma is None else f"{pka:.2f}+/-{pka_sigma:.2f}"
+            ax[1].text(self.pHs[x] + 0.1, self.net_charges[x] + 0.05, pka_label, fontsize=12)
 
         ax[1].set_xlabel("pH", fontsize=12)
         ax[1].set_ylabel("Net charge", fontsize=12)

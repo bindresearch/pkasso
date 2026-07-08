@@ -271,7 +271,8 @@ def test_combine_expert_energies_aligns_on_lowest_shared_state_and_keeps_union()
     combined = main.combine_expert_energies([raw_a, raw_b])
 
     assert combined.state_strs == ["00", "01", "10", "11"]
-    assert combined.Gs.tolist() == pytest.approx([0.0, 3.0, 2.0, 3.0])
+    assert combined.Gs.tolist() == pytest.approx([0.0, 3.5, 1.5, 3.0])
+    assert combined.Gs_sigmas.tolist() == pytest.approx([0.70710678, 2.0, 2.0, 0.70710678])
 
 
 def test_combine_expert_energies_falls_back_to_first_model_without_shared_state(caplog):
@@ -302,6 +303,7 @@ def test_combine_expert_energies_falls_back_to_first_model_without_shared_state(
     assert combined.state_strs == ["0"]
     assert combined.state_vecs[0].tolist() == [0]
     assert combined.Gs.tolist() == pytest.approx([0.0])
+    assert combined.Gs_sigmas.tolist() == pytest.approx([2.0])
 
 
 def test_combine_expert_energies_pads_different_index_spaces_with_neutral_state():
