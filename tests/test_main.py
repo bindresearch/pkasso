@@ -1,5 +1,6 @@
 import importlib.util
 import itertools
+import logging
 import sys
 import types
 from pathlib import Path
@@ -273,7 +274,7 @@ def test_combine_expert_energies_aligns_on_lowest_shared_state_and_keeps_union()
     assert combined.Gs.tolist() == pytest.approx([0.0, 3.0, 2.0, 3.0])
 
 
-def test_combine_expert_energies_requires_shared_finite_state():
+def test_combine_expert_energies_falls_back_to_first_model_without_shared_state(caplog):
     space = main.ProtonationIndexSpace(
         indices=[1],
         q_options=np.array([[1, 1, 0]], dtype=np.int64),
@@ -293,8 +294,14 @@ def test_combine_expert_energies_requires_shared_finite_state():
         Gs=np.array([0.0]),
     )
 
-    with pytest.raises(ValueError, match="do not share any finite microstate"):
-        main.combine_expert_energies([raw_a, raw_b])
+    with caplog.at_level(logging.WARNING, logger="pkasso.main"):
+        combined = main.combine_expert_energies([raw_a, raw_b])
+
+    assert "Falling back to the first model provided" in caplog.text
+    assert combined.index_space is space
+    assert combined.state_strs == ["0"]
+    assert combined.state_vecs[0].tolist() == [0]
+    assert combined.Gs.tolist() == pytest.approx([0.0])
 
 
 def test_combine_expert_energies_pads_different_index_spaces_with_neutral_state():

@@ -580,6 +580,11 @@ def combine_expert_energies(
 
     if index_space is not None and index_space.indices == combined_indices:
         combined_index_space = index_space
+    elif (
+        reference.index_space.indices == combined_indices
+        and np.array_equal(reference.index_space.q_options, combined_q_options)
+    ):
+        combined_index_space = reference.index_space
     else:
         combined_index_space = ProtonationIndexSpace(
             indices=combined_indices,
@@ -612,7 +617,23 @@ def combine_expert_energies(
 
     shared_states = set.intersection(*state_sets)
     if not shared_states:
-        raise ValueError(f"Expert raw distributions do not share any finite microstate strings. {state_sets}")
+        logger.warning(
+            "Expert raw distributions do not share any finite microstate strings. "
+            "Falling back to the first model provided."
+        )
+        fallback_G_by_state = G_by_state_rows[0]
+        fallback_state_strs = [
+            state_str
+            for state_str in fallback_G_by_state
+            if state_str in state_sets[0]
+        ]
+        return RawMicrostateEnergies(
+            index_space=combined_index_space,
+            pH=pH,
+            state_strs=fallback_state_strs,
+            state_vecs=[unpack_vec(state_str) for state_str in fallback_state_strs],
+            Gs=np.array([fallback_G_by_state[state_str] for state_str in fallback_state_strs], dtype=np.float64),
+        )
 
     shared_anchor_state = min(
         shared_states,
