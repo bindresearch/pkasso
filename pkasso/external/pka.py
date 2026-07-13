@@ -7,7 +7,7 @@ import torch
 from rdkit.Chem.rdchem import Mol
 from torch_geometric.data import Data
 
-from .descriptor import MolVectorizer, mol2vec
+from .descriptor import MolVectorizer
 from .ionization_group import get_ionization_aid
 from .net import GCNNet
 
@@ -19,14 +19,6 @@ def load_model(model_file: Path, device: str = "cpu") -> GCNNet:
     model.load_state_dict(torch.load(model_file, map_location=device, weights_only=True))
     model.eval()
     return model
-
-
-def model_pred(mol: Mol, atom_idx: int, model: GCNNet, device: str = "cpu") -> float:
-    """Predict pKa with molgpka model."""
-
-    data = mol2vec(mol, atom_idx)
-    return model_pred_data(data, model, device=device)
-
 
 def model_pred_data(data: Data, model: GCNNet, device: str = "cpu") -> float:
     """Predict pKa from precomputed molgpka graph data."""

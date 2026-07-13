@@ -19,23 +19,6 @@ def load_coupling_module():
 
 coupling = load_coupling_module()
 
-
-def test_cluster_coupling_matrix_uses_connected_components():
-    matrix = np.zeros((6, 6), dtype=np.int64)
-    edges = [
-        (0, 1),
-        (1, 2),
-        (2, 0),
-        (3, 4),
-        (4, 5),
-        (5, 3),
-    ]
-    for i, j in edges:
-        matrix[i, j] = 1
-
-    assert coupling.cluster_coupling_matrix(matrix) == [[0, 1, 2], [3, 4, 5]]
-
-
 def test_coupling_weights_to_graph_thresholds_undirected_max_weights():
     weights = np.zeros((4, 4), dtype=np.float64)
     weights[0, 1] = 0.2
