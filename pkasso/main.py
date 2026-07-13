@@ -91,10 +91,7 @@ def preprocess(
         sizeable = sizeable_organic_fragments(mol,min_heavy_atoms=min_fragment_heavy_atoms)
         if len(sizeable) > 1:
             logger.warning(f"Input SMILES contains multiple sizeable organic fragments: {sizeable}")
-            # raise ValueError(
-                # "Input SMILES contains multiple sizeable organic fragments:",
-                # sizeable
-            # )
+
         # Remove ions and covalent fragments
         chooser = rdMolStandardize.LargestFragmentChooser()
         mol = chooser.choose(mol)
@@ -131,10 +128,6 @@ def preprocess(
 
     for atom in mol.GetAtoms():
         atom.SetAtomMapNum(atom.GetIdx() + 1)
-
-    logger.debug("Formal charges after cleanup")
-    symbols = [at.GetFormalCharge() for at in mol.GetAtoms()]
-    logger.debug(symbols)
 
     return mol, smiles
 
@@ -468,9 +461,6 @@ def combine_cluster_distributions(
     state_freqs_clusters = [np.asarray(dist.state_freqs, dtype=np.float64) for dist in cluster_dists]
     indices_clusters = [dist.indices for dist in cluster_dists]
 
-    logger.debug(state_strs_clusters)
-    logger.debug(state_freqs_clusters)
-
     cluster_state_ids = [range(len(state_freqs_cl)) for state_freqs_cl in state_freqs_clusters]
     n_combinations = int(np.prod([len(state_ids) for state_ids in cluster_state_ids]))
     logger.debug(f"N microstate combinations from clusters: {n_combinations}")
@@ -597,8 +587,6 @@ def calc_symmetry(
             state_dict[state_hash].append(state_str)
         else:
             state_dict[state_hash] = [state_str]
-
-    logger.debug(state_dict)
 
     state_strs_symm: list[str] = []
     state_freqs_symm: list[float] = []
@@ -835,9 +823,6 @@ class pKasso:
         - Determining the full set of indices with protonable sites
         """
 
-        logger.debug(self.name)
-        logger.debug(self.smiles)
-
         self.initialize_paths_models_libs()
 
         self.mol0, self.smiles0 = preprocess(
@@ -855,7 +840,7 @@ class pKasso:
         pka_predictor = self.pka_predictor(self.mol0)
         self.exclude_base_indices, self.exclude_acid_indices = pka_predictor.exclude_sites()
 
-        logger.debug("Processed:")
+        logger.debug("Processed SMILES:")
         logger.debug(self.smiles0)
         logger.debug(f"Exclude base indices: {self.exclude_base_indices}")
         logger.debug(f"Exclude acid indices: {self.exclude_acid_indices}")
@@ -1179,9 +1164,6 @@ class pKasso:
         self.construct_mols(space, state_strs, state_vecs)
         self.run_acid_base_calcs(space, state_strs, state_vecs)
 
-        for key, val in space.base_lib.items():
-            logger.debug(f"{key}: {val}")
-
         state_str0 = state_strs[0]  # Neutral state
         base_pka_diffs = {}
         acid_pka_diffs = {}
@@ -1397,8 +1379,6 @@ class pKasso:
             if state_str in space.base_lib:
                 continue
 
-            logger.debug(state_str)
-
             state_vec_base = np.maximum(state_vec, 1)  # disregard de-protonations of other sites to assess base probability
 
             state_str_base = pack_vec(state_vec_base)
@@ -1482,10 +1462,6 @@ class pKasso:
 
         self.check_chiral_consistency(distribution.state_strs, distribution.indices)
         space = self.index_spaces.get(distribution.indices)
-
-        logger.debug(f"Export at pH {self.pH}:")
-        for e_idx, (state_str, sfreq) in enumerate(zip(state_strs_export, state_freqs_export)):
-            logger.debug(e_idx, state_str, sfreq)
 
         molecule = combine_results(
             self.name,
