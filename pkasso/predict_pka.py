@@ -331,25 +331,3 @@ class MolgpkaPredictor(Predictor):
 
         base = base_curated
         return base
-
-
-def predict_acid(
-    mol: Mol,
-    device: str = "cpu",
-    predictor_cls: type[Predictor] = MolgpkaPredictor,
-) -> dict[int, float]:
-    """Predict acidic pKa values with the selected predictor backend."""
-
-    predictor = predictor_cls(mol, device=device)
-    return predictor.pred_acid()
-
-
-def predict_base(
-    mol: Mol,
-    device: str = "cpu",
-    predictor_cls: type[Predictor] = MolgpkaPredictor,
-) -> dict[int, float]:
-    """Predict basic pKa values with the selected predictor backend."""
-
-    predictor = predictor_cls(mol, device=device)
-    return predictor.pred_base()

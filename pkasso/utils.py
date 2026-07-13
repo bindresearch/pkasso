@@ -58,17 +58,27 @@ def pack_indices(indices: list[int]) -> str:
     indices_str = indices_str[:-1]  # remove last comma
     return indices_str
 
-
 def is_jupyter() -> bool:
-    """Check if a jupyter notebook/lab is run."""
+    """Return whether the code is running in a Jupyter kernel."""
+
+    from collections.abc import Mapping
+    from importlib import import_module
 
     try:
-        from IPython import get_ipython  # type: ignore
-
-        return get_ipython() is not None and "IPKernelApp" in get_ipython().config  # type: ignore
+        ipython = import_module("IPython")
     except ImportError:
         return False
 
+    get_ipython = getattr(ipython, "get_ipython", None)
+    if not callable(get_ipython):
+        return False
+
+    shell = get_ipython()
+    if shell is None:
+        return False
+
+    config = cast(Mapping[str, object], getattr(shell, "config", {}))
+    return "IPKernelApp" in config
 
 def state_str_to_q(state_str: str) -> str:
     """Convert state_str (0, 1, 2) to

@@ -42,17 +42,6 @@ def get_bond_pair(mol: Mol) -> list[list[int]]:
         res[1] += [bond.GetEndAtomIdx(), bond.GetBeginAtomIdx()]
     return res
 
-
-def _match_tuples(mol: Mol, query_one: Mol, query_two: Mol) -> set[tuple[int, ...]]:
-    matches = set(mol.GetSubstructMatches(query_one))
-    matches.update(mol.GetSubstructMatches(query_two))
-    return matches
-
-
-def _match_atom_indices(mol: Mol, query_one: Mol, query_two: Mol) -> set[int]:
-    return {atom_idx for match in _match_tuples(mol, query_one, query_two) for atom_idx in match}
-
-
 class MolVectorizer:
     """Cache molecule-level descriptors for repeated target-atom evaluations."""
 
@@ -141,54 +130,3 @@ class MolVectorizer:
                 pka=torch.tensor([[pka]], dtype=torch.float),
             )
         return data
-
-
-def get_atom_features(mol: Mol, aid: int) -> list[list[Any]]:
-    AllChem.ComputeGasteigerCharges(mol)
-    Chem.AssignStereochemistry(mol)
-
-    ring = mol.GetRingInfo()
-
-    m = []
-    for atom_idx in range(mol.GetNumAtoms()):
-        atom = mol.GetAtomWithIdx(atom_idx)
-
-        o: list[Any] = []
-        o += one_hot(atom.GetSymbol(), ATOM_SYMBOLS)
-        o += [atom.GetDegree()]
-        o += one_hot(atom.GetHybridization(), HYBRIDIZATIONS)
-        o += [atom.GetValence(Chem.ValenceType.IMPLICIT)]
-        o += [atom.GetIsAromatic()]
-        o += [
-            ring.IsAtomInRingOfSize(atom_idx, 3),
-            ring.IsAtomInRingOfSize(atom_idx, 4),
-            ring.IsAtomInRingOfSize(atom_idx, 5),
-            ring.IsAtomInRingOfSize(atom_idx, 6),
-            ring.IsAtomInRingOfSize(atom_idx, 7),
-            ring.IsAtomInRingOfSize(atom_idx, 8),
-        ]
-
-        # Preserve MolGpKa's original descriptor bug; see MolVectorizer above.
-        o += [False]
-        o += [False]
-        o += [atom.GetFormalCharge()]
-        if atom_idx == aid:
-            o += [0]
-        else:
-            o += [len(Chem.rdmolops.GetShortestPath(mol, atom_idx, aid))]
-
-        if atom_idx == aid:
-            o += [True]
-        else:
-            o += [False]
-        m.append(o)
-    return m
-
-
-def mol2vec(
-    mol: Mol,
-    atom_idx: int,
-    evaluation: bool = True,
-    pka: float | None = None,
-) -> Data:
-    return MolVectorizer(mol).mol2vec(atom_idx, evaluation=evaluation, pka=pka)
