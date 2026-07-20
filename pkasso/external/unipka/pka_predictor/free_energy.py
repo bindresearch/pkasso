@@ -51,7 +51,7 @@ class FreeEnergyPredictionConfig(PredictionConfig):
     model_dir: Path = PKASSO_DATA
     dict_dir: Path = PKASSO_DATA
     folds: tuple[int, ...] | None = None
-    target_mean: float = 6.497260103383458
+    target_mean: float = 6.457855284082695 # dwar + iupac (no overlap)
     loss_func: str = "infer_free_energy"
     valid_subset: str = "valid"
     conformer_gen_mode: str = "mmff"
