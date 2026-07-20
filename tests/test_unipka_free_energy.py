@@ -74,7 +74,15 @@ def test_aggregate_fold_free_energy_predictions_averages_folds_by_input_order():
     assert results["n_conformers"].tolist() == [11, 11]
 
 
-def test_predict_standard_free_energies_runs_all_discovered_folds(monkeypatch, tmp_path):
+def test_free_energy_config_defaults_to_one_fold():
+    assert FreeEnergyPredictionConfig().folds == (0,)
+
+
+def test_free_energy_config_accepts_single_fold_without_trailing_comma():
+    assert FreeEnergyPredictionConfig(folds=(0)).folds == (0,)
+
+
+def test_predict_standard_free_energies_runs_only_configured_default_fold(monkeypatch, tmp_path):
     calls = []
     model_dir = tmp_path / "model"
     for fold in range(5):
@@ -119,10 +127,9 @@ def test_predict_standard_free_energies_runs_all_discovered_folds(monkeypatch, t
 
     run_folds = [call[1] for call in calls if call[0] == "run"]
     read_folds = [call[1] for call in calls if call[0] == "read"]
-    assert run_folds == [0, 1, 2, 3, 4]
-    assert read_folds == [0, 1, 2, 3, 4]
-    assert results["standard_free_energy"].tolist() == [2.0]
-    assert results["n_folds"].tolist() == [5]
+    assert run_folds == [0]
+    assert read_folds == [0]
+    assert results["standard_free_energy"].tolist() == [0.0]
 
 
 def test_free_energy_inference_session_deduplicates_smiles_and_reuses_runner(monkeypatch, tmp_path):

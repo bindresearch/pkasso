@@ -50,12 +50,20 @@ class FreeEnergyPredictionConfig(PredictionConfig):
 
     model_dir: Path = PKASSO_DATA
     dict_dir: Path = PKASSO_DATA
-    folds: tuple[int, ...] | None = None
+    folds: tuple[int, ...] = (0,)
     target_mean: float = 6.457855284082695 # dwar + iupac (no overlap)
     loss_func: str = "infer_free_energy"
     valid_subset: str = "valid"
     conformer_gen_mode: str = "mmff"
     verbose: bool = False
+
+    def __post_init__(self) -> None:
+        if isinstance(self.folds, int):
+            object.__setattr__(self, "folds", (self.folds,))
+        if not isinstance(self.folds, tuple):
+            raise TypeError("folds must be an integer or tuple, for example 0 or (0, 1).")
+        if not self.folds:
+            raise ValueError("folds must contain at least one fold.")
 
 
 class FreeEnergyInferenceSession:
@@ -128,7 +136,7 @@ class FreeEnergyInferenceSession:
         _write_free_energy_lmdb(unique_smiles, task, self.processed_dir, cfg)
 
         fold_results = []
-        folds = _prediction_folds(cfg)
+        folds = cfg.folds
         for fold in folds:
             fold_task = self._task_name_for_fold(task, fold, len(folds))
             runner = self._get_fold_runner(fold)
@@ -517,7 +525,7 @@ def predict_standard_free_energies(
         _copy_dictionaries(_resolve(cfg.dict_dir), processed_dir)
 
         fold_results = []
-        folds = _prediction_folds(cfg)
+        folds = cfg.folds
         for fold in folds:
             fold_cfg = replace(cfg, fold=fold)
             _run_free_energy_inference(processed_dir, results_dir, task, fold_cfg)
@@ -712,34 +720,6 @@ def _aggregate_free_energy_predictions(conformer_results: pd.DataFrame, n_molecu
     if observed != expected:
         raise ValueError(f"Expected molecule indices {expected}, got {observed}.")
     return results
-
-
-def _prediction_folds(cfg: FreeEnergyPredictionConfig) -> tuple[int, ...]:
-    if cfg.folds is None:
-        return _discover_prediction_folds(cfg)
-
-    folds = tuple(int(fold) for fold in cfg.folds)
-    if not folds:
-        raise ValueError("folds must contain at least one fold.")
-    return folds
-
-
-def _discover_prediction_folds(cfg: FreeEnergyPredictionConfig) -> tuple[int, ...]:
-    model_path = _resolve(cfg.model_dir)
-    if model_path.suffix == ".pt" or (model_path / "checkpoint_best.pt").exists():
-        return (cfg.fold,)
-
-    folds = []
-    for checkpoint in model_path.glob("fold_*/checkpoint_best.pt"):
-        fold_name = checkpoint.parent.name
-        try:
-            folds.append(int(fold_name.removeprefix("fold_")))
-        except ValueError:
-            continue
-
-    if folds:
-        return tuple(sorted(folds))
-    return (cfg.fold,)
 
 
 def _aggregate_fold_free_energy_predictions(
