@@ -11,9 +11,93 @@ from pkasso.external.unipka.pka_predictor.free_energy import (
     _free_energy_inference_argv,
     _run_inference_subprocess,
     _mol_to_unmapped_smiles,
+    _smiles_to_3d_coords,
     _suppress_unipka_extension_output,
     predict_standard_free_energies,
 )
+
+
+def test_smiles_to_3d_coords_embeds_and_optimizes_conformers_together(monkeypatch):
+    embed_multiple_confs = free_energy_module.AllChem.EmbedMultipleConfs
+    optimize_molecule_confs = free_energy_module.AllChem.MMFFOptimizeMoleculeConfs
+    calls = []
+
+    def wrapped_embed(mol, **kwargs):
+        calls.append(("embed", kwargs))
+        return embed_multiple_confs(mol, **kwargs)
+
+    def wrapped_optimize(mol, **kwargs):
+        calls.append(("optimize", kwargs))
+        return optimize_molecule_confs(mol, **kwargs)
+
+    monkeypatch.setattr(free_energy_module.AllChem, "EmbedMultipleConfs", wrapped_embed)
+    monkeypatch.setattr(free_energy_module.AllChem, "MMFFOptimizeMoleculeConfs", wrapped_optimize)
+
+    coordinates = _smiles_to_3d_coords("CCO", 3, "mmff", num_threads=2)
+
+    assert len(coordinates) == 3
+    assert calls == [
+        ("embed", {"numConfs": 3, "randomSeed": 0, "numThreads": 2}),
+        ("optimize", {"numThreads": 2}),
+    ]
+    assert all(coords.dtype.name == "float32" for coords in coordinates)
+
+
+def test_smiles_to_3d_coords_skips_bulk_optimization_in_no_mmff_mode(monkeypatch):
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("MMFF optimization should not run")
+
+    monkeypatch.setattr(free_energy_module.AllChem, "MMFFOptimizeMoleculeConfs", fail_if_called)
+
+    coordinates = _smiles_to_3d_coords("CCO", 2, "no_mmff", num_threads=2)
+
+    assert len(coordinates) == 2
+
+
+def test_smiles_to_3d_coords_falls_back_to_2d_when_bulk_embedding_fails(monkeypatch):
+    def fail_embedding(*args, **kwargs):
+        raise ValueError("embedding failed")
+
+    monkeypatch.setattr(free_energy_module.AllChem, "EmbedMultipleConfs", fail_embedding)
+
+    coordinates = _smiles_to_3d_coords("CCO", 2, "mmff", num_threads=2)
+
+    assert len(coordinates) == 2
+    assert all(coords.dtype.name == "float32" for coords in coordinates)
+
+
+def test_free_energy_record_passes_configured_threads_to_conformer_generation(monkeypatch):
+    captured = {}
+
+    def mock_metadata(smi, conformer_count, gen_mode, num_threads):
+        captured.update(
+            smi=smi,
+            conformer_count=conformer_count,
+            gen_mode=gen_mode,
+            num_threads=num_threads,
+        )
+        return {
+            "atoms": ["C"],
+            "charges": [0],
+            "coordinates": [],
+            "mol": Chem.MolFromSmiles("C"),
+            "smi": smi,
+            "scaffold": "",
+        }
+
+    monkeypatch.setattr(free_energy_module, "_smiles_to_metadata", mock_metadata)
+
+    free_energy_module._smiles_to_free_energy_record(
+        "C",
+        FreeEnergyPredictionConfig(conf_size=5, nthreads=3),
+    )
+
+    assert captured == {
+        "smi": "C",
+        "conformer_count": 4,
+        "gen_mode": "mmff",
+        "num_threads": 3,
+    }
 
 
 def test_mol_to_unmapped_smiles_removes_atom_maps_and_preserves_charge():

@@ -587,6 +587,7 @@ def _smiles_to_free_energy_record(smi: str, cfg: FreeEnergyPredictionConfig) -> 
         smi,
         conformer_count=max(cfg.conf_size - 1, 0),
         gen_mode=cfg.conformer_gen_mode,
+        num_threads=cfg.nthreads,
     )
     return {
         "atoms": metadata["atoms"],
@@ -774,7 +775,12 @@ def _mol_to_unmapped_smiles(mol: Mol) -> str:
     return smiles
 
 
-def _smiles_to_metadata(smi: str, conformer_count: int, gen_mode: str) -> dict[str, object]:
+def _smiles_to_metadata(
+    smi: str,
+    conformer_count: int,
+    gen_mode: str,
+    num_threads: int = 1,
+) -> dict[str, object]:
     if gen_mode not in {"mmff", "no_mmff"}:
         raise ValueError("conformer_gen_mode must be 'mmff' or 'no_mmff'.")
 
@@ -786,7 +792,12 @@ def _smiles_to_metadata(smi: str, conformer_count: int, gen_mode: str) -> dict[s
     if len(mol.GetAtoms()) > 400:
         coordinates = [_smiles_to_2d_coords(smi)] * (conformer_count + 1)
     else:
-        coordinates = _smiles_to_3d_coords(smi, conformer_count, gen_mode)
+        coordinates = _smiles_to_3d_coords(
+            smi,
+            conformer_count,
+            gen_mode,
+            num_threads=num_threads,
+        )
         coordinates.append(_smiles_to_2d_coords(smi))
 
     mol_h = AllChem.AddHs(mol)
@@ -821,39 +832,43 @@ def _smiles_to_2d_coords(smi: str) -> np.ndarray:
     return mol.GetConformer().GetPositions().astype(np.float32)
 
 
-def _smiles_to_3d_coords(smi: str, conformer_count: int, gen_mode: str) -> list[np.ndarray]:
+def _smiles_to_3d_coords(
+    smi: str,
+    conformer_count: int,
+    gen_mode: str,
+    num_threads: int = 1,
+) -> list[np.ndarray]:
+    if conformer_count == 0:
+        return []
+
     mol = Chem.MolFromSmiles(smi)
     if mol is None:
         raise ValueError(f"Could not parse SMILES: {smi}")
     mol = AllChem.AddHs(mol)
 
-    coordinates = []
-    for seed in range(conformer_count):
-        try:
-            res = AllChem.EmbedMolecule(mol, randomSeed=seed)
-            if res != 0:
-                mol_tmp = Chem.MolFromSmiles(smi)
-                if mol_tmp is None:
-                    raise ValueError(f"Could not parse SMILES: {smi}")
-                AllChem.EmbedMolecule(mol_tmp, maxAttempts=5000, randomSeed=seed)
-                mol_tmp = AllChem.AddHs(mol_tmp, addCoords=True)
-                coordinates.append(_optimize_or_get_coords(mol_tmp, smi, gen_mode))
-            else:
-                coordinates.append(_optimize_or_get_coords(mol, smi, gen_mode))
-        except Exception:
-            coordinates.append(_smiles_to_2d_coords(smi))
-
-    return coordinates
-
-
-def _optimize_or_get_coords(mol: Mol, smi: str, gen_mode: str) -> np.ndarray:
     try:
+        conf_ids = list(
+            AllChem.EmbedMultipleConfs(
+                mol,
+                numConfs=conformer_count,
+                randomSeed=0,
+                numThreads=num_threads,
+            )
+        )
         if gen_mode == "mmff":
-            AllChem.MMFFOptimizeMolecule(mol)
-        coordinates = mol.GetConformer().GetPositions()
+            AllChem.MMFFOptimizeMoleculeConfs(mol, numThreads=num_threads)
     except Exception:
-        coordinates = _smiles_to_2d_coords(smi)
-    return coordinates.astype(np.float32)
+        conf_ids = []
+
+    coordinates = [
+        mol.GetConformer(int(conf_id)).GetPositions().astype(np.float32)
+        for conf_id in conf_ids
+    ]
+    coordinates.extend(
+        _smiles_to_2d_coords(smi)
+        for _ in range(conformer_count - len(coordinates))
+    )
+    return coordinates
 
 
 def _task_name_from_smiles(smiles: Sequence[str]) -> str:
