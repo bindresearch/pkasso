@@ -776,7 +776,7 @@ def combine_expert_energies(
 
     shared_states = set.intersection(*state_sets)
     if not shared_states:
-        logger.warning(
+        logger.info(
             "Expert raw distributions do not share any finite microstate strings. "
             "Falling back to the first model provided."
         )

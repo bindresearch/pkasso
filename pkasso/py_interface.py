@@ -134,7 +134,12 @@ def scan_pH(
     ```
     """
 
+    if isinstance(inp, Mol):
+        smiles = MolToSmiles(inp)
+    else:
+        smiles = inp
+
     pHs_arr: NDArray[np.float64] = np.array(pHs)
 
-    ap = pKasso(inp, **_resolve_model_kwargs(kwargs, model))
+    ap = pKasso(smiles, **_resolve_model_kwargs(kwargs, model))
     return ap.run_scan(pHs=pHs_arr)
