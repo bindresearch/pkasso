@@ -121,7 +121,7 @@ def preprocess(
     charges = [at.GetFormalCharge() for at in mol.GetAtoms()]
     logger.debug(charges)
 
-    mol = rdMolStandardize.Cleanup(mol)
+    mol = rdMolStandardize.Normalize(mol)
     uncharger = rdMolStandardize.Uncharger(force=True)
 
     # load/save cycles to clean up the mol atom ordering
