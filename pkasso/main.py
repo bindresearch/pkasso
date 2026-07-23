@@ -677,8 +677,8 @@ def _estimate_energy_sigmas(
 def _sample_state_freqs(
     Gs: NDArray[np.float64],
     Gs_sigmas: NDArray[np.float64] | None,
-    n_samples: int,
-    seed: int,
+    n_samples: int = 200,
+    seed: int = 1,
 ) -> NDArray[np.float64] | None:
     """Monte-Carlo sample populations from independent free-energy errors."""
 
@@ -1153,8 +1153,6 @@ class pKasso:
     strip_fragments: bool = True
     score_window: int = 0
     num_threads: int = 1
-    uncertainty_samples: int = 200
-    uncertainty_seed: int = 1
     standard_free_energy_config: Any | None = None
     standard_free_energy_predictor: Callable[[list[Mol]], Any] | None = None
 
@@ -1272,8 +1270,8 @@ class pKasso:
 
         if self.standard_free_energy_config is None:
             predictor_config = getattr(self.standard_free_energy_predictor, "config", None)
-            return float(getattr(predictor_config, "target_mean", 6.497260103383458))
-        return float(getattr(self.standard_free_energy_config, "target_mean", 6.497260103383458))
+            return float(getattr(predictor_config, "target_mean", 6.457855284082695))
+        return float(getattr(self.standard_free_energy_config, "target_mean", 6.457855284082695))
 
     def predict_standard_free_energy_values(
         self,
@@ -1517,8 +1515,6 @@ class pKasso:
         state_freq_samples = _sample_state_freqs(
             Gs,
             Gs_sigmas,
-            self.uncertainty_samples,
-            self.uncertainty_seed,
         )
         state_freqs_sigmas = (
             None
