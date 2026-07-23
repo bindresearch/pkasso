@@ -16,23 +16,17 @@ from ..postprocess import draw_mols
 
 os.environ.setdefault("MPLCONFIGDIR", "/tmp/matplotlib-pkasso")
 
-PRECISION_MODELS = ["molgpka", "unipka"]
-
-
 def prediction_kwargs(state: AppState) -> dict[str, Any]:
     if not state.precision_mode:
         return {}
 
-    from pkasso.external.unipka.pka_predictor import FreeEnergyPredictionConfig
-
-    cfg = FreeEnergyPredictionConfig(
-        model_dir=UNIPKA_MODEL_FOLDER,
-        batch_size=16,
-        conf_size=11,
-    )
     return {
-        "model": PRECISION_MODELS,
-        "standard_free_energy_config": cfg,
+        "model": {
+            "molgpka": {},
+            "unipka": {
+                "model_dir": UNIPKA_MODEL_FOLDER,
+            },
+        },
     }
 
 

@@ -1,7 +1,7 @@
 import pytest
 
 from pkasso import py_interface
-from pkasso.predict_pka import MolgpkaPredictor, UnipkaPredictor
+from pkasso.predict_pka import UnipkaPredictor
 
 
 class Molecule:
@@ -9,7 +9,7 @@ class Molecule:
     mols = ()
 
 
-def test_protonate_resolves_model_key_to_predictor_class(monkeypatch):
+def test_protonate_passes_model_mapping_to_pkasso(monkeypatch):
     captured = {}
 
     class PKasso:
@@ -22,37 +22,16 @@ def test_protonate_resolves_model_key_to_predictor_class(monkeypatch):
             return Molecule()
 
     monkeypatch.setattr(py_interface, "pKasso", PKasso)
+    model = {"unipka": {"folds": (0, 1), "gpu": False}}
 
-    py_interface.protonate("C", pH=6.5, model="unipka")
-
-    assert captured["smiles"] == "C"
-    assert captured["pH"] == 6.5
-    assert captured["pka_predictor_cls"] is UnipkaPredictor
-
-
-def test_protonate_resolves_model_key_list_to_predictor_classes(monkeypatch):
-    captured = {}
-
-    class PKasso:
-        def __init__(self, smiles, **kwargs):
-            captured["smiles"] = smiles
-            captured.update(kwargs)
-
-        def run_single(self, pH):
-            captured["pH"] = pH
-            return Molecule()
-
-    monkeypatch.setattr(py_interface, "pKasso", PKasso)
-
-    py_interface.protonate("C", pH=6.5, model=["molgpka", "unipka"])
+    py_interface.protonate("C", pH=6.5, model=model)
 
     assert captured["smiles"] == "C"
     assert captured["pH"] == 6.5
-    assert captured["pka_predictor_classes"] == (MolgpkaPredictor, UnipkaPredictor)
-    assert "pka_predictor_cls" not in captured
+    assert captured["model"] is model
 
 
-def test_batch_protonate_resolves_model_key_list_to_predictor_classes(monkeypatch):
+def test_batch_protonate_passes_model_mapping_for_each_molecule(monkeypatch):
     captured = []
 
     class PKasso:
@@ -63,17 +42,15 @@ def test_batch_protonate_resolves_model_key_list_to_predictor_classes(monkeypatc
             return Molecule()
 
     monkeypatch.setattr(py_interface, "pKasso", PKasso)
+    model = {"molgpka": {}, "unipka": {}}
 
-    py_interface.batch_protonate(["C", "N"], model=("molgpka", "unipka"))
+    py_interface.batch_protonate(["C", "N"], model=model)
 
     assert [smiles for smiles, _ in captured] == ["C", "N"]
-    assert all(
-        kwargs["pka_predictor_classes"] == (MolgpkaPredictor, UnipkaPredictor)
-        for _, kwargs in captured
-    )
+    assert all(kwargs["model"] is model for _, kwargs in captured)
 
 
-def test_scan_ph_resolves_model_key_list_to_predictor_classes(monkeypatch):
+def test_scan_ph_passes_model_mapping_to_pkasso(monkeypatch):
     captured = {}
 
     class PKasso:
@@ -86,16 +63,17 @@ def test_scan_ph_resolves_model_key_list_to_predictor_classes(monkeypatch):
             return "scan"
 
     monkeypatch.setattr(py_interface, "pKasso", PKasso)
+    model = {"molgpka": {}, "unipka": {"nthreads": 4}}
 
-    scan = py_interface.scan_pH("C", pHs=[6.0, 7.0], model=["molgpka", "unipka"])
+    scan = py_interface.scan_pH("C", pHs=[6.0, 7.0], model=model)
 
     assert scan == "scan"
     assert captured["smiles"] == "C"
     assert captured["pHs"].tolist() == [6.0, 7.0]
-    assert captured["pka_predictor_classes"] == (MolgpkaPredictor, UnipkaPredictor)
+    assert captured["model"] is model
 
 
-def test_single_item_model_list_uses_single_predictor_class(monkeypatch):
+def test_default_model_is_left_to_pkasso(monkeypatch):
     captured = {}
 
     class PKasso:
@@ -107,17 +85,24 @@ def test_single_item_model_list_uses_single_predictor_class(monkeypatch):
 
     monkeypatch.setattr(py_interface, "pKasso", PKasso)
 
-    py_interface.protonate("C", model=["unipka"])
+    py_interface.protonate("C")
 
-    assert captured["pka_predictor_cls"] is UnipkaPredictor
-    assert "pka_predictor_classes" not in captured
+    assert "model" not in captured
 
 
 def test_entry_points_reject_predictor_classes_kwargs():
-    with pytest.raises(ValueError, match="entry points accept model keys"):
-        py_interface.protonate("C", model="unipka", pka_predictor_classes=(UnipkaPredictor,))
+    with pytest.raises(ValueError, match="model mapping"):
+        py_interface.protonate(
+            "C",
+            model={"unipka": {}},
+            pka_predictor_classes=(UnipkaPredictor,),
+        )
 
 
 def test_entry_points_reject_predictor_class_kwargs():
-    with pytest.raises(ValueError, match="entry points accept model keys"):
-        py_interface.protonate("C", model="unipka", pka_predictor_cls=UnipkaPredictor)
+    with pytest.raises(ValueError, match="model mapping"):
+        py_interface.protonate(
+            "C",
+            model={"unipka": {}},
+            pka_predictor_cls=UnipkaPredictor,
+        )

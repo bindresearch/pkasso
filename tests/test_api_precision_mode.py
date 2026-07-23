@@ -3,7 +3,6 @@ from pathlib import Path
 from pkasso.api import chemistry
 from pkasso.api.render import render_form
 from pkasso.api.state import AppState, update_state_from_form
-from pkasso.external.unipka.pka_predictor import FreeEnergyPredictionConfig
 
 
 def test_precision_mode_is_rendered_and_restored_from_form():
@@ -61,11 +60,10 @@ def test_precision_mode_passes_unipka_model_and_config_to_protonate(monkeypatch)
     chemistry.compute_prediction(state)
 
     assert captured["inp"] == "C"
-    assert captured["model"] == ["molgpka", "unipka"]
-    assert isinstance(captured["standard_free_energy_config"], FreeEnergyPredictionConfig)
-    assert captured["standard_free_energy_config"].model_dir == model_dir
-    assert captured["standard_free_energy_config"].batch_size == 16
-    assert captured["standard_free_energy_config"].conf_size == 11
+    assert captured["model"] == {
+        "molgpka": {},
+        "unipka": {"model_dir": model_dir},
+    }
 
 
 def test_precision_mode_passes_unipka_model_and_config_to_scan(monkeypatch):
@@ -85,6 +83,7 @@ def test_precision_mode_passes_unipka_model_and_config_to_scan(monkeypatch):
 
     assert state.scan == "scan"
     assert captured["inp"] == "C"
-    assert captured["model"] == ["molgpka", "unipka"]
-    assert isinstance(captured["standard_free_energy_config"], FreeEnergyPredictionConfig)
-    assert captured["standard_free_energy_config"].model_dir == model_dir
+    assert captured["model"] == {
+        "molgpka": {},
+        "unipka": {"model_dir": model_dir},
+    }

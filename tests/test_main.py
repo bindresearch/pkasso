@@ -19,14 +19,29 @@ def load_main_module():
 
     predict_pka = types.ModuleType("pkasso.predict_pka")
     class Predictor:
+        model_key = "predictor"
         thermodynamic_prediction = "pka"
+        standard_free_energy_target_mean = None
 
     class MolgpkaPredictor(Predictor):
-        pass
+        model_key = "molgpka"
 
+    class ResolvedPredictor:
+        def __init__(self, predictor_cls, config):
+            self.predictor_cls = predictor_cls
+            self.config = config
+
+    def resolve_models(model):
+        if model != {"molgpka": {}}:
+            raise ValueError(f"Unsupported test model: {model}")
+        return (ResolvedPredictor(MolgpkaPredictor, None),)
+
+    predict_pka.ModelInput = dict
     predict_pka.Predictor = Predictor
     predict_pka.MolgpkaPredictor = MolgpkaPredictor
+    predict_pka.ResolvedPredictor = ResolvedPredictor
     predict_pka.ThermodynamicPredictionMode = str
+    predict_pka.resolve_models = resolve_models
 
     postprocess = types.ModuleType("pkasso.postprocess")
     postprocess.Molecule = type("Molecule", (), {})
@@ -428,6 +443,7 @@ def test_process_cluster_uses_batched_standard_free_energies_for_unipka_path():
 
     class StandardFreeEnergyPredictor(main.Predictor):
         thermodynamic_prediction = "standard_free_energy"
+        standard_free_energy_target_mean = 6.0
 
         @classmethod
         def predict_standard_free_energies(cls, mols, *, config=None):
@@ -437,8 +453,9 @@ def test_process_cluster_uses_batched_standard_free_energies_for_unipka_path():
     pk = main.pKasso(
         "N",
         tautomer_search=False,
-        pka_predictor_cls=StandardFreeEnergyPredictor,
-        standard_free_energy_config=types.SimpleNamespace(target_mean=6.0),
+    )
+    pk.resolved_predictors = (
+        main.ResolvedPredictor(StandardFreeEnergyPredictor, None),
     )
     pk.mol0 = mol
     space = main.ProtonationIndexSpace(
@@ -464,6 +481,7 @@ def test_process_cluster_can_use_standard_free_energy_predictor_class():
 
     class StandardFreeEnergyPredictor(main.Predictor):
         thermodynamic_prediction = "standard_free_energy"
+        standard_free_energy_target_mean = 6.0
 
         @classmethod
         def predict_standard_free_energies(cls, mols, *, config=None):
@@ -473,8 +491,12 @@ def test_process_cluster_can_use_standard_free_energy_predictor_class():
     pk = main.pKasso(
         "N",
         tautomer_search=False,
-        pka_predictor_cls=StandardFreeEnergyPredictor,
-        standard_free_energy_config=types.SimpleNamespace(target_mean=6.0),
+    )
+    pk.resolved_predictors = (
+        main.ResolvedPredictor(
+            StandardFreeEnergyPredictor,
+            types.SimpleNamespace(target_mean=6.0),
+        ),
     )
     pk.mol0 = mol
     space = main.ProtonationIndexSpace(
@@ -496,6 +518,7 @@ def test_coupling_assay_weights_batches_double_states_for_unipka_path():
 
     class StandardFreeEnergyPredictor(main.Predictor):
         thermodynamic_prediction = "standard_free_energy"
+        standard_free_energy_target_mean = 6.457855284082695
 
         @classmethod
         def predict_standard_free_energies(cls, mols, *, config=None):
@@ -505,7 +528,9 @@ def test_coupling_assay_weights_batches_double_states_for_unipka_path():
     pk = main.pKasso(
         "NCCN",
         tautomer_search=False,
-        pka_predictor_cls=StandardFreeEnergyPredictor,
+    )
+    pk.resolved_predictors = (
+        main.ResolvedPredictor(StandardFreeEnergyPredictor, None),
     )
     pk.mol0 = mol
     pk.initialize_paths_models_libs()

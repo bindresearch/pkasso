@@ -15,7 +15,14 @@ from rdkit.Chem.MolStandardize import rdMolStandardize
 from rdkit.Chem.rdchem import Mol
 
 from . import coupling, special_cases, utils
-from .predict_pka import MolgpkaPredictor, Predictor, ThermodynamicPredictionMode
+from .predict_pka import (
+    ModelInput,
+    MolgpkaPredictor,
+    Predictor,
+    ResolvedPredictor,
+    ThermodynamicPredictionMode,
+    resolve_models,
+)
 from .postprocess import Molecule, Scan, combine_results
 from .transitions import (
     calc_freqs_from_states,
@@ -346,6 +353,7 @@ class PredictorContext:
     """Model-specific setup state and prediction caches."""
 
     predictor_cls: type[Predictor]
+    predictor_config: object | None = None
     index_spaces: IndexSpaceRegistry = field(default_factory=IndexSpaceRegistry)
     exclude_base_indices: list[int] = field(default_factory=list)
     exclude_acid_indices: list[int] = field(default_factory=list)
@@ -1121,11 +1129,13 @@ class pKasso:
         Optional configuration parameters. Supported keys include:
 
         Pipeline parameters:
-            name, cutoff_states, device,
-            pka_predictor_cls, pka_predictor_classes,
+            name, cutoff_states, device, model,
             free_energy_cutoff_individual, free_energy_cutoff_combined,
             expert_combination, expert_weights,
             matrix_def, cutoff_export
+
+        ``model`` is an ordered mapping from predictor names to their options,
+        for example ``{"molgpka": {}, "unipka": {"gpu": True}}``.
 
     """
 
@@ -1141,8 +1151,7 @@ class pKasso:
     cutoff_export: float = 1.0
     matrix_def: str = "dG"
     device: str = "cpu"  # fixed!
-    pka_predictor_cls: type[Predictor] = MolgpkaPredictor
-    pka_predictor_classes: Sequence[type[Predictor]] | None = None
+    model: ModelInput = field(default_factory=lambda: {"molgpka": {}})
     expert_combination: str = "product_of_experts"
     expert_weights: Sequence[float] | None = None
     tautomer_search: bool = True
@@ -1153,21 +1162,25 @@ class pKasso:
     strip_fragments: bool = True
     score_window: int = 0
     num_threads: int = 1
-    standard_free_energy_config: Any | None = None
+    resolved_predictors: tuple[ResolvedPredictor, ...] = field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        self.resolved_predictors = resolve_models(self.model)
 
     def model_classes(self) -> tuple[type[Predictor], ...]:
         """Return the configured model classes in evaluation order."""
 
-        if self.pka_predictor_classes is None:
-            return (self.pka_predictor_cls,)
-        if not self.pka_predictor_classes:
-            raise ValueError("pka_predictor_classes must contain at least one model class.")
-        return tuple(self.pka_predictor_classes)
+        return tuple(resolved.predictor_cls for resolved in self.resolved_predictors)
 
     def primary_predictor_cls(self) -> type[Predictor]:
         """Return the model used for setup and the first raw-energy pass."""
 
         return self.model_classes()[0]
+
+    def primary_predictor_config(self) -> object | None:
+        """Return the resolved configuration for the primary model."""
+
+        return self.resolved_predictors[0].config
 
     def pka_predictor(
         self,
@@ -1194,7 +1207,7 @@ class pKasso:
         mode = getattr(predictor_cls, "thermodynamic_prediction", None)
         if mode not in ("pka", "standard_free_energy"):
             raise ValueError(
-                "pka_predictor_cls must define thermodynamic_prediction as "
+                "Predictor classes must define thermodynamic_prediction as "
                 "'pka' or 'standard_free_energy'."
             )
         return mode
@@ -1261,10 +1274,19 @@ class pKasso:
         decoupled_clusters.extend(phosphate_clusters)
         return sorted(decoupled_clusters, key=lambda cluster: cluster[0])
 
-    def standard_free_energy_target_mean(self) -> float:
-        """Return the training-set pH offset used by the Uni-pKa free-energy head."""
+    def standard_free_energy_target_mean(
+        self,
+        context: PredictorContext | None = None,
+    ) -> float:
+        """Return the target-mean offset declared by a free-energy predictor."""
 
-        return float(getattr(self.standard_free_energy_config, "target_mean", 6.457855284082695))
+        predictor_cls = context.predictor_cls if context is not None else self.primary_predictor_cls()
+        target_mean = predictor_cls.standard_free_energy_target_mean
+        if target_mean is None:
+            raise ValueError(
+                f"{predictor_cls.__name__} must define standard_free_energy_target_mean."
+            )
+        return float(target_mean)
 
     def predict_standard_free_energy_values(
         self,
@@ -1276,10 +1298,15 @@ class pKasso:
         if not mols:
             return []
 
-        predictor_cls = context.predictor_cls if context is not None else self.primary_predictor_cls()
+        if context is None:
+            predictor_cls = self.primary_predictor_cls()
+            predictor_config = self.primary_predictor_config()
+        else:
+            predictor_cls = context.predictor_cls
+            predictor_config = context.predictor_config
         result = predictor_cls.predict_standard_free_energies(
             mols,
-            config=self.standard_free_energy_config,
+            config=predictor_config,
         )
 
         return _coerce_standard_free_energy_values(result, len(mols))
@@ -1346,16 +1373,20 @@ class pKasso:
         logger.debug(self.smiles0)
 
         self.predictor_contexts = [
-            self._setup_predictor_context(predictor_cls)
-            for predictor_cls in self.model_classes()
+            self._setup_predictor_context(resolved)
+            for resolved in self.resolved_predictors
         ]
         self.primary_context = self.predictor_contexts[0]
         self._bind_combined_context_space()
 
-    def _setup_predictor_context(self, predictor_cls: type[Predictor]) -> PredictorContext:
+    def _setup_predictor_context(self, resolved: ResolvedPredictor) -> PredictorContext:
         """Create model-specific site, cluster, and cache state."""
 
-        context = PredictorContext(predictor_cls=predictor_cls)
+        predictor_cls = resolved.predictor_cls
+        context = PredictorContext(
+            predictor_cls=predictor_cls,
+            predictor_config=resolved.config,
+        )
         pka_predictor = self.pka_predictor(self.mol0, context)
         context.exclude_base_indices, context.exclude_acid_indices = pka_predictor.exclude_sites()
 
@@ -1766,7 +1797,7 @@ class pKasso:
                 standard_free_energies,
                 state_vecs,
                 pH,
-                self.standard_free_energy_target_mean(),
+                self.standard_free_energy_target_mean(context),
             )
             Gs -= np.min(Gs)
         else:

@@ -2,9 +2,11 @@
 # mypy: disable-error-code=no-untyped-call
 
 from abc import ABC, abstractmethod
+from collections.abc import Mapping
+from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path
-from typing import Any, ClassVar, Literal
+from typing import Any, ClassVar, Literal, cast
 
 import numpy as np
 from rdkit import Chem
@@ -28,8 +30,19 @@ from .external.molgpka.ionization_group import get_ionization_aid
 pkg_base = resources.files("pkasso")
 
 ROOT = Path(f"{pkg_base}/data")
+UNIPKA_TARGET_MEAN = 6.457855284082695
 ThermodynamicPredictionMode = Literal["pka", "standard_free_energy"]
 PredictorKey = Literal["molgpka", "unipka"]
+ModelOptions = Mapping[str, object]
+ModelInput = Mapping[str, ModelOptions]
+
+
+@dataclass(frozen=True)
+class ResolvedPredictor:
+    """Predictor class paired with its model-specific resolved configuration."""
+
+    predictor_cls: type["Predictor"]
+    config: object | None
 
 
 def get_acid_neighbors(mol_h: Mol, acid: dict[int, float]) -> dict[int, float]:
@@ -84,11 +97,22 @@ def convert_base_ids_to_map_ids(mol_h: Mol, base_ids: list[int]) -> list[int]:
     return sorted(set(base_map_ids))
 
 class Predictor(ABC):
+    model_key: ClassVar[str]
     thermodynamic_prediction: ClassVar[ThermodynamicPredictionMode]
+    standard_free_energy_target_mean: ClassVar[float | None] = None
 
     def __init__(self, mol: Mol, device: str = "cpu"):
         self.mol = mol
         self.device = device
+
+    @classmethod
+    def resolve_options(cls, options: ModelOptions) -> object | None:
+        """Validate public model options and return an internal configuration."""
+
+        if options:
+            option_names = ", ".join(sorted(options))
+            raise ValueError(f"{cls.model_key!r} does not accept model options: {option_names}.")
+        return None
 
     @abstractmethod
     def pred_acid(self) -> dict[int, float]:
@@ -122,6 +146,7 @@ class Predictor(ABC):
         raise NotImplementedError(f"{cls.__name__} does not provide standard free-energy predictions.")
 
 class MolgpkaPredictor(Predictor):
+    model_key = "molgpka"
     thermodynamic_prediction: ClassVar[ThermodynamicPredictionMode] = "pka"
     model_file_base: ClassVar[Path] = ROOT / "weight_base.pth"
     model_file_acid: ClassVar[Path] = ROOT / "weight_acid.pth"
@@ -399,7 +424,9 @@ class MolgpkaPredictor(Predictor):
 ###########################################################################
 
 class UnipkaPredictor(Predictor):
+    model_key = "unipka"
     thermodynamic_prediction: ClassVar[ThermodynamicPredictionMode] = "standard_free_energy"
+    standard_free_energy_target_mean = UNIPKA_TARGET_MEAN
     # smarts_pattern: ClassVar[Path] = ROOT / "smarts_pattern_unipka.tsv"
     smarts_pattern: ClassVar[Path] = ROOT / "simple_smarts_pattern.tsv"
 
@@ -408,6 +435,21 @@ class UnipkaPredictor(Predictor):
         self.mol_h = Chem.rdmolops.AddHs(Chem.Mol(mol))
         self.atom_indices = [atom.GetIdx() for atom in mol.GetAtoms()]
         self.qs = np.array([at.GetFormalCharge() for at in mol.GetAtoms()])
+
+    @classmethod
+    def resolve_options(cls, options: ModelOptions) -> object:
+        """Resolve the public Uni-pKa options into its inference configuration."""
+
+        from .external.unipka.pka_predictor import UnipkaFreeEnergyConfig
+
+        valid_options = {"model_dir", "folds", "nthreads", "gpu"}
+        unknown_options = sorted(set(options) - valid_options)
+        if unknown_options:
+            unknown = ", ".join(unknown_options)
+            valid = ", ".join(sorted(valid_options))
+            raise ValueError(f"Unknown unipka option(s): {unknown}. Valid options: {valid}.")
+        config_kwargs = cast(dict[str, Any], dict(options))
+        return UnipkaFreeEnergyConfig(**config_kwargs)
 
     # def exclude_sites(self) -> tuple[list[int], list[int]]:
     #     exclude_base_indices: set[int] = set()
@@ -559,7 +601,7 @@ class UnipkaPredictor(Predictor):
 
 ############################################################################
 
-PREDICTOR_CLASSES: dict[PredictorKey, type[Predictor]] = {
+PREDICTOR_CLASSES: dict[str, type[Predictor]] = {
     "molgpka": MolgpkaPredictor,
     "unipka": UnipkaPredictor,
 }
@@ -573,6 +615,33 @@ def resolve_predictor_cls(model: PredictorKey | str) -> type[Predictor]:
     except KeyError as exc:
         valid_keys = ", ".join(sorted(PREDICTOR_CLASSES))
         raise ValueError(f"Unknown pKa predictor {model!r}. Valid predictors: {valid_keys}.") from exc
+
+
+def resolve_models(model: ModelInput) -> tuple[ResolvedPredictor, ...]:
+    """Resolve an ordered public model mapping through predictor-owned options."""
+
+    if not isinstance(model, Mapping):
+        raise TypeError(
+            "model must be a mapping such as {'molgpka': {}} or "
+            "{'molgpka': {}, 'unipka': {'gpu': True}}."
+        )
+    if not model:
+        raise ValueError("model must contain at least one predictor.")
+
+    resolved = []
+    for model_key, options in model.items():
+        if not isinstance(model_key, str):
+            raise TypeError("model keys must be predictor names.")
+        if not isinstance(options, Mapping):
+            raise TypeError(f"Options for model {model_key!r} must be a mapping.")
+        predictor_cls = resolve_predictor_cls(model_key)
+        resolved.append(
+            ResolvedPredictor(
+                predictor_cls=predictor_cls,
+                config=predictor_cls.resolve_options(options),
+            )
+        )
+    return tuple(resolved)
 
 
 def predict_acid(

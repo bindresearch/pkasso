@@ -7,8 +7,8 @@ import pickle
 import sys
 import tempfile
 from collections.abc import Sequence
-from contextlib import ExitStack, contextmanager, redirect_stderr, redirect_stdout
-from dataclasses import dataclass, replace
+from contextlib import contextmanager, redirect_stderr, redirect_stdout
+from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path
 
@@ -21,15 +21,23 @@ from rdkit.Chem.rdchem import Mol
 
 from .api import (
     REPO_ROOT,
-    PredictionConfig,
     _copy_dictionaries,
     _resolve,
     _resolve_checkpoint,
-    _log,
 )
 
 
 PKASSO_DATA = Path(str(resources.files("pkasso") / "data"))
+UNIPKA_BATCH_SIZE = 16
+UNIPKA_CONF_SIZE = 11
+_UNIPKA_DICT_DIR = PKASSO_DATA
+_UNIPKA_NUM_WORKERS = 0
+_UNIPKA_LOSS = "infer_free_energy"
+_UNIPKA_HEAD_NAME = "chembl"
+_UNIPKA_TASK_NUM = 1
+_UNIPKA_ONLY_POLAR = -1
+_UNIPKA_VALID_SUBSET = "valid"
+_UNIPKA_CONFORMER_GEN_MODE = "mmff"
 logger = logging.getLogger(__name__)
 _UNIPKA_EXTENSION_NOISE = (
     "fused_multi_tensor is not installed corrected",
@@ -41,30 +49,31 @@ _UNIPKA_EXTENSION_NOISE = (
 
 
 @dataclass(frozen=True)
-class FreeEnergyPredictionConfig(PredictionConfig):
-    """Configuration for direct Uni-pKa microstate free-energy inference."""
+class UnipkaFreeEnergyConfig:
+    """User-configurable options for Uni-pKa free-energy inference."""
 
     model_dir: Path = PKASSO_DATA
-    dict_dir: Path = PKASSO_DATA
     folds: tuple[int, ...] = (0,)
-    target_mean: float = 6.457855284082695 # dwar + iupac (no overlap)
-    loss_func: str = "infer_free_energy"
-    valid_subset: str = "valid"
-    conformer_gen_mode: str = "mmff"
-    verbose: bool = False
+    nthreads: int = 16
+    gpu: bool | None = None
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "model_dir", Path(self.model_dir))
         if isinstance(self.folds, int):
             object.__setattr__(self, "folds", (self.folds,))
         if not isinstance(self.folds, tuple):
             raise TypeError("folds must be an integer or tuple, for example 0 or (0, 1).")
         if not self.folds:
             raise ValueError("folds must contain at least one fold.")
+        if self.nthreads < 1:
+            raise ValueError("nthreads must be at least 1.")
+        if self.gpu is not None and not isinstance(self.gpu, bool):
+            raise TypeError("gpu must be True, False, or None.")
 
 
 @dataclass
 class _FreeEnergyFoldRunner:
-    cfg: FreeEnergyPredictionConfig
+    cfg: UnipkaFreeEnergyConfig
     fold: int
     args: object
     task: object
@@ -77,11 +86,11 @@ class _FreeEnergyFoldRunner:
     @classmethod
     def load(
         cls,
-        cfg: FreeEnergyPredictionConfig,
+        cfg: UnipkaFreeEnergyConfig,
         fold: int,
         task_setup_dir: Path,
     ) -> "_FreeEnergyFoldRunner":
-        with _suppress_unipka_extension_output(cfg):
+        with _suppress_unipka_extension_output():
             _ensure_unipka_user_dir()
 
             try:
@@ -95,15 +104,17 @@ class _FreeEnergyFoldRunner:
         if not checkpoint.exists():
             raise FileNotFoundError(f"Missing checkpoint: {checkpoint}")
 
-        with _suppress_unipka_extension_output(cfg):
+        with _suppress_unipka_extension_output():
             args = _parse_free_energy_inference_args(
                 task_setup_dir,
                 task_name="_model_setup",
                 checkpoint=checkpoint,
-                cfg=replace(cfg, fold=fold),
+                cfg=cfg,
+                fold=fold,
             )
-            args.cpu = not _use_fp16_or_cuda(cfg)
-            args.fp16 = _use_fp16_or_cuda(cfg)
+            use_gpu = _use_gpu(cfg)
+            args.cpu = not use_gpu
+            args.fp16 = use_gpu
 
             use_cuda = bool(torch.cuda.is_available() and not args.cpu)
             if use_cuda:
@@ -132,7 +143,7 @@ class _FreeEnergyFoldRunner:
     ) -> pd.DataFrame:
         self.args.data = str(processed_dir)
         self.args.task_name = task_name
-        self.args.valid_subset = self.cfg.valid_subset
+        self.args.valid_subset = _UNIPKA_VALID_SUBSET
 
         batches = []
         for subset in str(self.args.valid_subset).split(","):
@@ -140,7 +151,7 @@ class _FreeEnergyFoldRunner:
             dataset = self.task.dataset(subset)
             itr = self.task.get_batch_iterator(
                 dataset=dataset,
-                batch_size=self.args.batch_size,
+                batch_size=UNIPKA_BATCH_SIZE,
                 ignore_invalid_inputs=True,
                 required_batch_size_multiple=self.args.required_batch_size_multiple,
                 seed=self.args.seed,
@@ -158,27 +169,26 @@ class _FreeEnergyFoldRunner:
                     _, _, log_output = self.task.valid_step(sample, self.model, self.loss, test=True)
                     batches.append(log_output)
 
-        return _free_energy_results_from_batches(batches, n_molecules, self.cfg.conf_size)
+        return _free_energy_results_from_batches(batches, n_molecules, UNIPKA_CONF_SIZE)
 
 
 _FOLD_RUNNER_CACHE: dict[
-    tuple[FreeEnergyPredictionConfig, int],
+    tuple[UnipkaFreeEnergyConfig, int],
     _FreeEnergyFoldRunner,
 ] = {}
 
 
 def _get_cached_fold_runner(
-    cache_config: FreeEnergyPredictionConfig,
-    runtime_config: FreeEnergyPredictionConfig,
+    config: UnipkaFreeEnergyConfig,
     fold: int,
     task_setup_dir: Path,
 ) -> _FreeEnergyFoldRunner:
     """Return the process-cached model runner for one configuration and fold."""
 
-    cache_key = (cache_config, fold)
+    cache_key = (config, fold)
     runner = _FOLD_RUNNER_CACHE.get(cache_key)
     if runner is None:
-        runner = _FreeEnergyFoldRunner.load(runtime_config, fold, task_setup_dir)
+        runner = _FreeEnergyFoldRunner.load(config, fold, task_setup_dir)
         _FOLD_RUNNER_CACHE[cache_key] = runner
     return runner
 
@@ -194,11 +204,7 @@ def _ensure_unipka_user_dir() -> None:
 
 
 @contextmanager
-def _suppress_unipka_extension_output(cfg: FreeEnergyPredictionConfig):
-    if cfg.verbose:
-        yield
-        return
-
+def _suppress_unipka_extension_output():
     stdout_buffer = io.StringIO()
     stderr_buffer = io.StringIO()
     original_stdout = sys.stdout
@@ -222,11 +228,12 @@ def _parse_free_energy_inference_args(
     *,
     task_name: str,
     checkpoint: Path,
-    cfg: FreeEnergyPredictionConfig,
+    cfg: UnipkaFreeEnergyConfig,
+    fold: int,
 ) -> object:
     from unicore import options
 
-    argv = _free_energy_inference_argv(processed_dir, task_name, checkpoint, cfg)
+    argv = _free_energy_inference_argv(processed_dir, task_name, checkpoint, cfg, fold)
     parser = options.get_validation_parser()
     options.add_model_args(parser)
 
@@ -245,39 +252,41 @@ def _free_energy_inference_argv(
     processed_dir: Path,
     task_name: str,
     checkpoint: Path,
-    cfg: FreeEnergyPredictionConfig,
+    cfg: UnipkaFreeEnergyConfig,
+    fold: int | None = None,
 ) -> list[str]:
+    selected_fold = cfg.folds[0] if fold is None else fold
     argv = [
         str(processed_dir),
         "--task-name",
         task_name,
         "--valid-subset",
-        cfg.valid_subset,
+        _UNIPKA_VALID_SUBSET,
         "--results-path",
-        str(_resolve(cfg.results_dir or Path(f"{task_name}_results")) / f"fold_{cfg.fold}"),
+        str(processed_dir / "_results" / f"fold_{selected_fold}"),
         "--num-workers",
-        str(cfg.num_workers),
+        str(_UNIPKA_NUM_WORKERS),
         "--ddp-backend=c10d",
         "--batch-size",
-        str(cfg.batch_size),
+        str(UNIPKA_BATCH_SIZE),
         "--task",
         "mol_free_energy",
         "--loss",
-        cfg.loss_func,
+        _UNIPKA_LOSS,
         "--arch",
         "unimol_pka",
         "--classification-head-name",
-        cfg.head_name,
+        _UNIPKA_HEAD_NAME,
         "--num-classes",
-        str(cfg.task_num),
+        str(_UNIPKA_TASK_NUM),
         "--dict-name",
         "dict.txt",
         "--charge-dict-name",
         "dict_charge.txt",
         "--conf-size",
-        str(cfg.conf_size),
+        str(UNIPKA_CONF_SIZE),
         "--only-polar",
-        str(cfg.only_polar),
+        str(_UNIPKA_ONLY_POLAR),
         "--path",
         str(checkpoint),
         "--fp16-init-scale",
@@ -292,15 +301,18 @@ def _free_energy_inference_argv(
         "1",
     ]
 
-    if _use_fp16_or_cuda(cfg):
+    if _use_gpu(cfg):
         argv.append("--fp16")
     else:
         argv.append("--cpu")
     return argv
 
 
-def _use_fp16_or_cuda(cfg: FreeEnergyPredictionConfig) -> bool:
-    return torch.cuda.is_available() if cfg.fp16 is None else bool(cfg.fp16)
+def _use_gpu(cfg: UnipkaFreeEnergyConfig) -> bool:
+    cuda_available = bool(torch.cuda.is_available())
+    if cfg.gpu is True and not cuda_available:
+        raise RuntimeError("gpu=True requires a CUDA-capable PyTorch installation and available GPU.")
+    return cuda_available if cfg.gpu is None else cfg.gpu
 
 
 def _unique_smiles_with_inverse(smiles: Sequence[str]) -> tuple[list[str], list[int]]:
@@ -364,7 +376,7 @@ def _free_energy_results_from_batches(
 def predict_standard_free_energy(
     mol: Mol,
     *,
-    config: FreeEnergyPredictionConfig | None = None,
+    config: UnipkaFreeEnergyConfig | None = None,
 ) -> float:
     """Predict the standard microstate formation free energy for one molecule.
 
@@ -383,40 +395,28 @@ def predict_standard_free_energies(
     mols: Sequence[Mol],
     *,
     task_name: str | None = None,
-    config: FreeEnergyPredictionConfig | None = None,
+    config: UnipkaFreeEnergyConfig | None = None,
 ) -> pd.DataFrame:
     """Predict standard free energies while caching loaded checkpoints."""
 
-    cache_config = config or FreeEnergyPredictionConfig()
-    cfg = cache_config
+    cfg = config or UnipkaFreeEnergyConfig()
     if not mols:
         raise ValueError("At least one molecule is required for free-energy prediction.")
-    if cfg.conf_size < 1:
-        raise ValueError("conf_size must be at least 1.")
     smiles = [_mol_to_unmapped_smiles(mol) for mol in mols]
     unique_smiles, inverse_indices = _unique_smiles_with_inverse(smiles)
     task = task_name or _task_name_from_smiles(unique_smiles)
 
-    with ExitStack() as stack:
-        if cfg.processed_lmdb_dir is None or cfg.results_dir is None:
-            tmpdir = Path(stack.enter_context(tempfile.TemporaryDirectory()))
-            cfg = replace(
-                cfg,
-                processed_lmdb_dir=cfg.processed_lmdb_dir or tmpdir / "data",
-                results_dir=cfg.results_dir or tmpdir / "results",
-            )
-
-        processed_dir = _resolve(cfg.processed_lmdb_dir or Path(task))
+    with tempfile.TemporaryDirectory() as tmpdir:
+        processed_dir = Path(tmpdir) / "data"
 
         _write_free_energy_lmdb(unique_smiles, task, processed_dir, cfg)
-        _copy_dictionaries(_resolve(cfg.dict_dir), processed_dir)
+        _copy_dictionaries(_resolve(_UNIPKA_DICT_DIR), processed_dir)
 
         fold_results = []
         folds = cfg.folds
         for fold in folds:
             runner = _get_cached_fold_runner(
-                cache_config,
-                replace(cfg, fold=fold),
+                cfg,
                 fold,
                 processed_dir,
             )
@@ -443,15 +443,11 @@ def _write_free_energy_lmdb(
     smiles: Sequence[str],
     task_name: str,
     processed_dir: Path,
-    cfg: FreeEnergyPredictionConfig,
+    cfg: UnipkaFreeEnergyConfig,
 ) -> None:
     """Write the LMDB layout expected by ``mol_free_energy``."""
 
-    lmdb_path = processed_dir / task_name / f"{cfg.valid_subset}.lmdb"
-    if lmdb_path.exists() and not cfg.overwrite_lmdb:
-        _log(cfg, f"Using existing LMDB: {lmdb_path}")
-        return
-
+    lmdb_path = processed_dir / task_name / f"{_UNIPKA_VALID_SUBSET}.lmdb"
     try:
         import lmdb
     except ModuleNotFoundError as exc:
@@ -463,7 +459,7 @@ def _write_free_energy_lmdb(
         lmdb_path.unlink()
     lmdb_path.parent.mkdir(parents=True, exist_ok=True)
 
-    _log(cfg, f"Preprocessing {len(smiles)} molecule(s) -> {lmdb_path}")
+    logger.debug("Preprocessing %d molecule(s) -> %s", len(smiles), lmdb_path)
     env = lmdb.open(
         str(lmdb_path),
         subdir=False,
@@ -483,11 +479,11 @@ def _write_free_energy_lmdb(
         env.close()
 
 
-def _smiles_to_free_energy_record(smi: str, cfg: FreeEnergyPredictionConfig) -> dict[str, object]:
+def _smiles_to_free_energy_record(smi: str, cfg: UnipkaFreeEnergyConfig) -> dict[str, object]:
     metadata = _smiles_to_metadata(
         smi,
-        conformer_count=max(cfg.conf_size - 1, 0),
-        gen_mode=cfg.conformer_gen_mode,
+        conformer_count=UNIPKA_CONF_SIZE - 1,
+        gen_mode=_UNIPKA_CONFORMER_GEN_MODE,
         num_threads=cfg.nthreads,
     )
     return {
@@ -672,7 +668,7 @@ def _task_name_from_smiles(smiles: Sequence[str]) -> str:
 
 
 __all__ = [
-    "FreeEnergyPredictionConfig",
+    "UnipkaFreeEnergyConfig",
     "predict_standard_free_energy",
     "predict_standard_free_energies",
 ]

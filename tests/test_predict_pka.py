@@ -1,7 +1,14 @@
 import pandas as pd
+import pytest
 from rdkit import Chem
 
-from pkasso.predict_pka import MolgpkaPredictor, UnipkaPredictor, resolve_predictor_cls
+from pkasso.external.unipka.pka_predictor import UnipkaFreeEnergyConfig
+from pkasso.predict_pka import (
+    MolgpkaPredictor,
+    UnipkaPredictor,
+    resolve_models,
+    resolve_predictor_cls,
+)
 
 
 def mapped_mol(smiles: str):
@@ -83,3 +90,42 @@ def test_unipka_predictor_curates_standard_free_energy_per_molecule(monkeypatch)
 def test_resolve_predictor_cls_accepts_public_model_keys():
     assert resolve_predictor_cls("molgpka") is MolgpkaPredictor
     assert resolve_predictor_cls("unipka") is UnipkaPredictor
+    assert UnipkaPredictor.standard_free_energy_target_mean == 6.457855284082695
+
+
+def test_resolve_models_preserves_order_and_delegates_options():
+    resolved = resolve_models(
+        {
+            "molgpka": {},
+            "unipka": {
+                "folds": (0, 1),
+                "nthreads": 4,
+                "gpu": False,
+            },
+        }
+    )
+
+    assert [item.predictor_cls for item in resolved] == [MolgpkaPredictor, UnipkaPredictor]
+    assert resolved[0].config is None
+    assert resolved[1].config == UnipkaFreeEnergyConfig(
+        folds=(0, 1),
+        nthreads=4,
+        gpu=False,
+    )
+
+
+@pytest.mark.parametrize("model", ["unipka", ["unipka"], (), {}])
+def test_resolve_models_requires_nonempty_mapping(model):
+    expected_error = ValueError if model == {} else TypeError
+    with pytest.raises(expected_error):
+        resolve_models(model)
+
+
+def test_molgpka_rejects_model_options():
+    with pytest.raises(ValueError, match="does not accept model options"):
+        resolve_models({"molgpka": {"gpu": False}})
+
+
+def test_unipka_rejects_unknown_model_options():
+    with pytest.raises(ValueError, match="Unknown unipka option"):
+        resolve_models({"unipka": {"batch_size": 4}})

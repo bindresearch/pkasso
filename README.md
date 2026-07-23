@@ -66,6 +66,21 @@ smiles_out, mols_out = protonate(smiles, name=name, pH=pH, cutoff_export=cutoff_
 print(smiles_out)
 ```
 
+Predictors and their options are selected with an ordered mapping:
+
+```python
+model = {
+    "molgpka": {},
+    "unipka": {
+        "model_dir": "/path/to/unipka/models",
+        "folds": (0,),
+        "nthreads": 8,
+        "gpu": True,
+    },
+}
+smiles_out, mols_out = protonate(smiles, model=model, pH=pH)
+```
+
 For more examples, see the [jupyter notebook](https://github.com/bindresearch/pkasso/blob/main/example/example.ipynb).
 
 ### Local webserver

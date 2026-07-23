@@ -1,4 +1,5 @@
 from dataclasses import replace
+import inspect
 
 import pandas as pd
 import pytest
@@ -6,13 +7,16 @@ from rdkit import Chem
 
 from pkasso.external.unipka.pka_predictor import free_energy as free_energy_module
 from pkasso.external.unipka.pka_predictor.free_energy import (
-    FreeEnergyPredictionConfig,
+    UNIPKA_BATCH_SIZE,
+    UNIPKA_CONF_SIZE,
+    UnipkaFreeEnergyConfig,
     _aggregate_free_energy_predictions,
     _aggregate_fold_free_energy_predictions,
     _free_energy_inference_argv,
     _mol_to_unmapped_smiles,
     _smiles_to_3d_coords,
     _suppress_unipka_extension_output,
+    _use_gpu,
     predict_standard_free_energies,
 )
 
@@ -89,12 +93,12 @@ def test_free_energy_record_passes_configured_threads_to_conformer_generation(mo
 
     free_energy_module._smiles_to_free_energy_record(
         "C",
-        FreeEnergyPredictionConfig(conf_size=5, nthreads=3),
+        UnipkaFreeEnergyConfig(nthreads=3),
     )
 
     assert captured == {
         "smi": "C",
-        "conformer_count": 4,
+        "conformer_count": 10,
         "gen_mode": "mmff",
         "num_threads": 3,
     }
@@ -159,11 +163,48 @@ def test_aggregate_fold_free_energy_predictions_averages_folds_by_input_order():
 
 
 def test_free_energy_config_defaults_to_one_fold():
-    assert FreeEnergyPredictionConfig().folds == (0,)
+    assert UnipkaFreeEnergyConfig().folds == (0,)
 
 
 def test_free_energy_config_accepts_single_fold_without_trailing_comma():
-    assert FreeEnergyPredictionConfig(folds=(0)).folds == (0,)
+    assert UnipkaFreeEnergyConfig(folds=(0)).folds == (0,)
+
+
+def test_unipka_config_exposes_only_supported_keywords():
+    assert list(inspect.signature(UnipkaFreeEnergyConfig).parameters) == [
+        "model_dir",
+        "folds",
+        "nthreads",
+        "gpu",
+    ]
+    with pytest.raises(TypeError):
+        UnipkaFreeEnergyConfig(batch_size=4)
+    with pytest.raises(TypeError):
+        UnipkaFreeEnergyConfig(conf_size=3)
+    with pytest.raises(TypeError):
+        UnipkaFreeEnergyConfig(target_mean=6.0)
+    with pytest.raises(TypeError):
+        UnipkaFreeEnergyConfig(fp16=True)
+
+
+def test_unipka_inference_constants_are_fixed():
+    assert UNIPKA_BATCH_SIZE == 16
+    assert UNIPKA_CONF_SIZE == 11
+
+
+def test_gpu_defaults_to_cuda_availability(monkeypatch):
+    monkeypatch.setattr(free_energy_module.torch.cuda, "is_available", lambda: True)
+    assert _use_gpu(UnipkaFreeEnergyConfig()) is True
+
+    monkeypatch.setattr(free_energy_module.torch.cuda, "is_available", lambda: False)
+    assert _use_gpu(UnipkaFreeEnergyConfig()) is False
+
+
+def test_gpu_true_requires_cuda(monkeypatch):
+    monkeypatch.setattr(free_energy_module.torch.cuda, "is_available", lambda: False)
+
+    with pytest.raises(RuntimeError, match="gpu=True"):
+        _use_gpu(UnipkaFreeEnergyConfig(gpu=True))
 
 
 def test_predict_standard_free_energies_runs_only_configured_default_fold(monkeypatch, tmp_path):
@@ -196,11 +237,8 @@ def test_predict_standard_free_energies_runs_only_configured_default_fold(monkey
 
     results = predict_standard_free_energies(
         [Chem.MolFromSmiles("CCO")],
-        config=FreeEnergyPredictionConfig(
+        config=UnipkaFreeEnergyConfig(
             model_dir=tmp_path / "model",
-            processed_lmdb_dir=tmp_path / "data",
-            results_dir=tmp_path / "results",
-            conf_size=1,
         ),
     )
 
@@ -239,13 +277,9 @@ def test_predict_standard_free_energies_deduplicates_smiles_and_reuses_runner(mo
     monkeypatch.setattr(free_energy_module, "_write_free_energy_lmdb", mock_write_free_energy_lmdb)
     monkeypatch.setattr(free_energy_module._FreeEnergyFoldRunner, "load", staticmethod(mock_load))
 
-    config = FreeEnergyPredictionConfig(
+    config = UnipkaFreeEnergyConfig(
         model_dir=tmp_path / "model",
-        dict_dir=tmp_path / "dict",
-        processed_lmdb_dir=tmp_path / "data",
-        results_dir=tmp_path / "results",
         folds=(0,),
-        conf_size=1,
     )
 
     results = predict_standard_free_energies(
@@ -301,13 +335,9 @@ def test_predict_standard_free_energies_runs_and_averages_five_cached_folds(monk
 
     monkeypatch.setattr(free_energy_module._FreeEnergyFoldRunner, "load", staticmethod(mock_load))
 
-    config = FreeEnergyPredictionConfig(
+    config = UnipkaFreeEnergyConfig(
         model_dir=tmp_path / "model",
-        dict_dir=tmp_path / "dict",
-        processed_lmdb_dir=tmp_path / "data",
-        results_dir=tmp_path / "results",
         folds=(0, 1, 2, 3, 4),
-        conf_size=1,
     )
 
     results = predict_standard_free_energies([Chem.MolFromSmiles("C")], config=config)
@@ -324,14 +354,16 @@ def test_cached_free_energy_argv_omits_user_dir_to_avoid_reimport_guard(tmp_path
         tmp_path / "data",
         task_name="task",
         checkpoint=tmp_path / "checkpoint_best.pt",
-        cfg=FreeEnergyPredictionConfig(results_dir=tmp_path / "results"),
+        cfg=UnipkaFreeEnergyConfig(),
     )
 
     assert "--user-dir" not in argv
+    assert argv[argv.index("--batch-size") + 1] == "16"
+    assert argv[argv.index("--conf-size") + 1] == "11"
 
 
 def test_suppress_unipka_extension_output_filters_known_fused_messages(capsys):
-    with _suppress_unipka_extension_output(FreeEnergyPredictionConfig()):
+    with _suppress_unipka_extension_output():
         print("fused_multi_tensor is not installed corrected")
         print("fused_layer_norm is not installed corrected")
         print("ordinary setup message")
@@ -341,12 +373,3 @@ def test_suppress_unipka_extension_output_filters_known_fused_messages(capsys):
     assert "fused_multi_tensor" not in captured.out
     assert "fused_layer_norm" not in captured.out
     assert "ordinary setup message" in captured.out
-
-
-def test_suppress_unipka_extension_output_respects_verbose(capsys):
-    with _suppress_unipka_extension_output(FreeEnergyPredictionConfig(verbose=True)):
-        print("fused_multi_tensor is not installed corrected")
-
-    captured = capsys.readouterr()
-
-    assert "fused_multi_tensor is not installed corrected" in captured.out
