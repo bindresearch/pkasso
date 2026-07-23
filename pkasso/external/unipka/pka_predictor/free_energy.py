@@ -4,6 +4,7 @@ import hashlib
 import io
 import logging
 import pickle
+import shutil
 import sys
 import tempfile
 from collections.abc import Sequence
@@ -172,10 +173,8 @@ class _FreeEnergyFoldRunner:
         return _free_energy_results_from_batches(batches, n_molecules, UNIPKA_CONF_SIZE)
 
 
-_FOLD_RUNNER_CACHE: dict[
-    tuple[UnipkaFreeEnergyConfig, int],
-    _FreeEnergyFoldRunner,
-] = {}
+_FoldRunnerCacheKey = tuple[Path, bool | None, int]
+_FOLD_RUNNER_CACHE: dict[_FoldRunnerCacheKey, _FreeEnergyFoldRunner] = {}
 
 
 def _get_cached_fold_runner(
@@ -185,12 +184,32 @@ def _get_cached_fold_runner(
 ) -> _FreeEnergyFoldRunner:
     """Return the process-cached model runner for one configuration and fold."""
 
-    cache_key = (config, fold)
+    cache_key = (_resolve(config.model_dir), config.gpu, fold)
     runner = _FOLD_RUNNER_CACHE.get(cache_key)
     if runner is None:
         runner = _FreeEnergyFoldRunner.load(config, fold, task_setup_dir)
         _FOLD_RUNNER_CACHE[cache_key] = runner
     return runner
+
+
+def _task_name_for_fold(
+    processed_dir: Path,
+    task_name: str,
+    fold: int,
+    n_folds: int,
+) -> str:
+    """Give each concurrently retained fold dataset its own LMDB path."""
+
+    if n_folds == 1:
+        return task_name
+
+    fold_task_name = f"{task_name}_fold_{fold}"
+    source = processed_dir / task_name / f"{_UNIPKA_VALID_SUBSET}.lmdb"
+    destination_dir = processed_dir / fold_task_name
+    destination = destination_dir / f"{_UNIPKA_VALID_SUBSET}.lmdb"
+    destination_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source, destination)
+    return fold_task_name
 
 
 def _ensure_unipka_user_dir() -> None:
@@ -415,13 +434,19 @@ def predict_standard_free_energies(
         fold_results = []
         folds = cfg.folds
         for fold in folds:
+            fold_task = _task_name_for_fold(
+                processed_dir,
+                task,
+                fold,
+                len(folds),
+            )
             runner = _get_cached_fold_runner(
                 cfg,
                 fold,
                 processed_dir,
             )
             fold_results.append(
-                runner.predict(processed_dir, task, len(unique_smiles))
+                runner.predict(processed_dir, fold_task, len(unique_smiles))
             )
 
         if len(fold_results) == 1:

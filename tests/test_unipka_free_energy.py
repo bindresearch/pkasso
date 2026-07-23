@@ -308,10 +308,16 @@ def test_predict_standard_free_energies_deduplicates_smiles_and_reuses_runner(mo
 def test_predict_standard_free_energies_runs_and_averages_five_cached_folds(monkeypatch, tmp_path):
     monkeypatch.setattr(free_energy_module, "_copy_dictionaries", lambda dict_dir, processed_dir: None)
 
-    monkeypatch.setattr(free_energy_module, "_write_free_energy_lmdb", lambda *args: None)
+    def mock_write_free_energy_lmdb(smiles, task_name, processed_dir, cfg):
+        lmdb_path = processed_dir / task_name / "valid.lmdb"
+        lmdb_path.parent.mkdir(parents=True, exist_ok=True)
+        lmdb_path.write_bytes(b"test")
+
+    monkeypatch.setattr(free_energy_module, "_write_free_energy_lmdb", mock_write_free_energy_lmdb)
 
     runner_load_folds = []
     runner_predict_folds = []
+    runner_task_names = []
 
     class FakeRunner:
         def __init__(self, fold):
@@ -319,6 +325,7 @@ def test_predict_standard_free_energies_runs_and_averages_five_cached_folds(monk
 
         def predict(self, processed_dir, task_name, n_molecules):
             runner_predict_folds.append(self.fold)
+            runner_task_names.append(task_name)
             return pd.DataFrame(
                 {
                     "molecule_index": [0],
@@ -345,8 +352,61 @@ def test_predict_standard_free_energies_runs_and_averages_five_cached_folds(monk
 
     assert runner_load_folds == [0, 1, 2, 3, 4]
     assert runner_predict_folds == [0, 1, 2, 3, 4, 0, 1, 2, 3, 4]
+    assert len(set(runner_task_names[:5])) == 5
+    assert all(task_name.endswith(f"_fold_{fold}") for fold, task_name in enumerate(runner_task_names[:5]))
     assert results["standard_free_energy"].tolist() == [2.0]
     assert results["n_folds"].tolist() == [5]
+
+
+def test_changing_selected_folds_reuses_loaded_fold_and_isolates_lmdb_paths(monkeypatch, tmp_path):
+    monkeypatch.setattr(free_energy_module, "_copy_dictionaries", lambda *args: None)
+
+    def mock_write_free_energy_lmdb(smiles, task_name, processed_dir, cfg):
+        lmdb_path = processed_dir / task_name / "valid.lmdb"
+        lmdb_path.parent.mkdir(parents=True, exist_ok=True)
+        lmdb_path.write_bytes(b"test")
+
+    loaded_folds = []
+    predicted = []
+
+    class FakeRunner:
+        def __init__(self, fold):
+            self.fold = fold
+
+        def predict(self, processed_dir, task_name, n_molecules):
+            predicted.append((self.fold, processed_dir / task_name / "valid.lmdb"))
+            return pd.DataFrame(
+                {
+                    "molecule_index": [0],
+                    "smiles": ["C"],
+                    "standard_free_energy": [float(self.fold)],
+                    "standard_free_energy_std": [0.0],
+                    "n_conformers": [11],
+                }
+            )
+
+    def mock_load(cfg, fold, task_setup_dir):
+        loaded_folds.append(fold)
+        return FakeRunner(fold)
+
+    monkeypatch.setattr(free_energy_module, "_write_free_energy_lmdb", mock_write_free_energy_lmdb)
+    monkeypatch.setattr(free_energy_module._FreeEnergyFoldRunner, "load", staticmethod(mock_load))
+
+    model_dir = tmp_path / "model"
+    molecule = Chem.MolFromSmiles("C")
+    predict_standard_free_energies(
+        [molecule],
+        config=UnipkaFreeEnergyConfig(model_dir=model_dir, folds=(0,)),
+    )
+    predict_standard_free_energies(
+        [molecule],
+        config=UnipkaFreeEnergyConfig(model_dir=model_dir, folds=(0, 1)),
+    )
+
+    assert loaded_folds == [0, 1]
+    assert [fold for fold, _ in predicted] == [0, 0, 1]
+    assert predicted[1][1] != predicted[2][1]
+    assert predicted[1][1].name == predicted[2][1].name == "valid.lmdb"
 
 
 def test_cached_free_energy_argv_omits_user_dir_to_avoid_reimport_guard(tmp_path):
