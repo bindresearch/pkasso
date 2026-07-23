@@ -4,8 +4,6 @@ import hashlib
 import io
 import logging
 import pickle
-import shutil
-import subprocess
 import sys
 import tempfile
 from collections.abc import Sequence
@@ -24,7 +22,6 @@ from rdkit.Chem.rdchem import Mol
 from .api import (
     REPO_ROOT,
     PredictionConfig,
-    _CPUUnpickler,
     _copy_dictionaries,
     _resolve,
     _resolve_checkpoint,
@@ -34,7 +31,6 @@ from .api import (
 
 PKASSO_DATA = Path(str(resources.files("pkasso") / "data"))
 logger = logging.getLogger(__name__)
-_SESSION_CACHE: dict[FreeEnergyPredictionConfig, FreeEnergyInferenceSession] = {}
 _UNIPKA_EXTENSION_NOISE = (
     "fused_multi_tensor is not installed corrected",
     "fused_rounding is not installed corrected",
@@ -66,125 +62,6 @@ class FreeEnergyPredictionConfig(PredictionConfig):
             raise ValueError("folds must contain at least one fold.")
 
 
-class FreeEnergyInferenceSession:
-    """Reusable in-process Uni-pKa free-energy inference session.
-
-    The session keeps the UniMol model loaded across calls. It still writes the
-    small LMDB expected by the existing UniMol dataset layer, which keeps this
-    integration close to the original inference path while avoiding repeated
-    Python process startup and checkpoint loading.
-    """
-
-    def __init__(self, config: FreeEnergyPredictionConfig | None = None) -> None:
-        self.config = config or FreeEnergyPredictionConfig()
-        self._stack = ExitStack()
-        self._closed = False
-        self._prediction_count = 0
-        self._fold_runners: dict[int, _FreeEnergyFoldRunner] = {}
-
-        cfg = self.config
-        if cfg.processed_lmdb_dir is None or cfg.results_dir is None:
-            tmpdir = Path(self._stack.enter_context(tempfile.TemporaryDirectory()))
-            cfg = replace(
-                cfg,
-                processed_lmdb_dir=cfg.processed_lmdb_dir or tmpdir / "data",
-                results_dir=cfg.results_dir or tmpdir / "results",
-            )
-            self.config = cfg
-
-        self.processed_dir = _resolve(cfg.processed_lmdb_dir or Path("free_energy_session"))
-        self.results_dir = _resolve(cfg.results_dir or Path("free_energy_session_results"))
-        self._task_setup_dir = self.processed_dir / "_session_setup"
-        self._task_setup_dir.mkdir(parents=True, exist_ok=True)
-        _copy_dictionaries(_resolve(cfg.dict_dir), self._task_setup_dir)
-
-    def __enter__(self) -> "FreeEnergyInferenceSession":
-        return self
-
-    def __exit__(self, *exc_info: object) -> None:
-        self.close()
-
-    def __del__(self) -> None:
-        self.close()
-
-    def __call__(self, mols: Sequence[Mol]) -> pd.DataFrame:
-        return self.predict_standard_free_energies(mols)
-
-    def close(self) -> None:
-        if self._closed:
-            return
-        self._fold_runners.clear()
-        self._stack.close()
-        self._closed = True
-
-    def predict_standard_free_energies(self, mols: Sequence[Mol]) -> pd.DataFrame:
-        """Predict conformer-averaged standard free energies for RDKit molecules."""
-
-        if self._closed:
-            raise RuntimeError("FreeEnergyInferenceSession is closed.")
-
-        cfg = self.config
-        if not mols:
-            raise ValueError("At least one molecule is required for free-energy prediction.")
-        if cfg.conf_size < 1:
-            raise ValueError("conf_size must be at least 1.")
-
-        smiles = [_mol_to_unmapped_smiles(mol) for mol in mols]
-        unique_smiles, inverse_indices = _unique_smiles_with_inverse(smiles)
-        task = self._next_task_name(unique_smiles)
-
-        _write_free_energy_lmdb(unique_smiles, task, self.processed_dir, cfg)
-
-        fold_results = []
-        folds = cfg.folds
-        for fold in folds:
-            fold_task = self._task_name_for_fold(task, fold, len(folds))
-            runner = self._get_fold_runner(fold)
-            fold_results.append(
-                runner.predict(
-                    self.processed_dir,
-                    fold_task,
-                    len(unique_smiles),
-                )
-            )
-
-        if len(fold_results) == 1:
-            unique_results = fold_results[0]
-        else:
-            unique_results = _aggregate_fold_free_energy_predictions(
-                fold_results,
-                folds,
-                len(unique_smiles),
-            )
-        return _expand_unique_free_energy_predictions(unique_results, smiles, inverse_indices)
-
-    def _next_task_name(self, smiles: Sequence[str]) -> str:
-        self._prediction_count += 1
-        return f"{_task_name_from_smiles(smiles)}_{self._prediction_count}"
-
-    def _task_name_for_fold(self, task_name: str, fold: int, n_folds: int) -> str:
-        if n_folds == 1:
-            return task_name
-
-        fold_task = f"{task_name}_fold_{fold}"
-        src_lmdb = self.processed_dir / task_name / f"{self.config.valid_subset}.lmdb"
-        dst_dir = self.processed_dir / fold_task
-        dst_lmdb = dst_dir / f"{self.config.valid_subset}.lmdb"
-        if not dst_lmdb.exists():
-            dst_dir.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(src_lmdb, dst_lmdb)
-        return fold_task
-
-    def _get_fold_runner(self, fold: int) -> "_FreeEnergyFoldRunner":
-        if fold not in self._fold_runners:
-            self._fold_runners[fold] = _FreeEnergyFoldRunner.load(
-                self.config,
-                fold,
-                self._task_setup_dir,
-            )
-        return self._fold_runners[fold]
-
-
 @dataclass
 class _FreeEnergyFoldRunner:
     cfg: FreeEnergyPredictionConfig
@@ -211,7 +88,7 @@ class _FreeEnergyFoldRunner:
                 from unicore import checkpoint_utils, options, tasks, utils as unicore_utils
             except ModuleNotFoundError as exc:
                 raise ModuleNotFoundError(
-                    "Reusable Uni-pKa inference requires the optional 'unicore' package."
+                    "Uni-pKa inference requires the optional 'unicore' package."
                 ) from exc
 
         checkpoint = _resolve_checkpoint(cfg.model_dir, fold)
@@ -221,7 +98,7 @@ class _FreeEnergyFoldRunner:
         with _suppress_unipka_extension_output(cfg):
             args = _parse_free_energy_inference_args(
                 task_setup_dir,
-                task_name="_session_setup",
+                task_name="_model_setup",
                 checkpoint=checkpoint,
                 cfg=replace(cfg, fold=fold),
             )
@@ -282,6 +159,28 @@ class _FreeEnergyFoldRunner:
                     batches.append(log_output)
 
         return _free_energy_results_from_batches(batches, n_molecules, self.cfg.conf_size)
+
+
+_FOLD_RUNNER_CACHE: dict[
+    tuple[FreeEnergyPredictionConfig, int],
+    _FreeEnergyFoldRunner,
+] = {}
+
+
+def _get_cached_fold_runner(
+    cache_config: FreeEnergyPredictionConfig,
+    runtime_config: FreeEnergyPredictionConfig,
+    fold: int,
+    task_setup_dir: Path,
+) -> _FreeEnergyFoldRunner:
+    """Return the process-cached model runner for one configuration and fold."""
+
+    cache_key = (cache_config, fold)
+    runner = _FOLD_RUNNER_CACHE.get(cache_key)
+    if runner is None:
+        runner = _FreeEnergyFoldRunner.load(runtime_config, fold, task_setup_dir)
+        _FOLD_RUNNER_CACHE[cache_key] = runner
+    return runner
 
 
 def _ensure_unipka_user_dir() -> None:
@@ -480,34 +379,23 @@ def predict_standard_free_energy(
     return float(results.loc[0, "standard_free_energy"])
 
 
-def get_standard_free_energy_session(
-    config: FreeEnergyPredictionConfig | None = None,
-) -> FreeEnergyInferenceSession:
-    """Return a cached reusable Uni-pKa free-energy inference session."""
-
-    cfg = config or FreeEnergyPredictionConfig()
-    session = _SESSION_CACHE.get(cfg)
-    if session is None or session._closed:
-        session = FreeEnergyInferenceSession(cfg)
-        _SESSION_CACHE[cfg] = session
-    return session
-
-
 def predict_standard_free_energies(
     mols: Sequence[Mol],
     *,
     task_name: str | None = None,
     config: FreeEnergyPredictionConfig | None = None,
 ) -> pd.DataFrame:
-    """Predict conformer-averaged standard free energies for RDKit molecules."""
+    """Predict standard free energies while caching loaded checkpoints."""
 
-    cfg = config or FreeEnergyPredictionConfig()
+    cache_config = config or FreeEnergyPredictionConfig()
+    cfg = cache_config
     if not mols:
         raise ValueError("At least one molecule is required for free-energy prediction.")
     if cfg.conf_size < 1:
         raise ValueError("conf_size must be at least 1.")
     smiles = [_mol_to_unmapped_smiles(mol) for mol in mols]
-    task = task_name or _task_name_from_smiles(smiles)
+    unique_smiles, inverse_indices = _unique_smiles_with_inverse(smiles)
+    task = task_name or _task_name_from_smiles(unique_smiles)
 
     with ExitStack() as stack:
         if cfg.processed_lmdb_dir is None or cfg.results_dir is None:
@@ -519,23 +407,36 @@ def predict_standard_free_energies(
             )
 
         processed_dir = _resolve(cfg.processed_lmdb_dir or Path(task))
-        results_dir = _resolve(cfg.results_dir or Path(f"{task}_results"))
 
-        _write_free_energy_lmdb(smiles, task, processed_dir, cfg)
+        _write_free_energy_lmdb(unique_smiles, task, processed_dir, cfg)
         _copy_dictionaries(_resolve(cfg.dict_dir), processed_dir)
 
         fold_results = []
         folds = cfg.folds
         for fold in folds:
-            fold_cfg = replace(cfg, fold=fold)
-            _run_free_energy_inference(processed_dir, results_dir, task, fold_cfg)
+            runner = _get_cached_fold_runner(
+                cache_config,
+                replace(cfg, fold=fold),
+                fold,
+                processed_dir,
+            )
             fold_results.append(
-                _read_free_energy_results(results_dir, fold, len(smiles), cfg.conf_size)
+                runner.predict(processed_dir, task, len(unique_smiles))
             )
 
         if len(fold_results) == 1:
-            return fold_results[0]
-        return _aggregate_fold_free_energy_predictions(fold_results, folds, len(smiles))
+            unique_results = fold_results[0]
+        else:
+            unique_results = _aggregate_fold_free_energy_predictions(
+                fold_results,
+                folds,
+                len(unique_smiles),
+            )
+        return _expand_unique_free_energy_predictions(
+            unique_results,
+            smiles,
+            inverse_indices,
+        )
 
 
 def _write_free_energy_lmdb(
@@ -598,112 +499,6 @@ def _smiles_to_free_energy_record(smi: str, cfg: FreeEnergyPredictionConfig) -> 
         "scaffold": metadata["scaffold"],
         "target": -1.0,
     }
-
-
-def _run_free_energy_inference(
-    processed_dir: Path,
-    results_dir: Path,
-    task_name: str,
-    cfg: FreeEnergyPredictionConfig,
-) -> None:
-    checkpoint = _resolve_checkpoint(cfg.model_dir, cfg.fold)
-    if not checkpoint.exists():
-        raise FileNotFoundError(f"Missing checkpoint: {checkpoint}")
-
-    fold_results_dir = results_dir / f"fold_{cfg.fold}"
-    cmd = [
-        cfg.python_executable,
-        str(REPO_ROOT / "unimol" / "infer.py"),
-        "--user-dir",
-        str(REPO_ROOT / "unimol"),
-        str(processed_dir),
-        "--task-name",
-        task_name,
-        "--valid-subset",
-        cfg.valid_subset,
-        "--results-path",
-        str(fold_results_dir),
-        "--num-workers",
-        str(cfg.num_workers),
-        "--ddp-backend=c10d",
-        "--batch-size",
-        str(cfg.batch_size),
-        "--task",
-        "mol_free_energy",
-        "--loss",
-        cfg.loss_func,
-        "--arch",
-        "unimol_pka",
-        "--classification-head-name",
-        cfg.head_name,
-        "--num-classes",
-        str(cfg.task_num),
-        "--dict-name",
-        "dict.txt",
-        "--charge-dict-name",
-        "dict_charge.txt",
-        "--conf-size",
-        str(cfg.conf_size),
-        "--only-polar",
-        str(cfg.only_polar),
-        "--path",
-        str(checkpoint),
-        "--fp16-init-scale",
-        "4",
-        "--fp16-scale-window",
-        "256",
-        "--log-interval",
-        "50",
-        "--log-format",
-        "simple",
-        "--required-batch-size-multiple",
-        "1",
-    ]
-
-    use_fp16 = torch.cuda.is_available() if cfg.fp16 is None else cfg.fp16
-    if use_fp16:
-        cmd.append("--fp16")
-    else:
-        cmd.append("--cpu")
-
-    _log(cfg, f"Running standard free-energy inference with fold_{cfg.fold}")
-    _run_inference_subprocess(cmd, cfg)
-
-
-def _run_inference_subprocess(cmd: list[str], cfg: FreeEnergyPredictionConfig) -> None:
-    if cfg.verbose:
-        subprocess.run(cmd, cwd=REPO_ROOT, check=True)
-        return
-
-    completed = subprocess.run(
-        cmd,
-        cwd=REPO_ROOT,
-        text=True,
-        capture_output=True,
-    )
-    if completed.returncode != 0:
-        if completed.stdout:
-            sys.stdout.write(completed.stdout)
-        if completed.stderr:
-            sys.stderr.write(completed.stderr)
-        completed.check_returncode()
-
-
-def _read_free_energy_results(
-    results_dir: Path,
-    fold: int,
-    n_molecules: int,
-    conf_size: int,
-) -> pd.DataFrame:
-    fold_dir = results_dir / f"fold_{fold}"
-    pkl_files = sorted(fold_dir.glob("*.pkl"))
-    if not pkl_files:
-        raise FileNotFoundError(f"No inference pickle found in {fold_dir}")
-
-    with pkl_files[0].open("rb") as handle:
-        batches = _CPUUnpickler(handle).load()
-
-    return _free_energy_results_from_batches(batches, n_molecules, conf_size)
 
 
 def _aggregate_free_energy_predictions(conformer_results: pd.DataFrame, n_molecules: int) -> pd.DataFrame:
@@ -877,9 +672,7 @@ def _task_name_from_smiles(smiles: Sequence[str]) -> str:
 
 
 __all__ = [
-    "FreeEnergyInferenceSession",
     "FreeEnergyPredictionConfig",
-    "get_standard_free_energy_session",
     "predict_standard_free_energy",
     "predict_standard_free_energies",
 ]

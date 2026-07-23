@@ -419,17 +419,6 @@ def test_bind_combined_context_space_uses_union_of_predictor_indices():
     assert pk.index_space0.indices == [1, 2]
 
 
-def test_standard_free_energy_target_mean_uses_predictor_config_when_session_is_injected():
-    predictor = types.SimpleNamespace(config=types.SimpleNamespace(target_mean=5.75))
-    pk = main.pKasso(
-        "C",
-        tautomer_search=False,
-        standard_free_energy_predictor=predictor,
-    )
-
-    assert pk.standard_free_energy_target_mean() == pytest.approx(5.75)
-
-
 def test_process_cluster_uses_batched_standard_free_energies_for_unipka_path():
     mol = Chem.MolFromSmiles("N")
     for atom in mol.GetAtoms():
@@ -437,14 +426,18 @@ def test_process_cluster_uses_batched_standard_free_energies_for_unipka_path():
 
     calls = []
 
-    def predict_standard_free_energies(mols):
-        calls.append([mol.GetProp("_Name") for mol in mols])
-        return [0.0 for _ in mols]
+    class StandardFreeEnergyPredictor(main.Predictor):
+        thermodynamic_prediction = "standard_free_energy"
+
+        @classmethod
+        def predict_standard_free_energies(cls, mols, *, config=None):
+            calls.append([mol.GetProp("_Name") for mol in mols])
+            return [0.0 for _ in mols]
 
     pk = main.pKasso(
         "N",
         tautomer_search=False,
-        standard_free_energy_predictor=predict_standard_free_energies,
+        pka_predictor_cls=StandardFreeEnergyPredictor,
         standard_free_energy_config=types.SimpleNamespace(target_mean=6.0),
     )
     pk.mol0 = mol
@@ -501,14 +494,18 @@ def test_coupling_assay_weights_batches_double_states_for_unipka_path():
 
     calls = []
 
-    def predict_standard_free_energies(mols):
-        calls.append([mol.GetProp("_Name") for mol in mols])
-        return [0.0 for _ in mols]
+    class StandardFreeEnergyPredictor(main.Predictor):
+        thermodynamic_prediction = "standard_free_energy"
+
+        @classmethod
+        def predict_standard_free_energies(cls, mols, *, config=None):
+            calls.append([mol.GetProp("_Name") for mol in mols])
+            return [0.0 for _ in mols]
 
     pk = main.pKasso(
         "NCCN",
         tautomer_search=False,
-        standard_free_energy_predictor=predict_standard_free_energies,
+        pka_predictor_cls=StandardFreeEnergyPredictor,
     )
     pk.mol0 = mol
     pk.initialize_paths_models_libs()

@@ -2,7 +2,7 @@
 
 import itertools
 import logging
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -1154,7 +1154,6 @@ class pKasso:
     score_window: int = 0
     num_threads: int = 1
     standard_free_energy_config: Any | None = None
-    standard_free_energy_predictor: Callable[[list[Mol]], Any] | None = None
 
     def model_classes(self) -> tuple[type[Predictor], ...]:
         """Return the configured model classes in evaluation order."""
@@ -1190,9 +1189,6 @@ class pKasso:
         context: PredictorContext | None = None,
     ) -> ThermodynamicPredictionMode:
         """Return the thermodynamic model route selected for this run."""
-
-        if self.standard_free_energy_predictor is not None:
-            return "standard_free_energy"
 
         predictor_cls = context.predictor_cls if context is not None else self.primary_predictor_cls()
         mode = getattr(predictor_cls, "thermodynamic_prediction", None)
@@ -1268,9 +1264,6 @@ class pKasso:
     def standard_free_energy_target_mean(self) -> float:
         """Return the training-set pH offset used by the Uni-pKa free-energy head."""
 
-        if self.standard_free_energy_config is None:
-            predictor_config = getattr(self.standard_free_energy_predictor, "config", None)
-            return float(getattr(predictor_config, "target_mean", 6.457855284082695))
         return float(getattr(self.standard_free_energy_config, "target_mean", 6.457855284082695))
 
     def predict_standard_free_energy_values(
@@ -1283,14 +1276,11 @@ class pKasso:
         if not mols:
             return []
 
-        if self.standard_free_energy_predictor is not None:
-            result = self.standard_free_energy_predictor(mols)
-        else:
-            predictor_cls = context.predictor_cls if context is not None else self.primary_predictor_cls()
-            result = predictor_cls.predict_standard_free_energies(
-                mols,
-                config=self.standard_free_energy_config,
-            )
+        predictor_cls = context.predictor_cls if context is not None else self.primary_predictor_cls()
+        result = predictor_cls.predict_standard_free_energies(
+            mols,
+            config=self.standard_free_energy_config,
+        )
 
         return _coerce_standard_free_energy_values(result, len(mols))
 
