@@ -60,9 +60,15 @@ def test_precision_mode_passes_unipka_model_and_config_to_protonate(monkeypatch)
     chemistry.compute_prediction(state)
 
     assert captured["inp"] == "C"
+    assert captured["total_max_sites"] == 10
     assert captured["model"] == {
         "molgpka": {},
-        "unipka": {"model_dir": model_dir},
+        "unipka": {
+            "folds": 3,
+            "model_dir": model_dir,
+            "nthreads": 4,
+            "gpu": False,
+        },
     }
 
 
@@ -83,7 +89,28 @@ def test_precision_mode_passes_unipka_model_and_config_to_scan(monkeypatch):
 
     assert state.scan == "scan"
     assert captured["inp"] == "C"
+    assert captured["total_max_sites"] == 10
     assert captured["model"] == {
         "molgpka": {},
-        "unipka": {"model_dir": model_dir},
+        "unipka": {
+            "folds": 3,
+            "model_dir": model_dir,
+            "nthreads": 4,
+            "gpu": False,
+        },
     }
+
+
+def test_standard_mode_uses_default_model_and_site_limit(monkeypatch):
+    captured = {}
+
+    def fake_protonate(inp, **kwargs):
+        captured.update(kwargs)
+        return ("C",), ("mol",)
+
+    monkeypatch.setattr(chemistry, "protonate", fake_protonate)
+
+    chemistry.compute_prediction(AppState(smiles="C", precision_mode=False))
+
+    assert "model" not in captured
+    assert "total_max_sites" not in captured

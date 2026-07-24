@@ -21,10 +21,13 @@ def prediction_kwargs(state: AppState) -> dict[str, Any]:
         return {}
 
     return {
+        "total_max_sites": 10,
         "model": {
             "molgpka": {},
             "unipka": {
+                "folds": (3),
                 "model_dir": UNIPKA_MODEL_FOLDER,
+                "nthreads": 4,
             },
         },
     }
