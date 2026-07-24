@@ -21,7 +21,7 @@ def prediction_kwargs(state: AppState) -> dict[str, Any]:
         return {}
 
     return {
-        "total_max_sites": 10,
+        "total_max_sites": 8,
         "model": {
             "molgpka": {},
             "unipka": {
@@ -71,8 +71,8 @@ def compute_prediction(state: AppState) -> None:
         cutoff_export=0.0,
         cutoff_states=CUTOFF_STATES,
         tautomer_search=state.tautomer_search,
-        free_energy_cutoff_individual = 100,
-        free_energy_cutoff_combined = 100,
+        free_energy_cutoff_individual = 10,
+        free_energy_cutoff_combined = 10,
         **prediction_kwargs(state),
     )
     state.smiles_out = list(smiles_out[: state.nmols_export])

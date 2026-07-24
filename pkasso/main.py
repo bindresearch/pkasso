@@ -1144,9 +1144,9 @@ class pKasso:
 
     # Internal options
     cutoff_states: int = 200
-    free_energy_cutoff_individual: float = 100.
+    free_energy_cutoff_individual: float = 10.
     max_states_individual: int = 20
-    free_energy_cutoff_combined: float = 100.
+    free_energy_cutoff_combined: float = 10.
     max_states_combined: int = 20
     cutoff_export: float = 1.0
     matrix_def: str = "dG"

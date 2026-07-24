@@ -60,14 +60,13 @@ def test_precision_mode_passes_unipka_model_and_config_to_protonate(monkeypatch)
     chemistry.compute_prediction(state)
 
     assert captured["inp"] == "C"
-    assert captured["total_max_sites"] == 10
+    assert captured["total_max_sites"] == 8
     assert captured["model"] == {
         "molgpka": {},
         "unipka": {
             "folds": 3,
             "model_dir": model_dir,
             "nthreads": 4,
-            "gpu": False,
         },
     }
 
@@ -89,14 +88,13 @@ def test_precision_mode_passes_unipka_model_and_config_to_scan(monkeypatch):
 
     assert state.scan == "scan"
     assert captured["inp"] == "C"
-    assert captured["total_max_sites"] == 10
+    assert captured["total_max_sites"] == 8
     assert captured["model"] == {
         "molgpka": {},
         "unipka": {
             "folds": 3,
             "model_dir": model_dir,
             "nthreads": 4,
-            "gpu": False,
         },
     }
 

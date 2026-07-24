@@ -371,7 +371,7 @@ def test_combine_expert_energies_falls_back_to_first_model_without_shared_state(
         Gs=np.array([0.0]),
     )
 
-    with caplog.at_level(logging.WARNING, logger="pkasso.main"):
+    with caplog.at_level(logging.INFO, logger=main.logger.name):
         combined = main.combine_expert_energies([raw_a, raw_b])
 
     assert "Falling back to the first model provided" in caplog.text

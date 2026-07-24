@@ -1,4 +1,5 @@
 import importlib.util
+import logging
 from pathlib import Path
 
 
@@ -110,21 +111,22 @@ def test_hydroxamate_filter_keeps_hydroxamate_motif():
     )
 
 
-def test_max_tautomers_falls_back_to_input_smiles(capsys):
+def test_max_tautomers_falls_back_to_input_smiles(caplog):
     tautomers = load_tautomers_module()
 
     smiles = "O=C(NC(=O)c1ccccc1)c1ccccc1"
 
-    assert (
-        tautomers.best_tautomer_smiles(
-            smiles,
-            max_tautomers=1,
-            num_confs=1,
+    with caplog.at_level(logging.INFO, logger=tautomers.logger.name):
+        assert (
+            tautomers.best_tautomer_smiles(
+                smiles,
+                max_tautomers=1,
+                num_confs=1,
+            )
+            == smiles
         )
-        == smiles
-    )
 
-    assert "Exceeding max tautomers" in capsys.readouterr().out
+    assert "Exceeding max tautomers" in caplog.text
 
 
 def test_returns_input_smiles_when_conformer_generation_fails(monkeypatch):
