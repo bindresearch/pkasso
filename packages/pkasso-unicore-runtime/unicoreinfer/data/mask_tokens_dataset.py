@@ -1,4 +1,6 @@
 # Copyright (c) DP Technology.
+# Copyright (c) Facebook, Inc. and its affiliates.
+#
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
@@ -6,25 +8,29 @@ from functools import lru_cache
 
 import numpy as np
 import torch
-from unicoreinfer.data import Dictionary
-from unicoreinfer.data import BaseWrapperDataset
-from . import data_utils
+from unicoreinfer.data import Dictionary, data_utils
+
+from . import BaseWrapperDataset, LRUCacheDataset
 
 
-class MaskPointsDataset(BaseWrapperDataset):
+class MaskTokensDataset(BaseWrapperDataset):
+
+    @classmethod
+    def apply_mask(cls, dataset: torch.utils.data.Dataset, *args, **kwargs):
+        """Return the source and target datasets for masked LM training."""
+        dataset = LRUCacheDataset(dataset)
+        return (
+            LRUCacheDataset(cls(dataset, *args, **kwargs, return_masked_tokens=False)),
+            LRUCacheDataset(cls(dataset, *args, **kwargs, return_masked_tokens=True)),
+        )
+
     def __init__(
         self,
         dataset: torch.utils.data.Dataset,
-        coord_dataset: torch.utils.data.Dataset,
-        charge_dataset: torch.utils.data.Dataset,
         vocab: Dictionary,
-        charge_vocab: Dictionary,
         pad_idx: int,
-        charge_pad_idx: int,
         mask_idx: int,
-        charge_mask_idx: int,
-        noise_type: str,
-        noise: float = 1.0,
+        return_masked_tokens: bool = False,
         seed: int = 1,
         mask_prob: float = 0.15,
         leave_unmasked_prob: float = 0.1,
@@ -36,16 +42,10 @@ class MaskPointsDataset(BaseWrapperDataset):
         assert random_token_prob + leave_unmasked_prob <= 1.0
 
         self.dataset = dataset
-        self.coord_dataset = coord_dataset
-        self.charge_dataset = charge_dataset
         self.vocab = vocab
-        self.charge_vocab = charge_vocab
         self.pad_idx = pad_idx
-        self.charge_pad_idx = charge_pad_idx
         self.mask_idx = mask_idx
-        self.charge_mask_idx = charge_mask_idx
-        self.noise_type = noise_type
-        self.noise = noise
+        self.return_masked_tokens = return_masked_tokens
         self.seed = seed
         self.mask_prob = mask_prob
         self.leave_unmasked_prob = leave_unmasked_prob
@@ -55,32 +55,15 @@ class MaskPointsDataset(BaseWrapperDataset):
             weights = np.ones(len(self.vocab))
             weights[vocab.special_index()] = 0
             self.weights = weights / weights.sum()
-            # for charge
-            charge_weights = np.ones(len(self.charge_vocab))
-            charge_weights[charge_vocab.special_index()] = 0
-            self.charge_weights = charge_weights / charge_weights.sum()
 
         self.epoch = None
-        if self.noise_type == "trunc_normal":
-            self.noise_f = lambda num_mask: np.clip(
-                np.random.randn(num_mask, 3) * self.noise,
-                a_min=-self.noise * 2.0,
-                a_max=self.noise * 2.0,
-            )
-        elif self.noise_type == "normal":
-            self.noise_f = lambda num_mask: np.random.randn(num_mask, 3) * self.noise
-        elif self.noise_type == "uniform":
-            self.noise_f = lambda num_mask: np.random.uniform(
-                low=-self.noise, high=self.noise, size=(num_mask, 3)
-            )
-        else:
-            self.noise_f = lambda num_mask: 0.0
+
+    @property
+    def can_reuse_epoch_itr_across_epochs(self):
+        return True  # only the noise changes, not item sizes
 
     def set_epoch(self, epoch, **unused):
         super().set_epoch(epoch)
-        self.coord_dataset.set_epoch(epoch)
-        self.dataset.set_epoch(epoch)
-        self.charge_dataset.set_epoch(epoch)
         self.epoch = epoch
 
     def __getitem__(self, index: int):
@@ -88,30 +71,31 @@ class MaskPointsDataset(BaseWrapperDataset):
 
     @lru_cache(maxsize=16)
     def __getitem_cached__(self, epoch: int, index: int):
-        ret = {}
         with data_utils.numpy_seed(self.seed, epoch, index):
             item = self.dataset[index]
-            coord = self.coord_dataset[index]
-            charge = self.charge_dataset[index]
             sz = len(item)
             # don't allow empty sequence
-            assert sz > 0
+            assert sz > 2
+            assert (
+                self.mask_idx not in item
+            ), "Dataset contains mask_idx (={}), this is not expected!".format(
+                self.mask_idx,
+            )
+
             # decide elements to mask
+            mask = np.full(sz, False)
             num_mask = int(
                 # add a random number for probabilistic rounding
-                self.mask_prob * sz
-                + np.random.rand()
+                self.mask_prob * (sz - 2) + np.random.rand()
             )
-            mask_idc = np.random.choice(sz, num_mask, replace=False)
-            mask = np.full(sz, False)
+            # don't mask first and last position
+            mask_idc = np.random.choice(sz - 2, num_mask, replace=False) + 1
             mask[mask_idc] = True
-            ret["targets"] = np.full(len(mask), self.pad_idx)
-            ret["targets"][mask] = item[mask]
-            ret["targets"] = torch.from_numpy(ret["targets"]).long()
-            # for charge
-            ret["charge_targets"] = np.full(len(mask), self.charge_pad_idx)
-            ret["charge_targets"][mask] = charge[mask]
-            ret["charge_targets"] = torch.from_numpy(ret["charge_targets"]).long()            
+
+            if self.return_masked_tokens:
+                new_item = np.full(len(mask), self.pad_idx)
+                new_item[mask] = item[torch.from_numpy(mask.astype(np.uint8)) == 1]
+                return torch.from_numpy(new_item)
 
             # decide unmasking and random replacement
             rand_or_unmask_prob = self.random_token_prob + self.leave_unmasked_prob
@@ -136,15 +120,6 @@ class MaskPointsDataset(BaseWrapperDataset):
 
             new_item = np.copy(item)
             new_item[mask] = self.mask_idx
-
-            num_mask = mask.astype(np.int32).sum()
-            new_coord = np.copy(coord)
-            new_coord[mask, :] += self.noise_f(num_mask)
-            
-            # for charge mask
-            new_charge = np.copy(charge)
-            new_charge[mask] = self.charge_mask_idx            
-
             if rand_mask is not None:
                 num_rand = rand_mask.sum()
                 if num_rand > 0:
@@ -153,14 +128,5 @@ class MaskPointsDataset(BaseWrapperDataset):
                         num_rand,
                         p=self.weights,
                     )
-                    # for charge
-                    new_charge[rand_mask] = np.random.choice(
-                        len(self.charge_vocab),
-                        num_rand,
-                        p=self.charge_weights,
-                    )
-            ret["atoms"] = torch.from_numpy(new_item).long()
-            ret["coordinates"] = torch.from_numpy(new_coord).float()
-            ret["charges"] = torch.from_numpy(new_charge).long()
-            return ret
 
+            return torch.from_numpy(new_item)

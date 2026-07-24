@@ -6,7 +6,7 @@ import logging
 import os
 
 import numpy as np
-from unicore.data import (
+from unicoreinfer.data import (
     Dictionary,
     NestedDictionaryDataset,
     LMDBDataset,
@@ -33,7 +33,7 @@ from unimol.data import (
 )
 
 from unimol.data.tta_dataset import TTADataset, TTAPKADataset
-from unicore.tasks import UnicoreTask, register_task
+from unicoreinfer.tasks import UnicoreTask, register_task
 
 
 logger = logging.getLogger(__name__)
@@ -267,7 +267,7 @@ class UniMolPKATask(UnicoreTask):
             self.datasets[split] = nest_dataset
 
     def build_model(self, args):
-        from unicore import models
+        from unicoreinfer import models
 
         model = models.build_model(args, self)
         model.register_classification_head(

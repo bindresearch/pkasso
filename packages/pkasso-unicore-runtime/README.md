@@ -4,7 +4,8 @@
 parts of [DP Technology's Uni-Core](https://github.com/dptech-corp/Uni-Core)
 needed by pKasso's Uni-pKa model.
 
-It provides the top-level `unicore` Python package expected by Uni-pKa. Both
+It provides an isolated top-level `unicoreinfer` Python package used by
+pKasso's vendored Uni-pKa code. Both
 CPU and single-GPU inference use ordinary PyTorch operations. The package does
 not build or ship Uni-Core's optional fused CUDA extensions, so installing it
 does not require a compiler, CUDA toolkit, `nvcc`, or `ninja`.
@@ -34,7 +35,8 @@ It excludes:
 
 This package is derived from Uni-Core commit
 `ace6fae1c8479a9751f2bb1e1d6e4047427bc134`.
-See `unicore/UPSTREAM.md` for provenance and the included `LICENSE` for terms.
+See `unicoreinfer/UPSTREAM.md` for provenance and the included `LICENSE` for
+terms.
 
 ## Local development
 
@@ -46,5 +48,5 @@ python -m pip install ./packages/pkasso-unicore-runtime
 python -m pip install '.[unipka]'
 ```
 
-This distribution and upstream Uni-Core both provide the top-level `unicore`
-package. They should not be installed in the same environment.
+The `unicoreinfer` import namespace is separate from upstream Uni-Core's
+`unicore` namespace, so both distributions can coexist in one environment.

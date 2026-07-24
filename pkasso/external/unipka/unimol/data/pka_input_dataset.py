@@ -4,11 +4,11 @@
 
 import numpy as np
 from functools import lru_cache
-from unicore.data import BaseWrapperDataset
+from unicoreinfer.data import BaseWrapperDataset
 import collections
 import torch
 from itertools import chain
-from unicore.data.data_utils import collate_tokens, collate_tokens_2d
+from unicoreinfer.data.data_utils import collate_tokens, collate_tokens_2d
 from .coord_pad_dataset import collate_tokens_coords
 
 

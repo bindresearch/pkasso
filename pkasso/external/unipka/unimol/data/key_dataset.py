@@ -3,7 +3,7 @@
 # LICENSE file in the root directory of this source tree.
 
 from functools import lru_cache
-from unicore.data import BaseWrapperDataset
+from unicoreinfer.data import BaseWrapperDataset
 
 
 class KeyDataset(BaseWrapperDataset):

@@ -6,9 +6,9 @@ import logging
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from unicore import utils
-from unicore.models import BaseUnicoreModel, register_model, register_model_architecture
-from unicore.modules import LayerNorm, init_bert_params
+from unicoreinfer import utils
+from unicoreinfer.models import BaseUnicoreModel, register_model, register_model_architecture
+from unicoreinfer.modules import LayerNorm, init_bert_params
 from .unimol import UniMolModel, ClassificationHead, NonLinearHead
 
 logger = logging.getLogger(__name__)

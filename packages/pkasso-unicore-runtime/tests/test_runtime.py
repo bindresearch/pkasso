@@ -11,11 +11,18 @@ RUNTIME_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RUNTIME_ROOT))
 pytest.importorskip("lmdb")
 
-from unicore import checkpoint_utils, options, tasks, utils  # noqa: E402
-from unicore.data import Dictionary, NestedDictionaryDataset  # noqa: E402
-from unicore.losses import UnicoreLoss  # noqa: E402
-from unicore.models import BaseUnicoreModel  # noqa: E402
-from unicore.modules import LayerNorm, TransformerEncoderLayer  # noqa: E402
+from unicoreinfer import checkpoint_utils, options, tasks, utils  # noqa: E402
+from unicoreinfer.data import Dictionary, NestedDictionaryDataset  # noqa: E402
+from unicoreinfer.losses import UnicoreLoss  # noqa: E402
+from unicoreinfer.models import BaseUnicoreModel  # noqa: E402
+from unicoreinfer.modules import LayerNorm, TransformerEncoderLayer  # noqa: E402
+
+
+def test_runtime_uses_an_isolated_import_namespace():
+    import unicoreinfer
+
+    assert unicoreinfer.__name__ == "unicoreinfer"
+    assert not (RUNTIME_ROOT / "unicore").exists()
 
 
 def test_inference_runtime_surface_is_available():
@@ -31,9 +38,9 @@ def test_inference_runtime_surface_is_available():
 
 
 def test_training_runtime_is_not_shipped():
-    assert importlib.util.find_spec("unicore.optim") is None
-    assert importlib.util.find_spec("unicore.trainer") is None
-    assert importlib.util.find_spec("unicore.ema") is None
+    assert importlib.util.find_spec("unicoreinfer.optim") is None
+    assert importlib.util.find_spec("unicoreinfer.trainer") is None
+    assert importlib.util.find_spec("unicoreinfer.ema") is None
 
 
 def test_layer_norm_uses_pytorch_fallback_on_cpu():

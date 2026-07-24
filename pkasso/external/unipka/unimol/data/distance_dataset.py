@@ -6,7 +6,7 @@ import numpy as np
 import torch
 from scipy.spatial import distance_matrix
 from functools import lru_cache
-from unicore.data import BaseWrapperDataset
+from unicoreinfer.data import BaseWrapperDataset
 
 
 class DistanceDataset(BaseWrapperDataset):

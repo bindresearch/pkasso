@@ -4,7 +4,7 @@
 
 import numpy as np
 from functools import lru_cache
-from unicore.data import BaseWrapperDataset
+from unicoreinfer.data import BaseWrapperDataset
 
 
 class RemoveHydrogenDataset(BaseWrapperDataset):

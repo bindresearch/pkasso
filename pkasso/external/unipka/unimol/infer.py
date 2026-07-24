@@ -9,9 +9,9 @@ import os
 import sys
 import pickle
 import torch
-from unicore import checkpoint_utils, distributed_utils, options, utils
-from unicore.logging import progress_bar
-from unicore import tasks
+from unicoreinfer import checkpoint_utils, distributed_utils, options, utils
+from unicoreinfer.logging import progress_bar
+from unicoreinfer import tasks
 
 logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",

@@ -83,7 +83,7 @@ class _FreeEnergyFoldRunner:
     loss: object
     use_cuda: bool
     torch_module: object
-    unicore_utils: object
+    unicoreinfer_utils: object
 
     @classmethod
     def load(
@@ -99,13 +99,17 @@ class _FreeEnergyFoldRunner:
             )
 
         with _suppress_unipka_extension_output():
-            _ensure_unipka_user_dir()
-
             try:
-                from unicore import checkpoint_utils, options, tasks, utils as unicore_utils
+                from unicoreinfer import (
+                    checkpoint_utils,
+                    tasks,
+                    utils as unicoreinfer_utils,
+                )
+                _ensure_unipka_user_dir()
             except ModuleNotFoundError as exc:
                 raise ModuleNotFoundError(
-                    "Uni-pKa inference requires the optional 'unicore' package."
+                    "Uni-pKa inference dependencies are missing. Install them with "
+                    "`python -m pip install 'pkasso[unipka]'`."
                 ) from exc
 
         with _suppress_unipka_extension_output():
@@ -137,7 +141,7 @@ class _FreeEnergyFoldRunner:
 
             loss = task.build_loss(args)
             loss.eval()
-        return cls(cfg, fold, args, task, model, loss, use_cuda, torch, unicore_utils)
+        return cls(cfg, fold, args, task, model, loss, use_cuda, torch, unicoreinfer_utils)
 
     def predict(
         self,
@@ -167,7 +171,7 @@ class _FreeEnergyFoldRunner:
 
             with self.torch_module.no_grad():
                 for sample in itr:
-                    sample = self.unicore_utils.move_to_cuda(sample) if self.use_cuda else sample
+                    sample = self.unicoreinfer_utils.move_to_cuda(sample) if self.use_cuda else sample
                     if len(sample) == 0:
                         continue
                     _, _, log_output = self.task.valid_step(sample, self.model, self.loss, test=True)
@@ -253,7 +257,7 @@ def _parse_free_energy_inference_args(
     cfg: UnipkaFreeEnergyConfig,
     fold: int,
 ) -> object:
-    from unicore import options
+    from unicoreinfer import options
 
     argv = _free_energy_inference_argv(processed_dir, task_name, checkpoint, cfg, fold)
     parser = options.get_validation_parser()

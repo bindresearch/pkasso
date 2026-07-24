@@ -38,10 +38,10 @@ Homepage = "https://github.com/dptech-corp/Uni-Core"
 Repository = "https://github.com/dptech-corp/Uni-Core"
 
 [tool.setuptools.packages.find]
-include = ["unicore*"]
+include = ["unicoreinfer*"]
 
 [tool.setuptools.package-data]
-unicore = ["UPSTREAM.md", "version.txt"]
+unicoreinfer = ["UPSTREAM.md", "version.txt"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
