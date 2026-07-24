@@ -57,20 +57,23 @@ pkasso single --smiles "CC(=O)O" --model mixed \
     --nthreads 4 --gpu
 ```
 
-If omitted, `--unipka-model-folder` uses pKasso's packaged `data` folder,
+If omitted, `--unipka-model-folder` uses `unipkainfer`'s per-user model
+directory (`~/.local/share/unipkainfer/models` on a typical Linux system).
 `--nthreads` defaults to `0` (automatic thread selection), and GPU use is
 disabled. Use `--no-gpu` to select CPU inference explicitly.
 
-The Uni-pKa model weights are hosted separately on Hugging Face. Install the
-downloader and choose an output folder:
+Uni-pKa is provided by the separate `unipkainfer` distribution. Install the
+pKasso extra and download its model weights from Hugging Face:
 
 ```bash
 python -m pip install 'pkasso[unipka]'
-pkasso-download-unipka-model --output-folder /path/to/unipka/models
+unipka-download-model
 ```
 
-The downloader creates the expected `fold_0`, `fold_1`, ... subfolders. Pass
-the same output folder to `--unipka-model-folder`.
+The downloader creates the expected `fold_0`, `fold_1`, ... subfolders in the
+default per-user directory. To use another location, run
+`unipka-download-model --output-folder /path/to/unipka/models` and pass that
+folder to `--unipka-model-folder`.
 
 ### Python interface
 

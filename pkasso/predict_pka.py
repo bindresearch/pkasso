@@ -440,7 +440,15 @@ class UnipkaPredictor(Predictor):
     def resolve_options(cls, options: ModelOptions) -> object:
         """Resolve the public Uni-pKa options into its inference configuration."""
 
-        from .external.unipka.pka_predictor import UnipkaFreeEnergyConfig
+        try:
+            from unipkainfer import UnipkaFreeEnergyConfig
+        except ModuleNotFoundError as exc:
+            if exc.name != "unipkainfer":
+                raise
+            raise ModuleNotFoundError(
+                "Uni-pKa support is not installed. Install it with "
+                "`python -m pip install 'pkasso[unipka]'`."
+            ) from exc
 
         valid_options = {"model_dir", "folds", "nthreads", "gpu"}
         unknown_options = sorted(set(options) - valid_options)
@@ -580,9 +588,15 @@ class UnipkaPredictor(Predictor):
 
     @classmethod
     def predict_standard_free_energies(cls, mols: list[Mol], *, config: Any | None = None) -> Any:
-        from .external.unipka.pka_predictor import (
-            predict_standard_free_energies,
-        )
+        try:
+            from unipkainfer import predict_standard_free_energies
+        except ModuleNotFoundError as exc:
+            if exc.name != "unipkainfer":
+                raise
+            raise ModuleNotFoundError(
+                "Uni-pKa support is not installed. Install it with "
+                "`python -m pip install 'pkasso[unipka]'`."
+            ) from exc
 
         results = predict_standard_free_energies(mols, config=config)
 

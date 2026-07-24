@@ -1,5 +1,3 @@
-from pathlib import Path
-
 from click.testing import CliRunner
 
 from pkasso import cli
@@ -116,7 +114,7 @@ def test_mixed_model_passes_fixed_fold_and_unipka_options(monkeypatch, tmp_path)
     }
 
 
-def test_mixed_model_defaults_to_packaged_data_and_cpu(monkeypatch):
+def test_mixed_model_uses_unipkainfer_default_model_dir_and_cpu(monkeypatch):
     captured = {}
 
     monkeypatch.setattr(cli, "protonate", mock_protonate(captured))
@@ -126,7 +124,6 @@ def test_mixed_model_defaults_to_packaged_data_and_cpu(monkeypatch):
     assert result.exit_code == 0
     assert captured["model"]["unipka"] == {
         "folds": 3,
-        "model_dir": Path(cli.__file__).resolve().parent / "data",
         "nthreads": 0,
         "gpu": False,
     }

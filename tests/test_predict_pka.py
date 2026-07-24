@@ -1,8 +1,10 @@
+import sys
+
 import pandas as pd
 import pytest
 from rdkit import Chem
 
-from pkasso.external.unipka.pka_predictor import UnipkaFreeEnergyConfig
+from unipkainfer import UnipkaFreeEnergyConfig
 from pkasso.predict_pka import (
     MolgpkaPredictor,
     UnipkaPredictor,
@@ -58,7 +60,7 @@ def test_unipka_predictor_excludes_poly_aza_ring_base_sites():
 
 
 def test_unipka_predictor_curates_standard_free_energy_per_molecule(monkeypatch):
-    from pkasso.external.unipka import pka_predictor
+    import unipkainfer
 
     class CuratingUnipkaPredictor(UnipkaPredictor):
         heavy_atom_counts: list[int] = []
@@ -76,7 +78,7 @@ def test_unipka_predictor_curates_standard_free_energy_per_molecule(monkeypatch)
             }
         )
 
-    monkeypatch.setattr(pka_predictor, "predict_standard_free_energies", mock_predict_standard_free_energies)
+    monkeypatch.setattr(unipkainfer, "predict_standard_free_energies", mock_predict_standard_free_energies)
 
     results = CuratingUnipkaPredictor.predict_standard_free_energies(
         [mapped_mol("C"), mapped_mol("CC")],
@@ -129,3 +131,10 @@ def test_molgpka_rejects_model_options():
 def test_unipka_rejects_unknown_model_options():
     with pytest.raises(ValueError, match="Unknown unipka option"):
         resolve_models({"unipka": {"batch_size": 4}})
+
+
+def test_unipka_recommends_optional_extra_when_package_is_missing(monkeypatch):
+    monkeypatch.setitem(sys.modules, "unipkainfer", None)
+
+    with pytest.raises(ModuleNotFoundError, match=r"pip install 'pkasso\[unipka\]'"):
+        resolve_models({"unipka": {}})

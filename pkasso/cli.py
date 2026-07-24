@@ -11,7 +11,6 @@ from typing import Any
 import click
 
 COMMANDS = {"single", "batch", "scan"}
-DEFAULT_UNIPKA_MODEL_FOLDER = Path(__file__).resolve().parent / "data"
 
 
 def protonate(*args: Any, **kwargs: Any) -> Any:
@@ -70,7 +69,7 @@ def _common_option_conflicts(ctx: click.Context) -> None:
 
 def _model_kwargs(
     model: str,
-    unipka_model_folder: Path,
+    unipka_model_folder: Path | None,
     nthreads: int,
     gpu: bool,
 ) -> dict[str, Any]:
@@ -79,15 +78,18 @@ def _model_kwargs(
     if model == "molgpka":
         return {}
 
+    unipka_options: dict[str, object] = {
+        "folds": 3,
+        "nthreads": nthreads,
+        "gpu": gpu,
+    }
+    if unipka_model_folder is not None:
+        unipka_options["model_dir"] = unipka_model_folder
+
     return {
         "model": {
             "molgpka": {},
-            "unipka": {
-                "folds": 3,
-                "model_dir": unipka_model_folder,
-                "nthreads": nthreads,
-                "gpu": gpu,
-            },
+            "unipka": unipka_options,
         },
     }
 
@@ -104,9 +106,11 @@ COMMON_OPTIONS = [
     click.option(
         "--unipka-model-folder",
         type=click.Path(file_okay=False, path_type=Path),
-        default=DEFAULT_UNIPKA_MODEL_FOLDER,
-        show_default=True,
-        help="Folder containing the Uni-pKa model files",
+        default=None,
+        help=(
+            "Folder containing Uni-pKa model files; defaults to unipkainfer's "
+            "per-user model directory"
+        ),
     ),
     click.option(
         "--nthreads",
@@ -213,7 +217,7 @@ def single(
     sdf_out: Path,
     cutoff_export: float,
     model: str,
-    unipka_model_folder: Path,
+    unipka_model_folder: Path | None,
     nthreads: int,
     gpu: bool,
     matrix_def: str,
@@ -282,7 +286,7 @@ def batch(
     overwrite: bool,
     cutoff_export: float,
     model: str,
-    unipka_model_folder: Path,
+    unipka_model_folder: Path | None,
     nthreads: int,
     gpu: bool,
     matrix_def: str,
@@ -343,7 +347,7 @@ def scan(
     sdf_out: Path,
     pkas_out: Path,
     model: str,
-    unipka_model_folder: Path,
+    unipka_model_folder: Path | None,
     nthreads: int,
     gpu: bool,
     matrix_def: str,

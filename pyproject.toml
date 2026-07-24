@@ -39,8 +39,7 @@ dependencies = [
 
 [project.optional-dependencies]
 unipka = [
-    "huggingface-hub>=0.27,<2",
-    "lmdb>=1.4,<3",
+    "unipkainfer>=0.1,<0.2",
 ]
 webserver = [
     "fastapi>=0.115,<1",
@@ -59,7 +58,6 @@ dev = [
 [project.scripts]
 pkasso = "pkasso.cli:run_cli"
 pkasso-web = "pkasso.api.app:main"
-pkasso-download-unipka-model = "pkasso.download_unipka_model:main"
 
 [tool.setuptools.package-data]
 "pkasso" = [
@@ -74,11 +72,11 @@ pkasso-download-unipka-model = "pkasso.download_unipka_model:main"
     "static/*.js",
     "static/*.svg",
     "static/*.ico"]
-"pkasso.external.unipka" = ["LICENSE"]
-"pkasso.external.unipka.unicoreinfer" = ["UPSTREAM.md", "version.txt"]
-
 [tool.setuptools.packages.find]
 include = ["pkasso*"]
+
+[tool.pytest.ini_options]
+pythonpath = ["packages/unipkainfer"]
 
 [tool.ruff]
 line-length = 127
