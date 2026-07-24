@@ -23,6 +23,7 @@ from rdkit.Chem.rdchem import Mol
 from .api import (
     REPO_ROOT,
     _copy_dictionaries,
+    _missing_checkpoint_message,
     _resolve,
     _resolve_checkpoint,
 )
@@ -91,6 +92,12 @@ class _FreeEnergyFoldRunner:
         fold: int,
         task_setup_dir: Path,
     ) -> "_FreeEnergyFoldRunner":
+        checkpoint = _resolve_checkpoint(cfg.model_dir, fold)
+        if not checkpoint.exists():
+            raise FileNotFoundError(
+                _missing_checkpoint_message(checkpoint, cfg.model_dir)
+            )
+
         with _suppress_unipka_extension_output():
             _ensure_unipka_user_dir()
 
@@ -100,10 +107,6 @@ class _FreeEnergyFoldRunner:
                 raise ModuleNotFoundError(
                     "Uni-pKa inference requires the optional 'unicore' package."
                 ) from exc
-
-        checkpoint = _resolve_checkpoint(cfg.model_dir, fold)
-        if not checkpoint.exists():
-            raise FileNotFoundError(f"Missing checkpoint: {checkpoint}")
 
         with _suppress_unipka_extension_output():
             args = _parse_free_energy_inference_args(

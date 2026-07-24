@@ -4,6 +4,7 @@ import io
 import hashlib
 import pickle
 import shutil
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -140,7 +141,7 @@ def _run_inference(
 ) -> None:
     checkpoint = _resolve_checkpoint(cfg.model_dir, cfg.fold)
     if not checkpoint.exists():
-        raise FileNotFoundError(f"Missing checkpoint: {checkpoint}")
+        raise FileNotFoundError(_missing_checkpoint_message(checkpoint, cfg.model_dir))
 
     fold_results_dir = results_dir / f"fold_{cfg.fold}"
     cmd = [
@@ -212,6 +213,14 @@ def _resolve_checkpoint(model_dir: str | Path, fold: int) -> Path:
         return checkpoint
 
     return model_path / f"fold_{fold}" / "checkpoint_best.pt"
+
+
+def _missing_checkpoint_message(checkpoint: Path, model_dir: str | Path) -> str:
+    output_folder = shlex.quote(str(Path(model_dir)))
+    return (
+        f"Missing Uni-pKa checkpoint: {checkpoint}. Download the model weights with "
+        f"`pkasso-download-unipka-model --output-folder {output_folder}`."
+    )
 
 
 def _read_results(results_dir: Path, fold: int, task_name: str) -> pd.DataFrame:
