@@ -1,0 +1,47 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pkasso-unicore-runtime"
+version = "0.1.0"
+description = "Minimal Uni-Core runtime for pKasso Uni-pKa inference"
+readme = "README.md"
+requires-python = ">=3.10,<3.14"
+license = { file = "LICENSE" }
+authors = [
+    { name = "DP Technology" },
+]
+maintainers = [
+    { name = "Bind Research" },
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "torch>=2.2,<3",
+    "numpy>=1.26,<3",
+    "lmdb>=1.4,<3",
+]
+
+[project.urls]
+Homepage = "https://github.com/dptech-corp/Uni-Core"
+Repository = "https://github.com/dptech-corp/Uni-Core"
+
+[tool.setuptools.packages.find]
+include = ["unicore*"]
+
+[tool.setuptools.package-data]
+unicore = ["UPSTREAM.md", "version.txt"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

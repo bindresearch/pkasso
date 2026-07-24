@@ -49,7 +49,7 @@ pkasso scan --help
 ```
 
 All commands accept `--model molgpka` (the default) or `--model mixed`.
-The mixed model combines MolGpKa with Uni-pKa fold 3:
+The mixed model combines MolGpKa with Uni-pKa (1-fold model):
 
 ```bash
 pkasso single --smiles "CC(=O)O" --model mixed \
@@ -90,7 +90,7 @@ smiles_out, mols_out = protonate(smiles, name=name, pH=pH, cutoff_export=cutoff_
 print(smiles_out)
 ```
 
-Predictors and their options are selected with an ordered mapping:
+Predictors and their options are selected with a dictionary:
 
 ```python
 model = {
