@@ -5,7 +5,7 @@
 from functools import lru_cache
 
 import torch
-from unicoreinfer.data import Dictionary
+from ..data import Dictionary
 from functools import lru_cache
 from . import BaseWrapperDataset
 

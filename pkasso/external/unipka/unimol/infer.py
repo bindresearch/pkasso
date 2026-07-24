@@ -6,20 +6,17 @@
 
 import logging
 import os
-import sys
 import pickle
-import torch
-from unicoreinfer import checkpoint_utils, distributed_utils, options, utils
-from unicoreinfer.logging import progress_bar
-from unicoreinfer import tasks
+import sys
+from collections.abc import Sequence
 
-logging.basicConfig(
-    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-    level=os.environ.get("LOGLEVEL", "INFO").upper(),
-    stream=sys.stdout,
-)
-logger = logging.getLogger("unimol.inference")
+import torch
+
+from ..unicoreinfer import checkpoint_utils, distributed_utils, options, utils
+from ..unicoreinfer import tasks
+from ..unicoreinfer.logging import progress_bar
+
+logger = logging.getLogger(__name__)
 
 
 def main(args):
@@ -104,12 +101,26 @@ def main(args):
     return None
 
 
-def cli_main():
+def run_inference(input_args: Sequence[str] | None = None) -> None:
+    """Parse Uni-pKa inference arguments and run inference in this process."""
+
     parser = options.get_validation_parser()
     options.add_model_args(parser)
-    args = options.parse_args_and_arch(parser)
+    args = options.parse_args_and_arch(parser, input_args=input_args)
 
     distributed_utils.call_main(args, main)
+
+
+def cli_main() -> None:
+    """Run the optional command-line interface."""
+
+    logging.basicConfig(
+        format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+        level=os.environ.get("LOGLEVEL", "INFO").upper(),
+        stream=sys.stdout,
+    )
+    run_inference()
 
 
 if __name__ == "__main__":

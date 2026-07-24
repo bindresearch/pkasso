@@ -6,22 +6,22 @@
 - Upstream package version: `0.0.1`
 - License: MIT
 
-## Runtime packaging changes
+## Inference-runtime changes
 
 The upstream `unicore` Python package was copied from the pinned commit,
-renamed to the isolated `unicoreinfer` import namespace, and reduced for
-pKasso Uni-pKa inference:
+integrated as pKasso's private
+`pkasso.external.unipka.unicoreinfer` subpackage, and reduced for Uni-pKa
+inference:
 
 - removed `unicore_cli`;
 - removed the trainer, optimizers, learning-rate schedulers, EMA, and NaN
   detector;
 - omitted all C++ and CUDA extension sources;
 - removed eager optimizer imports from `unicoreinfer/__init__.py`;
-- rewrote internal imports and dynamic module loading from `unicore` to
-  `unicoreinfer`;
+- rewrote internal imports as package-relative imports and made dynamic module
+  loading derive paths from the containing package;
 - removed the unused BERT tokenizer adapter and its eager import;
-- replaced upstream build metadata with a PEP 517 `pyproject.toml` for a
-  pure-Python wheel;
-- reduced dependencies to those imported by the retained runtime.
+- omitted upstream build metadata and declared the retained runtime's optional
+  dependencies in pKasso's `unipka` extra.
 
 Copyright headers in the retained source files are unchanged.

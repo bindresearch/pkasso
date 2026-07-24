@@ -4,7 +4,7 @@
 
 import numpy as np
 from functools import lru_cache
-from unicoreinfer.data import BaseWrapperDataset
+from ...unicoreinfer.data import BaseWrapperDataset
 
 
 class NormalizeDataset(BaseWrapperDataset):

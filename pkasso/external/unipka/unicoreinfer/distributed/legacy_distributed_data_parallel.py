@@ -21,7 +21,7 @@ from contextlib import contextmanager
 import torch
 from torch import nn
 
-from unicoreinfer.distributed import utils
+from ..distributed import utils
 
 
 class LegacyDistributedDataParallel(nn.Module):

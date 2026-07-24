@@ -11,8 +11,8 @@ from argparse import Namespace
 from typing import Any, Callable, Dict, List
 
 import torch
-from unicoreinfer import metrics, utils
-from unicoreinfer.data import UnicoreDataset, data_utils, iterators
+from .. import metrics, utils
+from ..data import UnicoreDataset, data_utils, iterators
 
 logger = logging.getLogger(__name__)
 
@@ -120,7 +120,7 @@ class UnicoreTask(object):
         Returns:
             a :class:`~unicoreinfer.data.UnicoreDataset` corresponding to *split*
         """
-        from unicoreinfer.data import UnicoreDataset
+        from ..data import UnicoreDataset
 
         if split not in self.datasets:
             raise KeyError("Dataset not loaded: " + split)
@@ -232,7 +232,7 @@ class UnicoreTask(object):
         Returns:
             a :class:`~unicoreinfer.models.BaseUnicoreModel` instance
         """
-        from unicoreinfer import models
+        from .. import models
         return models.build_model(args, self)
 
     def build_loss(self, args: Namespace):
@@ -246,7 +246,7 @@ class UnicoreTask(object):
         Returns:
             a :class:`~unicoreinfer.losses.UnicoreLoss` instance
         """
-        from unicoreinfer import losses
+        from .. import losses
 
         return losses.build_loss(args, self)
 

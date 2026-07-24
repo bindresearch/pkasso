@@ -1,5 +1,1 @@
-import importlib
-import unimol.tasks
-import unimol.data
-import unimol.models
-import unimol.losses
+from . import data, losses, models, tasks  # noqa: F401

@@ -12,7 +12,7 @@ import torch
 from typing import Callable, List, Optional
 
 # this import is for backward compatibility
-from unicoreinfer.utils import (
+from .utils import (
     csv_str_list,
     eval_bool,
     eval_str_dict,
@@ -74,7 +74,7 @@ def parse_args_and_arch(
             **{k: v for k, v in vars(args).items() if v is not None}
         )
 
-    from unicoreinfer.models import ARCH_MODEL_REGISTRY, ARCH_CONFIG_REGISTRY, MODEL_REGISTRY
+    from .models import ARCH_MODEL_REGISTRY, ARCH_CONFIG_REGISTRY, MODEL_REGISTRY
 
     # Before creating the true parser, we need to import optional user module
     # in order to eagerly import custom tasks, optimizers, architectures, etc.
@@ -108,12 +108,12 @@ def parse_args_and_arch(
             raise RuntimeError()
 
     if hasattr(args, "task"):
-        from unicoreinfer.tasks import TASK_REGISTRY
+        from .tasks import TASK_REGISTRY
 
         TASK_REGISTRY[args.task].add_args(parser)
 
     # Add *-specific args to parser.
-    from unicoreinfer.registry import REGISTRIES
+    from .registry import REGISTRIES
 
     for registry_name, REGISTRY in REGISTRIES.items():
         choice = getattr(args, registry_name, None)
@@ -209,7 +209,7 @@ def get_parser(desc, default_task="test"):
     parser.add_argument("--validate-with-ema", action="store_true")
     
 
-    from unicoreinfer.registry import REGISTRIES
+    from .registry import REGISTRIES
     for registry_name, REGISTRY in REGISTRIES.items():
         parser.add_argument(
             '--' + registry_name.replace('_', '-'),
@@ -218,7 +218,7 @@ def get_parser(desc, default_task="test"):
         )
 
     # Task definitions can be found under unicoreinfer/tasks/
-    from unicoreinfer.tasks import TASK_REGISTRY
+    from .tasks import TASK_REGISTRY
     parser.add_argument('--task', metavar='TASK', default=default_task,
                         choices=TASK_REGISTRY.keys(),
                         help='task')
@@ -420,7 +420,7 @@ def add_model_args(parser):
     # 1) model defaults (lowest priority)
     # 2) --arch argument
     # 3) --encoder/decoder-* arguments (highest priority)
-    from unicoreinfer.models import ARCH_MODEL_REGISTRY
+    from .models import ARCH_MODEL_REGISTRY
     group.add_argument('--arch', '-a', default='fconv', metavar='ARCH', required=True,
                        choices=ARCH_MODEL_REGISTRY.keys(),
                        help='Model Architecture')

@@ -5,8 +5,6 @@ import hashlib
 import pickle
 import shutil
 import shlex
-import subprocess
-import sys
 import tempfile
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -45,7 +43,6 @@ class PredictionConfig:
     task_num: int = 1
     only_polar: int = -1
     loss_func: str = "finetune_mse"
-    python_executable: str = sys.executable
     fp16: bool | None = None
     overwrite_lmdb: bool = True
     write_csv: bool = False
@@ -115,7 +112,7 @@ def _preprocess(
         _log(cfg, f"Using existing LMDB: {lmdb_path}")
         return
     _log(cfg, f"Preprocessing {input_path} -> {lmdb_path}")
-    from scripts.preprocess_pka import write_lmdb
+    from ..scripts.preprocess_pka import write_lmdb
 
     write_lmdb(
         task_name=task_name,
@@ -144,11 +141,7 @@ def _run_inference(
         raise FileNotFoundError(_missing_checkpoint_message(checkpoint, cfg.model_dir))
 
     fold_results_dir = results_dir / f"fold_{cfg.fold}"
-    cmd = [
-        cfg.python_executable,
-        str(REPO_ROOT / "unimol" / "infer.py"),
-        "--user-dir",
-        str(REPO_ROOT / "unimol"),
+    input_args = [
         str(processed_dir),
         "--task-name",
         task_name,
@@ -195,12 +188,14 @@ def _run_inference(
 
     use_fp16 = torch.cuda.is_available() if cfg.fp16 is None else cfg.fp16
     if use_fp16:
-        cmd.append("--fp16")
+        input_args.append("--fp16")
     else:
-        cmd.append("--cpu")
+        input_args.append("--cpu")
 
     _log(cfg, f"Running inference with fold_{cfg.fold}")
-    subprocess.run(cmd, cwd=REPO_ROOT, check=True)
+    from ..unimol.infer import run_inference
+
+    run_inference(input_args)
 
 
 def _resolve_checkpoint(model_dir: str | Path, fold: int) -> Path:

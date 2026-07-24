@@ -71,7 +71,7 @@ for file in os.listdir(tasks_dir):
         and (file.endswith(".py") or os.path.isdir(path))
     ):
         task_name = file[: file.find(".py")] if file.endswith(".py") else file
-        module = importlib.import_module("unicoreinfer.tasks." + task_name)
+        module = importlib.import_module(f"{__name__}.{task_name}")
 
         # expose `task_parser` for sphinx
         if task_name in TASK_REGISTRY:

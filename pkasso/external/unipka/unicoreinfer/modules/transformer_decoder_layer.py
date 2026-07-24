@@ -8,7 +8,7 @@ from typing import Dict, Optional
 
 import torch
 import torch.nn.functional as F
-from unicoreinfer import utils
+from .. import utils
 from torch import nn
 from . import LayerNorm, SelfMultiheadAttention, CrossMultiheadAttention
 

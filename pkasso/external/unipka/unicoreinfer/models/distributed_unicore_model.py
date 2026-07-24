@@ -10,7 +10,7 @@ import torch
 import torch.nn as nn
 from torch.nn.parallel import DistributedDataParallel
 
-from unicoreinfer.distributed import (
+from ..distributed import (
     ModuleProxyWrapper, LegacyDistributedDataParallel
 )
 

@@ -8,8 +8,8 @@
 import importlib
 import os
 
-from unicoreinfer import registry
-from unicoreinfer.losses.unicore_loss import (  # noqa
+from .. import registry
+from ..losses.unicore_loss import (  # noqa
     UnicoreLoss,
 )
 
@@ -31,4 +31,4 @@ def build_loss(args, task):
 for file in os.listdir(os.path.dirname(__file__)):
     if file.endswith(".py") and not file.startswith("_"):
         file_name = file[: file.find(".py")]
-        importlib.import_module("unicoreinfer.losses." + file_name)
+        importlib.import_module(f"{__name__}.{file_name}")

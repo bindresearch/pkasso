@@ -81,7 +81,7 @@ def ckp_copy_fun(src, checkpoints, end_of_epoch, args):
 
 
 def save_checkpoint(args, trainer, epoch_itr, val_loss, ckp_copy_thread, do_save=True):
-    from unicoreinfer import meters
+    from . import meters
 
     # only one worker should attempt to create the required dir
     if trainer.data_parallel_rank == 0:

@@ -5,7 +5,7 @@
 import numpy as np
 from functools import lru_cache
 import logging
-from unicoreinfer.data import BaseWrapperDataset
+from ...unicoreinfer.data import BaseWrapperDataset
 from . import data_utils
 
 logger = logging.getLogger(__name__)

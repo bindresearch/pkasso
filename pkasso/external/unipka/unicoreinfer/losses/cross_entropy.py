@@ -7,8 +7,8 @@
 import math
 import torch
 import torch.nn.functional as F
-from unicoreinfer import metrics
-from unicoreinfer.losses import UnicoreLoss, register_loss
+from .. import metrics
+from ..losses import UnicoreLoss, register_loss
 
 @register_loss("cross_entropy")
 class CrossEntropyLoss(UnicoreLoss):

@@ -6,7 +6,7 @@ import logging
 import os
 
 import numpy as np
-from unicoreinfer.data import (
+from ...unicoreinfer.data import (
     Dictionary,
     NestedDictionaryDataset,
     LMDBDataset,
@@ -20,7 +20,7 @@ from unicoreinfer.data import (
     RawArrayDataset,
     FromNumpyDataset,
 )
-from unimol.data import (
+from ..data import (
     KeyDataset,
     DistanceDataset,
     EdgeTypeDataset,
@@ -31,8 +31,8 @@ from unimol.data import (
     data_utils,
 )
 
-from unimol.data.tta_dataset import TTADataset
-from unicoreinfer.tasks import UnicoreTask, register_task
+from ..data.tta_dataset import TTADataset
+from ...unicoreinfer.tasks import UnicoreTask, register_task
 
 
 logger = logging.getLogger(__name__)
@@ -213,7 +213,7 @@ class UniMolFreeEnergyTask(UnicoreTask):
             self.datasets[split] = nest_dataset
 
     def build_model(self, args):
-        from unicoreinfer import models
+        from ...unicoreinfer import models
 
         model = models.build_model(args, self)
         model.register_classification_head(

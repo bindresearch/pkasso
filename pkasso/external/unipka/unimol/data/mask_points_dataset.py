@@ -6,8 +6,8 @@ from functools import lru_cache
 
 import numpy as np
 import torch
-from unicoreinfer.data import Dictionary
-from unicoreinfer.data import BaseWrapperDataset
+from ...unicoreinfer.data import Dictionary
+from ...unicoreinfer.data import BaseWrapperDataset
 from . import data_utils
 
 

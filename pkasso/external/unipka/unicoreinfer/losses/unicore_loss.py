@@ -7,7 +7,7 @@
 import inspect
 from typing import Any, Dict, List
 
-from unicoreinfer import metrics, utils
+from .. import metrics, utils
 from torch.nn.modules.loss import _Loss
 
 

@@ -8,7 +8,7 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from unicoreinfer.modules import TransformerEncoderLayer, LayerNorm
+from ...unicoreinfer.modules import TransformerEncoderLayer, LayerNorm
 
 
 class TransformerEncoderWithPair(nn.Module):

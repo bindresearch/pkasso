@@ -7,8 +7,8 @@ import torch
 import torch.nn.functional as F
 import pandas as pd
 import numpy as np
-from unicoreinfer import metrics
-from unicoreinfer.losses import UnicoreLoss, register_loss
+from ...unicoreinfer import metrics
+from ...unicoreinfer.losses import UnicoreLoss, register_loss
 
 
 @register_loss("pretrain_mlm")

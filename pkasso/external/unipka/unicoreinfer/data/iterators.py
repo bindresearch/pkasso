@@ -15,7 +15,7 @@ from threading import Thread
 
 import numpy as np
 import torch
-from unicoreinfer.data import data_utils
+from ..data import data_utils
 
 
 logger = logging.getLogger(__name__)

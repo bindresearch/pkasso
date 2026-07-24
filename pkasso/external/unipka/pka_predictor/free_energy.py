@@ -100,12 +100,12 @@ class _FreeEnergyFoldRunner:
 
         with _suppress_unipka_extension_output():
             try:
-                from unicoreinfer import (
+                from ..unicoreinfer import (
                     checkpoint_utils,
                     tasks,
                     utils as unicoreinfer_utils,
                 )
-                _ensure_unipka_user_dir()
+                _ensure_unipka_modules()
             except ModuleNotFoundError as exc:
                 raise ModuleNotFoundError(
                     "Uni-pKa inference dependencies are missing. Install them with "
@@ -219,14 +219,10 @@ def _task_name_for_fold(
     return fold_task_name
 
 
-def _ensure_unipka_user_dir() -> None:
-    repo_root = str(REPO_ROOT)
-    if repo_root not in sys.path:
-        sys.path.insert(0, repo_root)
+def _ensure_unipka_modules() -> None:
+    """Import vendored Uni-Mol modules so their registries are populated."""
 
-    import unimol.losses  # noqa: F401
-    import unimol.models  # noqa: F401
-    import unimol.tasks  # noqa: F401
+    from .. import unimol  # noqa: F401
 
 
 @contextmanager
@@ -257,7 +253,7 @@ def _parse_free_energy_inference_args(
     cfg: UnipkaFreeEnergyConfig,
     fold: int,
 ) -> object:
-    from unicoreinfer import options
+    from ..unicoreinfer import options
 
     argv = _free_energy_inference_argv(processed_dir, task_name, checkpoint, cfg, fold)
     parser = options.get_validation_parser()

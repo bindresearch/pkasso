@@ -17,17 +17,13 @@ except ImportError:
 
 __all__ = ["pdb"]
 
-# backwards compatibility to support `from unicoreinfer.X import Y`
-from unicoreinfer.distributed import utils as distributed_utils
-from unicoreinfer.logging import meters, metrics, progress_bar  # noqa
+# Backwards-compatible aliases retained within the private runtime package.
+from .distributed import utils as distributed_utils
+from .logging import meters, metrics, progress_bar  # noqa
 
-sys.modules["unicoreinfer.distributed_utils"] = distributed_utils
-sys.modules["unicoreinfer.meters"] = meters
-sys.modules["unicoreinfer.metrics"] = metrics
-sys.modules["unicoreinfer.progress_bar"] = progress_bar
+sys.modules[f"{__name__}.distributed_utils"] = distributed_utils
+sys.modules[f"{__name__}.meters"] = meters
+sys.modules[f"{__name__}.metrics"] = metrics
+sys.modules[f"{__name__}.progress_bar"] = progress_bar
 
-import unicoreinfer.losses  # noqa
-import unicoreinfer.distributed  # noqa
-import unicoreinfer.models  # noqa
-import unicoreinfer.modules  # noqa
-import unicoreinfer.tasks  # noqa
+from . import distributed, losses, models, modules, tasks  # noqa: E402,F401

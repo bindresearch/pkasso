@@ -285,7 +285,7 @@ def all_gather_list(data, group=None, max_size=16384):
         max_size (int, optional): maximum size of the data to be gathered
             across workers
     """
-    from unicoreinfer import utils
+    from .. import utils
 
     if group is None:
         group = get_global_group()
