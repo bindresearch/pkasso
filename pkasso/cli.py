@@ -11,6 +11,7 @@ from typing import Any
 import click
 
 COMMANDS = {"single", "batch", "scan"}
+DEFAULT_UNIPKA_MODEL_FOLDER = Path(__file__).resolve().parent / "data"
 
 
 def protonate(*args: Any, **kwargs: Any) -> Any:
@@ -62,12 +63,64 @@ def _common_option_conflicts(ctx: click.Context) -> None:
     if ctx.params["cutoff_states"] < 1:
         raise click.UsageError("--cutoff-states must be >= 1.")
 
-    if (ctx.params["cutoff_export"] < 0) or (ctx.params["cutoff_export"] > 1):
+    cutoff_export = ctx.params.get("cutoff_export")
+    if cutoff_export is not None and ((cutoff_export < 0) or (cutoff_export > 1)):
         raise click.UsageError("--cutoff-export must be >= 0 and <= 1.")
+
+
+def _model_kwargs(
+    model: str,
+    unipka_model_folder: Path,
+    nthreads: int,
+    gpu: bool,
+) -> dict[str, Any]:
+    """Build Python-interface arguments for the selected CLI model."""
+
+    if model == "molgpka":
+        return {}
+
+    return {
+        "model": {
+            "molgpka": {},
+            "unipka": {
+                "folds": 3,
+                "model_dir": unipka_model_folder,
+                "nthreads": nthreads,
+                "gpu": gpu,
+            },
+        },
+    }
 
 
 
 COMMON_OPTIONS = [
+    click.option(
+        "--model",
+        type=click.Choice(["molgpka", "mixed"]),
+        default="molgpka",
+        show_default=True,
+        help="pKa model to use; mixed combines MolGpKa with Uni-pKa",
+    ),
+    click.option(
+        "--unipka-model-folder",
+        type=click.Path(file_okay=False, path_type=Path),
+        default=DEFAULT_UNIPKA_MODEL_FOLDER,
+        show_default=True,
+        help="Folder containing the Uni-pKa model files",
+    ),
+    click.option(
+        "--nthreads",
+        type=click.IntRange(min=0),
+        default=0,
+        show_default=True,
+        help="Number of threads for Uni-pKa; 0 uses automatic thread selection",
+    ),
+    click.option(
+        "--gpu/--no-gpu",
+        default=False,
+        show_default=True,
+        help="Use a GPU for Uni-pKa inference",
+    ),
     click.option(
         "--matrix-def",
         type=click.Choice(["dG", "msm"]),
@@ -159,6 +212,10 @@ def single(
     ph: float,
     sdf_out: Path,
     cutoff_export: float,
+    model: str,
+    unipka_model_folder: Path,
+    nthreads: int,
+    gpu: bool,
     matrix_def: str,
     cutoff_states: int,
     tautomer_search: bool,
@@ -180,6 +237,7 @@ def single(
         tautomer_search=tautomer_search,
         max_tautomers=max_tautomers,
         num_confs=num_confs,
+        **_model_kwargs(model, unipka_model_folder, nthreads, gpu),
     )
     print(f"{name} | pH: {ph}")
     print("Microstate SMILES Probability Net_Charge")
@@ -223,6 +281,10 @@ def batch(
     path_out: Path,
     overwrite: bool,
     cutoff_export: float,
+    model: str,
+    unipka_model_folder: Path,
+    nthreads: int,
+    gpu: bool,
     matrix_def: str,
     cutoff_states: int,
     tautomer_search: bool,
@@ -247,6 +309,7 @@ def batch(
             tautomer_search=tautomer_search,
             max_tautomers=max_tautomers,
             num_confs=num_confs,
+            **_model_kwargs(model, unipka_model_folder, nthreads, gpu),
         )
         print(name, smiles_out)
 
@@ -279,6 +342,10 @@ def scan(
     fig_out: Path,
     sdf_out: Path,
     pkas_out: Path,
+    model: str,
+    unipka_model_folder: Path,
+    nthreads: int,
+    gpu: bool,
     matrix_def: str,
     cutoff_states: int,
     tautomer_search: bool,
@@ -310,6 +377,7 @@ def scan(
         tautomer_search=tautomer_search,
         max_tautomers=max_tautomers,
         num_confs=num_confs,
+        **_model_kwargs(model, unipka_model_folder, nthreads, gpu),
     )
 
     scan.export_macro_pkas(file=pkas_out)

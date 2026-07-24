@@ -27,7 +27,7 @@ def prediction_kwargs(state: AppState) -> dict[str, Any]:
             "unipka": {
                 "folds": (3),
                 "model_dir": UNIPKA_MODEL_FOLDER,
-                "nthreads": 4,
+                "nthreads": 0,
             },
         },
     }

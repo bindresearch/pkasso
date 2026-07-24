@@ -66,7 +66,7 @@ def test_precision_mode_passes_unipka_model_and_config_to_protonate(monkeypatch)
         "unipka": {
             "folds": 3,
             "model_dir": model_dir,
-            "nthreads": 4,
+            "nthreads": 0,
         },
     }
 
@@ -94,7 +94,7 @@ def test_precision_mode_passes_unipka_model_and_config_to_scan(monkeypatch):
         "unipka": {
             "folds": 3,
             "model_dir": model_dir,
-            "nthreads": 4,
+            "nthreads": 0,
         },
     }
 

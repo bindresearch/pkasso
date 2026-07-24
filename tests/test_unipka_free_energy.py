@@ -170,6 +170,15 @@ def test_free_energy_config_accepts_single_fold_without_trailing_comma():
     assert UnipkaFreeEnergyConfig(folds=(0)).folds == (0,)
 
 
+def test_free_energy_config_accepts_automatic_thread_selection():
+    assert UnipkaFreeEnergyConfig(nthreads=0).nthreads == 0
+
+
+def test_free_energy_config_rejects_negative_threads():
+    with pytest.raises(ValueError, match="at least 0"):
+        UnipkaFreeEnergyConfig(nthreads=-1)
+
+
 def test_unipka_config_exposes_only_supported_keywords():
     assert list(inspect.signature(UnipkaFreeEnergyConfig).parameters) == [
         "model_dir",

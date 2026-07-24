@@ -66,8 +66,8 @@ class UnipkaFreeEnergyConfig:
             raise TypeError("folds must be an integer or tuple, for example 0 or (0, 1).")
         if not self.folds:
             raise ValueError("folds must contain at least one fold.")
-        if self.nthreads < 1:
-            raise ValueError("nthreads must be at least 1.")
+        if self.nthreads < 0:
+            raise ValueError("nthreads must be at least 0.")
         if self.gpu is not None and not isinstance(self.gpu, bool):
             raise TypeError("gpu must be True, False, or None.")
 

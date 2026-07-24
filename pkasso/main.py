@@ -1161,7 +1161,7 @@ class pKasso:
     max_cut_edges: int = 1
     strip_fragments: bool = True
     score_window: int = 0
-    num_threads: int = 1
+    num_threads: int = 0
     resolved_predictors: tuple[ResolvedPredictor, ...] = field(init=False, repr=False)
 
     def __post_init__(self) -> None:

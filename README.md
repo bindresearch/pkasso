@@ -48,6 +48,19 @@ pkasso batch --help
 pkasso scan --help
 ```
 
+All commands accept `--model molgpka` (the default) or `--model mixed`.
+The mixed model combines MolGpKa with Uni-pKa fold 3:
+
+```bash
+pkasso single --smiles "CC(=O)O" --model mixed \
+    --unipka-model-folder /path/to/unipka/models \
+    --nthreads 4 --gpu
+```
+
+If omitted, `--unipka-model-folder` uses pKasso's packaged `data` folder,
+`--nthreads` defaults to `0` (automatic thread selection), and GPU use is
+disabled. Use `--no-gpu` to select CPU inference explicitly.
+
 ### Python interface
 
 ```
