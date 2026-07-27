@@ -104,6 +104,7 @@ class Predictor(ABC):
     def __init__(self, mol: Mol, device: str = "cpu"):
         self.mol = mol
         self.device = device
+        self.source_net_charge = Chem.GetFormalCharge(mol)
 
     @classmethod
     def resolve_options(cls, options: ModelOptions) -> object | None:
@@ -390,7 +391,8 @@ class MolgpkaPredictor(Predictor):
                 pka = base[map_idx]
 
                 ncat = has_nplus_base_proximity(map_idx, self.mol, max_distance=5)
-                correction = 2.5 * max(0, (ncat - 1.0))
+                target_net_charge = self.source_net_charge + 1
+                correction = 2.5 * max(0, target_net_charge - 1) if ncat > 0 else 0.0
                 pka -= correction
 
                 if atom.GetSymbol() == "N":

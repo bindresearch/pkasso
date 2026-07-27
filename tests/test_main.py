@@ -261,6 +261,58 @@ def test_setup_returns_processed_input_space_when_site_limit_exceeded(monkeypatc
     assert Chem.MolToSmiles(distribution.mols_lib[""]) == Chem.MolToSmiles(pk.mol0)
 
 
+def test_run_acid_base_calcs_passes_source_charge_to_half_neutralized_predictors():
+    calls = []
+
+    class ChargeRecordingPredictor:
+        thermodynamic_prediction = "pka"
+        opposite_charge_influence = False
+
+        def __init__(self, mol, device="cpu"):
+            self.mol = mol
+
+        def pred_base(self):
+            calls.append(
+                ("base", Chem.GetFormalCharge(self.mol), self.source_net_charge)
+            )
+            return {}
+
+        def pred_acid(self):
+            calls.append(
+                ("acid", Chem.GetFormalCharge(self.mol), self.source_net_charge)
+            )
+            return {}
+
+    pk = main.pKasso("CO", tautomer_search=False)
+    context = main.PredictorContext(predictor_cls=ChargeRecordingPredictor)
+    space = main.ProtonationIndexSpace(
+        indices=[1, 2],
+        q_options=np.array(
+            [
+                [0, 1, 0],
+                [1, 1, 0],
+            ],
+            dtype=np.int64,
+        ),
+        mols_lib={
+            "10": Chem.MolFromSmiles("C[O-]"),
+            "11": Chem.MolFromSmiles("CO"),
+        },
+    )
+
+    pk.run_acid_base_calcs(
+        space,
+        state_strs=["10"],
+        state_vecs=[np.array([1, 0], dtype=np.int64)],
+        context=context,
+    )
+
+    assert calls == [
+        ("base", 0, -1),
+        ("acid", -1, -1),
+    ]
+
+
 def test_screen_clusters_skips_coupling_when_full_state_space_fits(monkeypatch):
     q_options = np.array(
         [

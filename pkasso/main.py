@@ -1208,11 +1208,16 @@ class pKasso:
         self,
         mol: Mol,
         context: PredictorContext | None = None,
+        *,
+        source_net_charge: int | None = None,
     ) -> Predictor:
         """Create the configured molecule-specific pKa predictor."""
 
         predictor_cls = context.predictor_cls if context is not None else self.primary_predictor_cls()
-        return predictor_cls(mol, device=self.device)
+        predictor = predictor_cls(mol, device=self.device)
+        if source_net_charge is not None:
+            predictor.source_net_charge = source_net_charge
+        return predictor
 
     def uses_standard_free_energies(self, context: PredictorContext | None = None) -> bool:
         """Return whether this run should use direct microstate free energies."""
@@ -2205,6 +2210,8 @@ class pKasso:
             if state_str in space.base_lib:
                 continue
 
+            source_net_charge = Chem.GetFormalCharge(space.mols_lib[state_str])
+
             state_vec_base = state_vec.copy()
             if self.opposite_charge_influence_mode(context):
                 state_vec_base = state_vec
@@ -2216,7 +2223,11 @@ class pKasso:
 
             mol_base = space.mols_lib[state_str_base]
 
-            base_tmp = self.pka_predictor(mol_base, context).pred_base()
+            base_tmp = self.pka_predictor(
+                mol_base,
+                context,
+                source_net_charge=source_net_charge,
+            ).pred_base()
             base = {}
             for map_idx, b in base_tmp.items():
                 if map_idx not in space.indices:
@@ -2236,7 +2247,11 @@ class pKasso:
 
             mol_acid = space.mols_lib[state_str_acid]
 
-            acid_tmp = self.pka_predictor(mol_acid, context).pred_acid()
+            acid_tmp = self.pka_predictor(
+                mol_acid,
+                context,
+                source_net_charge=source_net_charge,
+            ).pred_acid()
 
             acid = {}
             for map_idx, a in acid_tmp.items():
