@@ -35,7 +35,7 @@ def request_root_path(request: Request) -> str:
 
 def dependency_message(exc: Exception) -> str:
     detail = str(exc)
-    if isinstance(exc, ModuleNotFoundError):
+    if isinstance(exc, ModuleNotFoundError) and exc.name:
         return (
             f"Missing Python dependency: {exc.name}. Install the project dependencies "
             "with `pip install .` in the environment that runs this server."

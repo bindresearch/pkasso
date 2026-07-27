@@ -3,6 +3,7 @@ from pathlib import Path
 from pkasso.api import chemistry
 from pkasso.api.render import render_form
 from pkasso.api.state import AppState, update_state_from_form
+from pkasso.api.web import dependency_message
 
 
 def test_precision_mode_is_rendered_and_restored_from_form():
@@ -42,6 +43,15 @@ def test_precision_mode_is_rendered_and_restored_from_form():
     )
 
     assert state.precision_mode is True
+
+
+def test_precision_mode_preserves_optional_dependency_error():
+    exc = ModuleNotFoundError(
+        "Uni-pKa support is not installed. Install it with "
+        "`python -m pip install 'pkasso[unipka]'`."
+    )
+
+    assert dependency_message(exc) == str(exc)
 
 
 def test_precision_mode_passes_unipka_model_and_config_to_protonate(monkeypatch):
