@@ -300,7 +300,7 @@ def has_double_nplus_ring(mol: Mol) -> int:
     """
 
     rings = [set(r) for r in mol.GetRingInfo().AtomRings()]
-    systems = []
+    systems: list[set[int]] = []
 
     for ring in rings:
         hits = [s for s in systems if s & ring]

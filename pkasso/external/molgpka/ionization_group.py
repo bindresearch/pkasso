@@ -14,7 +14,7 @@ from rdkit.Chem import Mol
 # SMARTS_FILE = os.path.join(root, "smarts_pattern.tsv")
 
 
-def split_acid_base_pattern(smarts_file) -> tuple[DataFrame, DataFrame]:
+def split_acid_base_pattern(smarts_file: Path) -> tuple[DataFrame, DataFrame]:
     """
     Load SMARTS patterns and split them into acid and base DataFrames.
     """
@@ -74,8 +74,8 @@ def match_base(df_smarts_base: DataFrame, mol: Mol) -> list[int]:
         if len(match) == 0:
             continue
         index_split = str(indexs).split(",")
-        for index in index_split:
-            index = int(index)
+        for id in index_split:
+            index = int(id)
             for m in match:
                 matches.append([m[index]])
     matches = unique_acid_match(matches)

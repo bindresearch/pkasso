@@ -4,7 +4,7 @@ import itertools
 import logging
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 import networkx as nx
 import numpy as np
@@ -407,7 +407,7 @@ class MicrostateDistribution:
 
         state_strs_symm: list[str] = []
         state_freqs_symm: list[float] = []
-        state_freq_samples_symm = [] if self.state_freq_samples is not None else None
+        state_freq_samples_symm: list[NDArray[np.float64]] | None = [] if self.state_freq_samples is not None else None
 
         for group in groups.values():
             state_strs_group = sorted(self.state_strs[state_idx] for state_idx in group)
@@ -1210,7 +1210,7 @@ class pKasso:
                 "Predictor classes must define thermodynamic_prediction as "
                 "'pka' or 'standard_free_energy'."
             )
-        return mode
+        return cast(ThermodynamicPredictionMode, mode)
     
     def opposite_charge_influence_mode(self, context: PredictorContext | None = None) -> bool:
         predictor_cls = context.predictor_cls if context is not None else self.primary_predictor_cls()
@@ -1754,7 +1754,7 @@ class pKasso:
         """
 
         self.index_spaces = IndexSpaceRegistry()
-        self.predictor_contexts: list[PredictorContext] = []
+        self.predictor_contexts = []
 
     def process_cluster(
         self,
