@@ -549,7 +549,6 @@ def test_coupling_assay_weights_batches_double_states_for_unipka_path():
     assert calls == [["11", "21", "12", "22"]]
     assert weights.shape == (2, 2)
 
-
 def test_split_cluster_preserves_explicit_max_cut_edges_through_recursion(monkeypatch):
     q_options = np.ones((4, 3), dtype=np.int64)
     weights = np.zeros((4, 4), dtype=np.float64)

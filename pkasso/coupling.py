@@ -264,29 +264,6 @@ def validate_coupling_matrix(M: NDArray[np.float64] | NDArray[np.int64]) -> NDAr
         raise ValueError("Coupling matrix must be square.")
     return matrix
 
-
-def coupling_matrix_to_graph(M: NDArray[np.float64] | NDArray[np.int64]) -> nx.Graph:
-    """
-    Convert a directed coupling matrix into an undirected site graph.
-
-    Any nonzero sensitivity in either direction is treated as one site-site
-    connection. This preserves the previous connected-component semantics while
-    allowing NetworkX to perform more nuanced graph partitioning.
-    """
-
-    validate_coupling_matrix(M)
-    n = M.shape[0]
-    graph = nx.Graph()
-    graph.add_nodes_from(range(n))
-
-    for i in range(n):
-        for j in range(i + 1, n):
-            if M[i, j] != 0 or M[j, i] != 0:
-                graph.add_edge(i, j)
-
-    return graph
-
-
 def coupling_weights_to_graph(
     M: NDArray[np.float64],
     coupling_cutoff: float,
@@ -316,30 +293,6 @@ def coupling_weights_to_graph(
                 graph.add_edge(i, j, weight=weight)
 
     return graph
-
-
-def cluster_coupling_matrix(M: NDArray[np.int64]) -> list[list[int]]:
-    """
-    Partition sites into clusters based on coupling connectivity.
-
-    Identify connected components in the coupling matrix, grouping sites that
-    influence each other into clusters.
-
-    Parameters
-    ----------
-    coupling_matrix
-        Square matrix indicating pairwise coupling strength between sites.
-
-    Returns
-    -------
-    clusters
-        Lists of site indices belonging to each coupling cluster.
-    """
-
-    graph = coupling_matrix_to_graph(M)
-    clusters = [sorted(c) for c in nx.connected_components(graph)]
-    return sorted(clusters, key=lambda c: c[0])
-
 
 def cutset_penalty(M: NDArray[np.float64], cutset: tuple[tuple[int, int], ...]) -> float:
     """Sum undirected pKa penalties for severing a set of graph edges."""

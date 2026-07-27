@@ -70,6 +70,7 @@ def preprocess(
     strip_fragments: bool = True,
     score_window: int = 0,
     num_threads: int = 1,
+    min_fragment_heavy_atoms: int = 6
 ) -> tuple[Mol, str]:
     """
     Construct and standardize an RDKit molecule from a SMILES string.
@@ -99,12 +100,10 @@ def preprocess(
         raise ValueError(f"Invalid SMILES: {smiles_raw}")
     
     if strip_fragments:
-        sizeable = sizeable_organic_fragments(mol)
+        sizeable = sizeable_organic_fragments(mol,min_heavy_atoms=min_fragment_heavy_atoms)
         if len(sizeable) > 1:
-            raise ValueError(
-                "Input SMILES contains multiple sizeable organic fragments:",
-                sizeable
-            )
+            logger.warning(f"Input SMILES contains multiple sizeable organic fragments: {sizeable}")
+
         # Remove ions and covalent fragments
         chooser = rdMolStandardize.LargestFragmentChooser()
         mol = chooser.choose(mol)
@@ -113,6 +112,19 @@ def preprocess(
 
     logger.debug("Canonical")
     logger.debug(smiles)
+
+    logger.debug("Formal charges before cleanup")
+    charges = [at.GetFormalCharge() for at in mol.GetAtoms()]
+    logger.debug(charges)
+
+    mol = rdMolStandardize.Normalize(mol)
+    uncharger = rdMolStandardize.Uncharger(force=True)
+    mol = uncharger.uncharge(mol)
+    
+    # load/save cycles to clean up the mol atom ordering
+    smiles = Chem.MolToSmiles(mol, canonical=True)
+    mol = Chem.MolFromSmiles(smiles, sanitize=True)
+    smiles = Chem.MolToSmiles(mol, canonical=True)
 
     if tautomer_search:
         smiles = best_tautomer_smiles(
@@ -142,10 +154,6 @@ def preprocess(
 
     for atom in mol.GetAtoms():
         atom.SetAtomMapNum(atom.GetIdx() + 1)
-
-    logger.debug("Formal charges after cleanup")
-    symbols = [at.GetFormalCharge() for at in mol.GetAtoms()]
-    logger.debug(symbols)
 
     return mol, smiles
 
@@ -523,6 +531,7 @@ def combine_cluster_distributions(
     logger.debug(Gs_clusters)
 
     cluster_state_ids = [range(len(Gs_cl)) for Gs_cl in Gs_clusters]
+
     n_combinations = int(np.prod([len(state_ids) for state_ids in cluster_state_ids]))
     logger.debug(f"N microstate combinations from clusters: {n_combinations}")
 
@@ -932,8 +941,6 @@ def calc_symmetry(
             state_dict[state_hash].append(state_str)
         else:
             state_dict[state_hash] = [state_str]
-
-    logger.debug(state_dict)
 
     state_strs_symm: list[str] = []
     state_freqs_symm: list[float] = []
@@ -1353,9 +1360,6 @@ class pKasso:
         - Determining the full set of indices with protonable sites
         """
 
-        logger.debug(self.name)
-        logger.debug(self.smiles)
-
         self.initialize_paths_models_libs()
         self.mol0, self.smiles0 = preprocess(
             self.smiles,
@@ -1365,11 +1369,12 @@ class pKasso:
             strip_fragments=self.strip_fragments,
             score_window=self.score_window,
             num_threads=self.num_threads,
+            min_fragment_heavy_atoms=self.fragment_warning_heavy_atoms
         )
 
         self.charged_indices = special_cases.find_charged(self.mol0)
 
-        logger.debug("Processed:")
+        logger.debug("Processed SMILES:")
         logger.debug(self.smiles0)
 
         self.predictor_contexts = [

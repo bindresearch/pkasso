@@ -115,6 +115,7 @@ def test_max_tautomers_falls_back_to_input_smiles(caplog):
     tautomers = load_tautomers_module()
 
     smiles = "O=C(NC(=O)c1ccccc1)c1ccccc1"
+    caplog.set_level("INFO", logger=tautomers.__name__)
 
     with caplog.at_level(logging.INFO, logger=tautomers.logger.name):
         assert (
@@ -127,7 +128,6 @@ def test_max_tautomers_falls_back_to_input_smiles(caplog):
         )
 
     assert "Exceeding max tautomers" in caplog.text
-
 
 def test_returns_input_smiles_when_conformer_generation_fails(monkeypatch):
     tautomers = load_tautomers_module()
