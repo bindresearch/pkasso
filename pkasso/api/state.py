@@ -19,6 +19,7 @@ class AppState:
     mols_out: list[Any] = field(default_factory=list)
     scan: Any | None = None
     scan_figures: dict[int, str] = field(default_factory=dict)
+    warnings: list[str] = field(default_factory=list)
     error: str | None = None
 
 

@@ -34,6 +34,21 @@ def render_alert(message: str) -> str:
     """
 
 
+def render_warnings(messages: list[str]) -> str:
+    if not messages:
+        return ""
+
+    items = "".join(f"<li>{esc(message)}</li>" for message in messages)
+    return f"""
+    <div role="alert" class="alert alert-warning items-start rounded-lg">
+      <div>
+        <p class="font-semibold">pKasso reported a warning</p>
+        <ul class="mt-1 list-disc space-y-1 pl-5 text-sm">{items}</ul>
+      </div>
+    </div>
+    """
+
+
 def render_form(state: AppState, root_path: str = "") -> str:
     tautomer_checked = "checked" if state.tautomer_search else ""
     scan_checked = "checked" if state.scan_enabled else ""
@@ -128,8 +143,10 @@ def render_results(state: AppState, root_path: str = "") -> str:
         if state.scan is not None
         else render_empty("Enable pH scan and calculate states to inspect microstate distributions.")
     )
+    warnings_html = render_warnings(state.warnings)
     return f"""
     <section class="space-y-4">
+      {warnings_html}
       <div class="flex flex-wrap items-start justify-between gap-3 border-b border-[color:var(--bind-border)] pb-4">
         <div>
           <p class="section-kicker">Single pH prediction</p>
