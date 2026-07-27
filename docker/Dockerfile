@@ -24,7 +24,8 @@ COPY pkasso ./pkasso
 
 RUN python -m pip install --upgrade pip \
     && python -m pip install --index-url https://download.pytorch.org/whl/cpu "torch>=2.2,<3" \
-    && python -m pip install ".[webserver]"
+    && python -m pip install ".[webserver,unipka]" \
+    && unipka-download-model --output-folder /root/.local/share/unipkainfer/models
 
 EXPOSE 8001
 

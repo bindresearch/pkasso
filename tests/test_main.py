@@ -369,7 +369,7 @@ def test_screen_clusters_does_not_decouple_phosphates_for_non_molgpka_context(mo
     assert pk.screen_clusters(indices, q_options, context=context) == [list(range(len(indices)))]
 
 
-def test_combine_expert_energies_aligns_on_population_weighted_shared_states():
+def test_combine_expert_energies_uses_reference_states_and_aligns_shared_states():
     space = main.ProtonationIndexSpace(
         indices=[1, 2],
         q_options=np.array([[1, 1, 0], [1, 1, 0]], dtype=np.int64),
@@ -391,9 +391,9 @@ def test_combine_expert_energies_aligns_on_population_weighted_shared_states():
 
     combined = main.combine_expert_energies([raw_a, raw_b])
 
-    assert combined.state_strs == ["00", "01", "10", "11"]
-    assert combined.Gs.tolist() == pytest.approx([0.0, 3.04742587, 1.95257413, 3.0])
-    assert combined.Gs_sigmas.tolist() == pytest.approx([0.06707031, 2.0, 2.0, 1.34714325])
+    assert combined.state_strs == ["00", "01", "11"]
+    assert combined.Gs.tolist() == pytest.approx([0.0, 3.04742587, 3.0])
+    assert combined.Gs_sigmas.tolist() == pytest.approx([0.06707031, 2.0, 1.34714325])
 
 
 def test_combine_expert_energies_falls_back_to_first_model_without_shared_state(caplog):
@@ -455,8 +455,8 @@ def test_combine_expert_energies_pads_different_index_spaces_with_neutral_state(
 
     assert combined.index_space.indices == [1, 2]
     assert combined.index_space.q_options.tolist() == [[1, 1, 0], [1, 1, 0]]
-    assert combined.state_strs == ["01", "10", "11"]
-    assert combined.Gs.tolist() == pytest.approx([2.0, 2.0, 0.0])
+    assert combined.state_strs == ["01", "11"]
+    assert combined.Gs.tolist() == pytest.approx([2.0, 0.0])
 
 
 def test_bind_combined_context_space_uses_union_of_predictor_indices():

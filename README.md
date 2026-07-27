@@ -2,7 +2,7 @@
 
 Developed by [Bind Research](https://bindresearch.org/)
 
-## Protonation state prediction for small molecules
+# Protonation state prediction for small molecules
 
 pKasso determines protonation states for small molecules from SMILES strings or RDKit molecule objects. pKasso is open-source and free to use (MIT Licence).
 
@@ -10,13 +10,9 @@ Protonation microstates describe the unique charge patterns on protonable sites 
 
 *pKasso is under active development. Features, prediction models, and results may change in future releases.*
 
-## Run pKasso
+## Local installation
 
-The easiest way to run pKasso is via the [webserver](https://tools.bindresearch.org/pkasso).
-
-
-### Local installation
-
+### Basic install (MolGpKa)
 ```
 # Create conda environment
 conda create -n pkasso python=3.12
@@ -25,6 +21,48 @@ conda activate pkasso
 # Install pkasso from PyPI
 pip install pkasso
 ```
+
+### Mixed mode (MolGpKa + Uni-pKa)
+
+pKasso can also be run with a mixed model based on MolGpKa and [Uni-pKa](https://github.com/dptech-corp/Uni-pKa) (Apache-2.0). In that case, `pKasso[unipka]` needs to be installed and the Uni-pKa model checkpoints need to be downloaded with the command `unipka-download-model`.
+
+```
+# Create conda environment
+conda create -n pkasso python=3.12
+conda activate pkasso
+
+# Install pkasso with Uni-pKa support from PyPI
+pip install pkasso[unipka]
+
+# Download checkpoint
+unipka-download-model
+```
+
+By default, model checkpoints are downloaded to the user data directory.
+On Linux this is normally:
+
+```text
+~/.local/share/unipkainfer/models
+```
+
+Choose another location when needed:
+
+```bash
+unipka-download-model --output-folder /path/to/models
+```
+
+### Local webserver
+
+A local webserver can be installed via 
+```
+pip install pkasso[webserver,unipka]
+``` 
+followed by calling `pkasso-web` or by downloading and running the [docker image](https://github.com/bindresearch/pkasso/pkgs/container/pkasso) (main). Installing `pkasso[webserver]` without `unipka` does work as well but without 'Precision Mode' (mixed mode) functionality.
+
+## Run pKasso
+
+The easiest way to run pKasso is via the [webserver](https://tools.bindresearch.org/pkasso) hosted by Bind Research.
+
 
 ### Command line interface
 
@@ -35,9 +73,9 @@ The command line interface is called via `pkasso`.
 3) `pkasso scan`: Scan a pH range and plot the microstate distributions for all pH values (for a single molecule); calculate macro-pKa values.
 
 ```
-pkasso --smiles 'OC(=O)C(c1ccc(O)cc1)CNCCN'
+pkasso --smiles 'CCCCNCCCN'
 # equivalent to
-# pkasso single --smiles 'OC(=O)C(c1ccc(O)cc1)CNCCN'
+# pkasso single --smiles 'CCCCNCCCN'
 ```
 
 Get help for different pKasso options (single prediction, batch prediction, pH scan) with
@@ -54,24 +92,9 @@ The mixed model combines MolGpKa with Uni-pKa (1-fold model):
 ```bash
 pkasso single --smiles "CC(=O)O" --model mixed \
     --unipka-model-folder /path/to/unipka/models \
-    --nthreads 4 --gpu
 ```
 
-If omitted, `--unipka-model-folder` uses `unipkainfer`'s per-user model
-directory (`~/.local/share/unipkainfer/models` on a typical Linux system).
-`--nthreads` defaults to `0` (automatic thread selection), and GPU use is
-disabled. Use `--no-gpu` to select CPU inference explicitly.
-
-Uni-pKa is provided by the separate `unipkainfer` distribution. Install the
-pKasso extra and download its model weights from Hugging Face:
-
-```bash
-python -m pip install 'pkasso[unipka]'
-unipka-download-model
-```
-
-The downloader creates the expected `fold_0`, `fold_1`, ... subfolders in the
-default per-user directory. To use another location, run
+If omitted, `--unipka-model-folder` defaults to `~/.local/share/unipkainfer/models` on a typical Linux system. To use another location, run
 `unipka-download-model --output-folder /path/to/unipka/models` and pass that
 folder to `--unipka-model-folder`.
 
@@ -81,7 +104,7 @@ folder to `--unipka-model-folder`.
 from pkasso import protonate
 
 name = 'mymolecule'
-smiles = r'OC(=O)C(c1ccc(O)cc1)CNCCN'
+smiles = r'CCCCNCCCN'
 pH = 7.0
 
 # Include microstates with probability of 20% compared to most probable microstate
@@ -109,7 +132,3 @@ smiles_out, mols_out = protonate(smiles, model=model, pH=pH)
 ```
 
 For more examples, see the [jupyter notebook](https://github.com/bindresearch/pkasso/blob/main/example/example.ipynb).
-
-### Local webserver
-
-A local webserver can be hosted via `pip install pkasso[webserver]` followed by calling `pkasso-web` or by downloading and running the [docker image](https://github.com/bindresearch/pkasso/pkgs/container/pkasso) (main).
