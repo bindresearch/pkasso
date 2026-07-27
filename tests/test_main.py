@@ -479,6 +479,36 @@ def test_bind_combined_context_space_uses_union_of_predictor_indices():
     assert pk.index_space0.indices == [1, 2]
 
 
+def test_relevant_states_are_named_in_scan_order():
+    pk = main.pKasso("N", tautomer_search=False)
+    pk.index_space0 = main.ProtonationIndexSpace(
+        indices=[],
+        q_options=np.empty((0, 3), dtype=np.int64),
+        mols_lib={
+            state: Chem.MolFromSmiles(smiles)
+            for state, smiles in {
+                "0": "N",
+                "1": "[NH2-]",
+                "2": "[NH4+]",
+            }.items()
+        },
+    )
+    state_freqs = {
+        "0": np.array([0.1, 0.2, 0.8]),
+        "1": np.array([0.8, 0.2, 0.1]),
+        "2": np.array([0.2, 0.8, 0.2]),
+    }
+
+    state_strs, _, _, mols, _, _ = pk.calc_relevant_states(state_freqs)
+
+    assert state_strs == ["1", "2", "0"]
+    assert [mol.GetProp("_Name") for mol in mols] == [
+        "1 (-1)",
+        "2 (+1)",
+        "3 (+0)",
+    ]
+
+
 def test_process_cluster_uses_batched_standard_free_energies_for_unipka_path():
     mol = Chem.MolFromSmiles("N")
     for atom in mol.GetAtoms():

@@ -16,7 +16,7 @@ from matplotlib.figure import Figure as Figure_plt
 from rdkit import Chem
 from rdkit.Chem import AllChem, Mol
 from rdkit.Chem.Draw import MolsToGridImage, MolDrawOptions
-from .utils import is_jupyter, state_str_to_q
+from .utils import is_jupyter
 
 warnings.filterwarnings(
     "ignore",
@@ -165,7 +165,7 @@ class Scan:
     pkas_macro_sigmas: dict[int, float] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        self.state_strs_conv = [state_str_to_q(state_str) for state_str in self.state_strs_relevant]
+        self.state_strs_conv = [mol.GetProp("_Name") for mol in self.mols_relevant]
 
     def export_macro_pkas(self, file: Path) -> None:
         """Write macro pKas from pooled microstates."""
@@ -274,9 +274,9 @@ class Scan:
                 )
             ax[0].plot(self.pHs, sfreq * 100, style, label=state_str, color=color, alpha=alpha, lw=lw)
         if len(self.state_strs_conv) > 8:
-            ax[0].legend(ncol=2, fontsize=8)
+            ax[0].legend(title="Microstate", ncol=2, fontsize=8)
         elif len(self.state_strs_conv) > 1:
-            ax[0].legend(ncol=1, fontsize=10)
+            ax[0].legend(title="Microstate", ncol=1, fontsize=10)
 
         ax[0].set_xlabel("pH", fontsize=12)
         ax[0].set_ylabel("Probability [%]", fontsize=12)

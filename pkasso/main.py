@@ -30,7 +30,7 @@ from .transitions import (
     calc_state_diffs,
     calc_state_pH_dependent_free_energies,
 )
-from .utils import pack_indices, pack_vec, unpack_vec, state_str_to_q, construct_mol
+from .utils import pack_indices, pack_vec, unpack_vec, construct_mol
 from .tautomers import best_tautomer_smiles
 
 logger = logging.getLogger(__name__)
@@ -1739,7 +1739,6 @@ class pKasso:
 
             for state_str, sfreqs in state_freqs_all.items():
                 mol = self.index_space0.mols_lib[state_str]
-                mol.SetProp("_Name", state_str_to_q(state_str))
                 for atom in mol.GetAtoms():
                     atom.SetAtomMapNum(0)
 
@@ -1760,13 +1759,18 @@ class pKasso:
             cutoff += 0.02
 
         ps: list[int] = [int(p) for p in np.argsort(pH_argmaxs)]
+        mols_relevant = [mols_relevant[p] for p in ps]
+        for idx, mol in enumerate(mols_relevant, start=1):
+            q = Chem.GetFormalCharge(mol)
+            qstr = f"{q:+d}"
+            mol.SetProp("_Name", f"{idx} ({qstr})")
 
         logger.debug(f"Final N relevant states: {N_relevant_states} with cutoff {cutoff}")
         return (
             [state_strs_relevant[p] for p in ps],
             [sfreqs_relevant[p] for p in ps],
             [sfreqs_relevant_sigmas[p] for p in ps],
-            [mols_relevant[p] for p in ps],
+            mols_relevant,
             sfreqs_not_relevant,
             sfreqs_not_relevant_sigmas,
         )
