@@ -216,6 +216,51 @@ def test_count_state_combinations():
     assert main.count_state_combinations(q_options) == 6
 
 
+def test_setup_returns_processed_input_space_when_site_limit_exceeded(monkeypatch, caplog):
+    class TooManySitesPredictor:
+        def exclude_sites(self):
+            return [], []
+
+        def pred_acid_ids(self):
+            return [1]
+
+        def pred_base_ids(self):
+            return [2]
+
+        def pred_acid(self):
+            return {1: 4.0}
+
+        def pred_base(self):
+            return {2: 8.0}
+
+    pk = main.pKasso(
+        "CCN",
+        total_max_sites=1,
+        tautomer_search=False,
+    )
+    predictor = TooManySitesPredictor()
+    monkeypatch.setattr(pk, "pka_predictor", lambda mol, context=None: predictor)
+
+    with caplog.at_level(logging.WARNING, logger=main.logger.name):
+        pk._setup()
+
+    assert pk.indices0 == []
+    assert pk.q_options0.shape == (0, 3)
+    assert pk.primary_context.indices0 == []
+    assert pk.primary_context.q_options0 is not None
+    assert pk.primary_context.q_options0.shape == (0, 3)
+    assert pk.index_space0.indices == []
+    assert pk.index_space0.q_options.shape == (0, 3)
+    assert pk.primary_context.clusters == []
+    assert "Returning processed input molecule" in caplog.text
+
+    distribution = pk._calc_microstates(7.0)
+
+    assert distribution.state_strs == [""]
+    assert distribution.state_freqs.tolist() == [1.0]
+    assert Chem.MolToSmiles(distribution.mols_lib[""]) == Chem.MolToSmiles(pk.mol0)
+
+
 def test_screen_clusters_skips_coupling_when_full_state_space_fits(monkeypatch):
     q_options = np.array(
         [

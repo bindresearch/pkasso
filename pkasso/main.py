@@ -1169,6 +1169,7 @@ class pKasso:
     strip_fragments: bool = True
     score_window: int = 0
     num_threads: int = 0
+    fragment_warning_heavy_atoms: int = 6
     resolved_predictors: tuple[ResolvedPredictor, ...] = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -1406,15 +1407,20 @@ class pKasso:
 
         n_candidate_sites = len(set(context.acid_map_ids + context.base_map_ids))
         if n_candidate_sites > self.total_max_sites:
-            raise ValueError(f"Molecule must contain <={self.total_max_sites} protonation sites.")
-
-        context.indices0, context.q_options0 = find_candidate_sites(
-            context.base_map_ids,
-            context.acid_map_ids,
-            context.exclude_base_indices,
-            context.exclude_acid_indices,
-            self.charged_indices,
-        )
+            logger.warning(
+                f"Molecule has >{self.total_max_sites} protonation sites. "
+                "Returning processed input molecule."
+            )
+            context.indices0 = []
+            context.q_options0 = np.empty((0, 3), dtype=np.int64)
+        else:
+            context.indices0, context.q_options0 = find_candidate_sites(
+                context.base_map_ids,
+                context.acid_map_ids,
+                context.exclude_base_indices,
+                context.exclude_acid_indices,
+                self.charged_indices,
+            )
         context.index_space0 = context.index_spaces.get_or_create(
             context.indices0,
             context.q_options0,
