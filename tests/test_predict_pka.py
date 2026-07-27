@@ -4,12 +4,23 @@ import pandas as pd
 import pytest
 from rdkit import Chem
 
-from unipkainfer import UnipkaFreeEnergyConfig
 from pkasso.predict_pka import (
     MolgpkaPredictor,
     UnipkaPredictor,
     resolve_models,
     resolve_predictor_cls,
+)
+
+try:
+    import unipkainfer
+except ModuleNotFoundError as exc:
+    if exc.name != "unipkainfer":
+        raise
+    unipkainfer = None
+
+requires_unipka = pytest.mark.skipif(
+    unipkainfer is None,
+    reason="requires the pkasso[unipka] optional dependency",
 )
 
 
@@ -59,9 +70,8 @@ def test_unipka_predictor_excludes_poly_aza_ring_base_sites():
     assert predictor.exclude_sites() == ([10, 11, 12, 13, 15], [])
 
 
+@requires_unipka
 def test_unipka_predictor_curates_standard_free_energy_per_molecule(monkeypatch):
-    import unipkainfer
-
     class CuratingUnipkaPredictor(UnipkaPredictor):
         heavy_atom_counts: list[int] = []
 
@@ -95,6 +105,7 @@ def test_resolve_predictor_cls_accepts_public_model_keys():
     assert UnipkaPredictor.standard_free_energy_target_mean == 6.457855284082695
 
 
+@requires_unipka
 def test_resolve_models_preserves_order_and_delegates_options():
     resolved = resolve_models(
         {
@@ -109,7 +120,7 @@ def test_resolve_models_preserves_order_and_delegates_options():
 
     assert [item.predictor_cls for item in resolved] == [MolgpkaPredictor, UnipkaPredictor]
     assert resolved[0].config is None
-    assert resolved[1].config == UnipkaFreeEnergyConfig(
+    assert resolved[1].config == unipkainfer.UnipkaFreeEnergyConfig(
         folds=(0, 1),
         nthreads=4,
         gpu=False,
@@ -128,6 +139,7 @@ def test_molgpka_rejects_model_options():
         resolve_models({"molgpka": {"gpu": False}})
 
 
+@requires_unipka
 def test_unipka_rejects_unknown_model_options():
     with pytest.raises(ValueError, match="Unknown unipka option"):
         resolve_models({"unipka": {"batch_size": 4}})
