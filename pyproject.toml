@@ -34,6 +34,7 @@ dependencies = [
     "tqdm>=4.66,<5",
     "click>=8.1,<9",
     "networkx>=3.1,<4",
+    "joblib<2",
 ]
 
 [project.optional-dependencies]
@@ -75,7 +76,6 @@ pkasso-web = "pkasso.api.app:main"
 include = ["pkasso*"]
 
 [tool.pytest.ini_options]
-pythonpath = ["packages/unipkainfer"]
 filterwarnings = [
     'ignore::DeprecationWarning:torch\.jit\._script',
 ]
