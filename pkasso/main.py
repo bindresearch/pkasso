@@ -720,7 +720,12 @@ def combine_expert_energies(
     method: str = "product_of_experts",
     weights: Sequence[float] | None = None,
 ) -> RawMicrostateEnergies:
-    """Combine aligned raw free-energy predictions from multiple experts."""
+    """Combine aligned raw free-energy predictions from multiple experts.
+
+    The first expert defines the admissible post-pruning state set. Later
+    experts contribute only for states also retained by that reference expert;
+    their exclusive states are ignored.
+    """
 
     if not raw_dists:
         raise ValueError("At least one raw distribution is required.")
@@ -791,6 +796,15 @@ def combine_expert_energies(
         G_by_state_rows.append(G_by_state)
         state_sets.append(finite_states)
 
+    reference_states = state_sets[0]
+    for row_idx in range(1, len(G_by_state_rows)):
+        G_by_state_rows[row_idx] = {
+            state_str: G
+            for state_str, G in G_by_state_rows[row_idx].items()
+            if state_str in reference_states
+        }
+        state_sets[row_idx] = set(G_by_state_rows[row_idx])
+
     shared_states = set.intersection(*state_sets)
     if not shared_states:
         logger.info(
@@ -814,18 +828,18 @@ def combine_expert_energies(
 
     aligned_rows = _align_energy_rows(G_by_state_rows, shared_states)
 
-    union_states = sorted(set.union(*state_sets))
+    combined_states = sorted(reference_states)
     state_vec_by_str = {
         state_str: unpack_vec(state_str)
-        for state_str in union_states
+        for state_str in combined_states
     }
-    Gs_sigmas = _estimate_energy_sigmas(union_states, aligned_rows)
+    Gs_sigmas = _estimate_energy_sigmas(combined_states, aligned_rows)
 
     weights_arr = _normalized_weights(weights, len(raw_dists))
 
     if method == "product_of_experts":
         Gs_list = []
-        for state_str in union_states:
+        for state_str in combined_states:
             available = [
                 row_idx for row_idx, G_by_state in enumerate(aligned_rows)
                 if state_str in G_by_state
@@ -844,7 +858,7 @@ def combine_expert_energies(
             pops = calc_populations(np.array([G_by_state[state_str] for state_str in state_strs], dtype=np.float64))
             pops_rows.append(dict(zip(state_strs, pops)))
         pops_matrix = np.array([
-            [pops_by_state.get(state_str, 0.0) for state_str in union_states]
+            [pops_by_state.get(state_str, 0.0) for state_str in combined_states]
             for pops_by_state in pops_rows
         ], dtype=np.float64)
         mixed_pops = np.sum(weights_arr[:, None] * pops_matrix, axis=0)
@@ -864,8 +878,8 @@ def combine_expert_energies(
     return RawMicrostateEnergies(
         index_space=combined_index_space,
         pH=pH,
-        state_strs=union_states,
-        state_vecs=[state_vec_by_str[state_str] for state_str in union_states],
+        state_strs=combined_states,
+        state_vecs=[state_vec_by_str[state_str] for state_str in combined_states],
         Gs=Gs,
         Gs_sigmas=Gs_sigmas,
     )
