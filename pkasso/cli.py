@@ -14,6 +14,41 @@ from rdkit.Chem.rdchem import Mol
 
 COMMANDS = {"single", "batch", "scan"}
 
+
+class RejectDuplicateOptionsCommand(click.Command):
+    """Click command that rejects repeated occurrences of the same option."""
+
+    def parse_args(self, ctx: click.Context, args: list[str]) -> list[str]:
+        options_by_flag: dict[str, click.Option] = {}
+        for param in self.get_params(ctx):
+            if isinstance(param, click.Option):
+                for flag in (*param.opts, *param.secondary_opts):
+                    options_by_flag[flag] = param
+
+        seen: set[str] = set()
+        for arg in args:
+            if arg == "--":
+                break
+            flag = arg.split("=", maxsplit=1)[0]
+            option = options_by_flag.get(flag)
+            if option is None:
+                continue
+            if option.name in seen:
+                raise click.UsageError(
+                    f"Option {option.get_error_hint(ctx)} cannot be specified multiple times.",
+                    ctx,
+                )
+            seen.add(option.name)
+
+        return super().parse_args(ctx, args)
+
+
+class RejectDuplicateOptionsGroup(RejectDuplicateOptionsCommand, click.Group):
+    """Click group whose subcommands reject duplicate options."""
+
+    command_class = RejectDuplicateOptionsCommand
+
+
 def _compute_protonate(
         idx: int,
         smiles: str,
@@ -205,7 +240,10 @@ def run_cli() -> None:
     cli(argv)
 
 
-@click.group()
+@click.group(
+    cls=RejectDuplicateOptionsGroup,
+    context_settings={"help_option_names": ["-h", "--help"]},
+)
 def cli() -> None:
     pass
 
@@ -215,7 +253,7 @@ def cli() -> None:
 @cli.command()
 @click.option("--name", required=False, type=str, default="molecule", help="Molecule name")
 @click.option("--smiles", required=True, type=str, help="SMILES string")
-@click.option("--ph", required=False, type=float, default=7.0, help="pH value (for sdf and csv output)")
+@click.option("--ph", "--pH", required=False, type=float, default=7.0, help="pH value (for sdf and csv output)")
 @click.option("--sdf-out", required=False, type=click.Path(path_type=Path), help="sdf output file name")
 @click.option(
     "--cutoff-export",
@@ -292,7 +330,7 @@ def single(
 
 @cli.command()
 @click.option("--smi", required=True, type=click.Path(path_type=Path), help="Input .smi for batch processing")
-@click.option("--ph", required=False, type=float, default=7.0, help="pH value (for sdf and csv output)")
+@click.option("--ph", "--pH", required=False, type=float, default=7.0, help="pH value (for sdf and csv output)")
 @click.option("--overwrite/--no-overwrite", is_flag=True, default=True, help="Overwrite sdf file if exists")
 @click.option(
     "--path-out",

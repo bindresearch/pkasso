@@ -41,6 +41,77 @@ def mock_protonate(captured):
     return protonate
 
 
+def test_short_help_option_is_available_for_root_and_subcommands():
+    runner = CliRunner()
+
+    for args in (["-h"], ["single", "-h"], ["batch", "-h"], ["scan", "-h"]):
+        result = runner.invoke(cli.cli, args)
+
+        assert result.exit_code == 0
+        assert "Usage:" in result.output
+        assert "--help" in result.output
+
+
+def test_uppercase_ph_alias_is_equivalent_for_single(monkeypatch):
+    captured = {}
+
+    monkeypatch.setattr(cli, "protonate", mock_protonate(captured))
+
+    result = CliRunner().invoke(
+        cli.cli,
+        ["single", "--smiles", "C", "--pH", "5.5"],
+    )
+
+    assert result.exit_code == 0
+    assert captured["pH"] == 5.5
+
+
+def test_uppercase_ph_alias_is_equivalent_for_batch(monkeypatch):
+    captured = {}
+
+    monkeypatch.setattr(cli, "read_smi", lambda _path: {"mol": "C"})
+    monkeypatch.setattr(cli, "protonate", mock_protonate(captured))
+    monkeypatch.setattr(cli, "save_sdf", lambda *_args: None)
+
+    result = CliRunner().invoke(
+        cli.cli,
+        ["batch", "--smi", "mols.smi", "--pH", "5.5"],
+    )
+
+    assert result.exit_code == 0
+    assert captured["pH"] == 5.5
+
+
+def test_repeated_option_is_rejected():
+    result = CliRunner().invoke(
+        cli.cli,
+        ["single", "--smiles", "C", "--ph", "5", "--ph", "6"],
+    )
+
+    assert result.exit_code != 0
+    assert "cannot be specified multiple times" in result.output
+
+
+def test_mixed_aliases_are_rejected_as_repeated_option():
+    result = CliRunner().invoke(
+        cli.cli,
+        ["single", "--smiles", "C", "--ph", "5", "--pH", "6"],
+    )
+
+    assert result.exit_code != 0
+    assert "cannot be specified multiple times" in result.output
+
+
+def test_repeated_name_is_rejected():
+    result = CliRunner().invoke(
+        cli.cli,
+        ["single", "--smiles", "C", "--name", "first", "--name", "second"],
+    )
+
+    assert result.exit_code != 0
+    assert "cannot be specified multiple times" in result.output
+
+
 def test_max_tautomers_conflicts_with_no_tautomer_search():
     result = CliRunner().invoke(cli.cli, ["single", "--smiles", "C", "--max-tautomers", "5", "--no-tautomer-search"])
 
