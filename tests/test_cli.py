@@ -133,7 +133,7 @@ def test_mixed_model_passes_fixed_fold_and_unipka_options(monkeypatch, tmp_path)
     assert captured["model"] == {
         "molgpka": {},
         "unipka": {
-            "folds": 3,
+            "folds": 1,
             "model_dir": tmp_path,
             "gpu": True,
         },
@@ -165,7 +165,7 @@ def test_mixed_model_uses_unipkainfer_default_model_dir_and_cpu(monkeypatch):
 
     assert result.exit_code == 0
     assert captured["model"]["unipka"] == {
-        "folds": 3,
+        "folds": 1,
         "gpu": False,
     }
     assert captured["nthreads"] == 0

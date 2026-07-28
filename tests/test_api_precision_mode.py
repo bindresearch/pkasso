@@ -65,7 +65,7 @@ def test_precision_mode_passes_unipka_model_and_config_to_protonate(monkeypatch)
     assert captured["model"] == {
         "molgpka": {},
         "unipka": {
-            "folds": 3,
+            "folds": (1,),
             "model_dir": model_dir,
         },
     }
@@ -93,7 +93,7 @@ def test_precision_mode_passes_unipka_model_and_config_to_scan(monkeypatch):
     assert captured["model"] == {
         "molgpka": {},
         "unipka": {
-            "folds": 3,
+            "folds": (1,),
             "model_dir": model_dir,
         },
     }
