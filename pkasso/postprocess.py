@@ -163,9 +163,27 @@ class Scan:
     sfreqs_not_relevant_sigmas: list[NDArray[np.float64]]
     pkas_macro: dict[int, float]
     pkas_macro_sigmas: dict[int, float] = field(default_factory=dict)
+    molecules: dict[float, Molecule] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self.state_strs_conv = [mol.GetProp("_Name") for mol in self.mols_relevant]
+
+    def molecule_at(self, pH: float, tolerance: float = 1e-8) -> Molecule:
+        """Return the molecule output at a scanned pH value."""
+
+        if tolerance < 0:
+            raise ValueError("tolerance must be non-negative.")
+
+        pH = float(pH)
+        if pH in self.molecules:
+            return self.molecules[pH]
+
+        if self.molecules:
+            nearest_pH = min(self.molecules, key=lambda candidate: abs(candidate - pH))
+            if abs(nearest_pH - pH) <= tolerance:
+                return self.molecules[nearest_pH]
+
+        raise KeyError(f"No molecule output found at pH {pH} within tolerance {tolerance}.")
 
     def export_macro_pkas(self, file: Path) -> None:
         """Write macro pKas from pooled microstates."""

@@ -147,6 +147,7 @@ def test_pkasso_uses_top_level_nthreads_for_runtime_configuration(monkeypatch):
     pk = main.pKasso("C", nthreads=3)
 
     assert pk.nthreads == 3
+    assert pk.output_molecules_from_scan is True
     assert configured == [3]
     assert resolved == [({"molgpka": {}}, 3)]
 
@@ -284,6 +285,54 @@ def test_setup_returns_processed_input_space_when_site_limit_exceeded(monkeypatc
     assert distribution.state_strs == [""]
     assert distribution.state_freqs.tolist() == [1.0]
     assert Chem.MolToSmiles(distribution.mols_lib[""]) == Chem.MolToSmiles(pk.mol0)
+
+
+@pytest.mark.parametrize(
+    ("output_molecules_from_scan", "expected_molecules", "expected_prep_calls"),
+    [
+        (
+            True,
+            {
+                7.0: "molecule-7.0",
+                7.5: "molecule-7.5",
+            },
+            [7.0, 7.5],
+        ),
+        (False, {}, []),
+    ],
+)
+def test_scan_optionally_collects_molecule_output_for_each_ph(
+    output_molecules_from_scan,
+    expected_molecules,
+    expected_prep_calls,
+):
+    pk = main.pKasso.__new__(main.pKasso)
+    pk.output_molecules_from_scan = output_molecules_from_scan
+    prep_calls = []
+
+    def calc_microstates(pH):
+        return types.SimpleNamespace(
+            pH=pH,
+            net_charge=0.0,
+            net_charge_sigma=None,
+            freqs_macro={0: 1.0},
+            freqs_macro_samples=None,
+            state_strs=["1"],
+            state_freqs=np.array([1.0], dtype=np.float64),
+            state_freqs_sigmas=None,
+        )
+
+    def prep_single_output(distribution):
+        prep_calls.append(distribution.pH)
+        return f"molecule-{distribution.pH}"
+
+    pk._calc_microstates = calc_microstates
+    pk.prep_single_output = prep_single_output
+
+    distribution = pk._scan_pH(np.array([7.0, 7.5], dtype=np.float64))
+
+    assert distribution.molecules == expected_molecules
+    assert prep_calls == expected_prep_calls
 
 
 def test_run_acid_base_calcs_passes_source_mol_to_half_neutralized_predictors():

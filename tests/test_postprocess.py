@@ -2,7 +2,7 @@ import pytest
 import numpy as np
 from rdkit import Chem
 
-from pkasso.postprocess import Scan, combine_results
+from pkasso.postprocess import Molecule, Scan, combine_results
 
 
 def test_combine_results_exports_frequency_sigmas():
@@ -86,3 +86,32 @@ def test_scan_legend_uses_microstate_names():
         "1 (+0)",
         "2 (+1)",
     ]
+
+
+def test_scan_molecule_at_supports_exact_and_tolerant_lookup():
+    molecule = Molecule("scan", ())
+    scan = Scan(
+        name="scan",
+        indices=[],
+        state_strs_relevant=[],
+        mols_relevant=[],
+        sfreqs_relevant=[],
+        sfreqs_relevant_sigmas=[],
+        pHs=np.array([7.5], dtype=np.float64),
+        net_charges=np.array([0.0], dtype=np.float64),
+        net_charge_sigmas=np.array([0.0], dtype=np.float64),
+        sfreqs_not_relevant=[],
+        sfreqs_not_relevant_sigmas=[],
+        pkas_macro={},
+        molecules={7.5: molecule},
+    )
+
+    assert scan.molecules[7.5] is molecule
+    assert scan.molecule_at(7.5) is molecule
+    assert scan.molecule_at(7.500000001) is molecule
+
+    with pytest.raises(KeyError, match="No molecule output found"):
+        scan.molecule_at(7.6)
+
+    with pytest.raises(ValueError, match="non-negative"):
+        scan.molecule_at(7.5, tolerance=-1.0)
