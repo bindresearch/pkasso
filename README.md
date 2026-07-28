@@ -6,7 +6,7 @@ Developed by [Bind Research](https://bindresearch.org/)
 
 pKasso determines protonation states for small molecules from SMILES strings or RDKit molecule objects. pKasso is open-source and free to use (MIT Licence).
 
-Protonation microstates describe the unique charge patterns on protonable sites of molecules. The acid/base equilibria (micro-pKa values) of individual protonable sites are coupled, leading to a graph of free energy difference between protonation microstates. pKasso computes this graph based on micro-pKa predictions from [MolGpKa](https://github.com/Xundrug/MolGpKa). pKasso then converts the results into pH-dependent absolute microstate probabilities and predicts net acid/base equilibria (macro-pKa values) of the molecule.
+Protonation microstates describe the unique charge patterns on protonable sites of molecules. The acid/base equilibria (micro-pKa values) of individual protonable sites are coupled, leading to a graph of free energy difference between protonation microstates. pKasso computes this graph based on micro-pKa predictions from [MolGpKa](https://github.com/Xundrug/MolGpKa) (MIT) and optionally standard state free energies from [Uni-pKa](https://github.com/dptech-corp/Uni-pKa) (Apache-2.0). pKasso then converts the results into pH-dependent absolute microstate probabilities and predicts net acid/base equilibria (macro-pKa values) of the molecule.
 
 *pKasso is under active development. Features, prediction models, and results may change in future releases.*
 
@@ -24,7 +24,7 @@ pip install pkasso
 
 ### Mixed mode (MolGpKa + Uni-pKa)
 
-pKasso can also be run with a mixed model based on MolGpKa and [Uni-pKa](https://github.com/dptech-corp/Uni-pKa) (Apache-2.0). In that case, `pKasso[unipka]` needs to be installed and the Uni-pKa model checkpoints need to be downloaded with the command `unipka-download-model`.
+pKasso can be run with a mixed model based on MolGpKa and Uni-pKa. In that case, `pKasso[unipka]` needs to be installed and the Uni-pKa model checkpoints need to be downloaded with the command `unipka-download-model`.
 
 ```
 # Create conda environment
