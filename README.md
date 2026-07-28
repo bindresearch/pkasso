@@ -24,9 +24,7 @@ pip install pkasso
 
 ### Mixed mode (MolGpKa + Uni-pKa)
 
-pKasso can be run with a mixed model based on MolGpKa and Uni-pKa. In that
-case, install `pKasso[unipka]`. The selected Uni-pKa model fold is downloaded
-from Hugging Face on first use and cached for later processes.
+pKasso can be run with a mixed model based on MolGpKa and Uni-pKa. In that case, install `pKasso[unipka]`.
 
 ```
 # Create conda environment
@@ -37,11 +35,7 @@ conda activate pkasso
 pip install pkasso[unipka]
 ```
 
-Five variants of Uni-pKa were trained (fold 0, fold 1, fold 2, fold 3, fold 4) with similar accuracy. By default, fold 1 is used and model checkpoints are cached in the user data directory. On Linux this is normally:
-
-```text
-~/.local/share/unipkainfer/models
-```
+Mixed mode is more computationally demanding and profits from a GPU. It can run in CPU-only mode as well, albeit more slowly.
 
 ### Local webserver
 
@@ -78,17 +72,13 @@ pkasso batch --help
 pkasso scan --help
 ```
 
-All commands accept `--model molgpka` (the default) or `--model mixed`.
-The mixed model combines MolGpKa with Uni-pKa using fold 1 by default:
+All commands accept `--model molgpka` (the default) or `--model mixed`. The mixed model combines MolGpKa with Uni-pKa.
 
 ```bash
-pkasso single --smiles "CC(=O)O" --model mixed \
-    --unipka-model-folder /path/to/unipka/models \
+pkasso single --smiles "CC(=O)O" --model mixed
 ```
 
-If omitted, `--unipka-model-folder` defaults to the per-user model cache,
-typically `~/.local/share/unipkainfer/models` on Linux. A missing selected fold
-is downloaded on first use.
+An additional argument `--unipka-model-folder` (defaults to `~/.local/share/unipkainfer/models`) can be provided to define where the Uni-pKa model checkpoint should be stored. A missing checkpoint is downloaded on first use.
 
 ### Python interface
 
@@ -122,6 +112,10 @@ model = {
 smiles_out, mols_out = protonate(smiles, model=model, pH=pH, nthreads=8)
 ```
 
-Ensure that molgpka is the first listed predictor in the dictionary. The `nthreads` option controls RDKit preprocessing, MolGpKa PyTorch inference, and Uni-pKa preprocessing.
+(Ensure that molgpka is the first listed predictor in the dictionary.)
+
+Five variants of Uni-pKa were trained (fold 0 to fold 4). The variants have similar accuracy. By default (including the CLI) fold 1 is used. The selected Uni-pKa model fold is downloaded from Hugging Face on first use and cached for later processes. All model checkpoints are cached in the user data directory. Uncomment the `"model_dir"` keyword to manually define the cache folder.
+
+`nthreads` controls RDKit preprocessing, MolGpKa PyTorch inference, and Uni-pKa preprocessing.
 
 For more examples, see the [jupyter notebook](https://github.com/bindresearch/pkasso/blob/main/example/example.ipynb).
