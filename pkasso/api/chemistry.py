@@ -53,13 +53,13 @@ def prediction_kwargs(state: AppState) -> dict[str, Any]:
 
     unipka_options: dict[str, object] = {
         "folds": (3),
-        "nthreads": 0,
     }
     if UNIPKA_MODEL_FOLDER is not None:
         unipka_options["model_dir"] = UNIPKA_MODEL_FOLDER
 
     return {
         "total_max_sites": 8,
+        "nthreads": 0,
         "model": {
             "molgpka": {},
             "unipka": unipka_options,

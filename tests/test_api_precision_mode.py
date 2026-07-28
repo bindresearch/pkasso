@@ -61,12 +61,12 @@ def test_precision_mode_passes_unipka_model_and_config_to_protonate(monkeypatch)
 
     assert captured["inp"] == "C"
     assert captured["total_max_sites"] == 8
+    assert captured["nthreads"] == 0
     assert captured["model"] == {
         "molgpka": {},
         "unipka": {
             "folds": 3,
             "model_dir": model_dir,
-            "nthreads": 0,
         },
     }
 
@@ -89,12 +89,12 @@ def test_precision_mode_passes_unipka_model_and_config_to_scan(monkeypatch):
     assert state.scan == "scan"
     assert captured["inp"] == "C"
     assert captured["total_max_sites"] == 8
+    assert captured["nthreads"] == 0
     assert captured["model"] == {
         "molgpka": {},
         "unipka": {
             "folds": 3,
             "model_dir": model_dir,
-            "nthreads": 0,
         },
     }
 

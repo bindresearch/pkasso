@@ -101,13 +101,12 @@ class Predictor(ABC):
     thermodynamic_prediction: ClassVar[ThermodynamicPredictionMode]
     standard_free_energy_target_mean: ClassVar[float | None] = None
 
-    def __init__(self, mol: Mol, device: str = "cpu"):
+    def __init__(self, mol: Mol):
         self.mol = mol
-        self.device = device
         self.source_net_charge = Chem.GetFormalCharge(mol)
 
     @classmethod
-    def resolve_options(cls, options: ModelOptions) -> object | None:
+    def resolve_options(cls, options: ModelOptions, *, nthreads: int = 0) -> object | None:
         """Validate public model options and return an internal configuration."""
 
         if options:
@@ -154,23 +153,22 @@ class MolgpkaPredictor(Predictor):
     smarts_pattern: ClassVar[Path] = ROOT / "smarts_pattern_molgpka.tsv"
     opposite_charge_influence = False
 
-    _model_cache: ClassVar[dict[tuple[type, str], tuple[GCNNet, GCNNet]]] = {}
+    _model_cache: ClassVar[dict[type, tuple[GCNNet, GCNNet]]] = {}
 
-    def __init__(self, mol: Mol, device: str = "cpu") -> None:
-        super().__init__(mol, device=device)
-        self.model_base, self.model_acid = self._load_models(device)
+    def __init__(self, mol: Mol) -> None:
+        super().__init__(mol)
+        self.model_base, self.model_acid = self._load_models()
         self.mol_h = Chem.rdmolops.AddHs(Chem.Mol(mol))
         self.atom_indices = [atom.GetIdx() for atom in mol.GetAtoms()]
         self.qs = np.array([at.GetFormalCharge() for at in mol.GetAtoms()])
 
     @classmethod
-    def _load_models(cls, device: str) -> tuple[GCNNet, GCNNet]:
-        cache_key = (cls, device)
-        if cache_key not in cls._model_cache:
-            model_base = load_model(cls.model_file_base, device=device)
-            model_acid = load_model(cls.model_file_acid, device=device)
-            cls._model_cache[cache_key] = (model_base, model_acid)
-        return cls._model_cache[cache_key]
+    def _load_models(cls) -> tuple[GCNNet, GCNNet]:
+        if cls not in cls._model_cache:
+            model_base = load_model(cls.model_file_base)
+            model_acid = load_model(cls.model_file_acid)
+            cls._model_cache[cls] = (model_base, model_acid)
+        return cls._model_cache[cls]
 
     def pred_acid(self) -> dict[int, float]:
         acid = self._predict_acid_raw()
@@ -266,7 +264,7 @@ class MolgpkaPredictor(Predictor):
     def _predict_acid_raw(self) -> dict[int, float]:
         """Run molgpka acid prediction and convert results to atom map indices."""
 
-        acid = molgpka_predict_acid(self.mol_h, self.model_acid, self.smarts_pattern, device=self.device)
+        acid = molgpka_predict_acid(self.mol_h, self.model_acid, self.smarts_pattern)
         return get_acid_neighbors(self.mol_h, acid)
 
     def _curate_acid(self, acid: dict[int, float]) -> dict[int, float]:
@@ -361,7 +359,7 @@ class MolgpkaPredictor(Predictor):
     def _predict_base_raw(self) -> dict[int, float]:
         """Run molgpka base prediction and convert results to atom map indices."""
 
-        base_aid = molgpka_predict_base(self.mol_h, self.model_base, self.smarts_pattern, device=self.device)
+        base_aid = molgpka_predict_base(self.mol_h, self.model_base, self.smarts_pattern)
         return convert_base_map_idx(self.mol_h, base_aid)
 
     def _curate_base(self, base: dict[int, float]) -> dict[int, float]:
@@ -432,14 +430,14 @@ class UnipkaPredictor(Predictor):
     # smarts_pattern: ClassVar[Path] = ROOT / "smarts_pattern_unipka.tsv"
     smarts_pattern: ClassVar[Path] = ROOT / "simple_smarts_pattern.tsv"
 
-    def __init__(self, mol: Mol, device: str = "cpu") -> None:
-        super().__init__(mol, device=device)
+    def __init__(self, mol: Mol) -> None:
+        super().__init__(mol)
         self.mol_h = Chem.rdmolops.AddHs(Chem.Mol(mol))
         self.atom_indices = [atom.GetIdx() for atom in mol.GetAtoms()]
         self.qs = np.array([at.GetFormalCharge() for at in mol.GetAtoms()])
 
     @classmethod
-    def resolve_options(cls, options: ModelOptions) -> object:
+    def resolve_options(cls, options: ModelOptions, *, nthreads: int = 0) -> object:
         """Resolve the public Uni-pKa options into its inference configuration."""
 
         try:
@@ -452,13 +450,19 @@ class UnipkaPredictor(Predictor):
                 "`python -m pip install 'pkasso[unipka]'`."
             ) from exc
 
-        valid_options = {"model_dir", "folds", "nthreads", "gpu"}
+        if "nthreads" in options:
+            raise ValueError(
+                "'unipka.nthreads' has moved to the top-level 'nthreads' option."
+            )
+
+        valid_options = {"model_dir", "folds", "gpu"}
         unknown_options = sorted(set(options) - valid_options)
         if unknown_options:
             unknown = ", ".join(unknown_options)
             valid = ", ".join(sorted(valid_options))
             raise ValueError(f"Unknown unipka option(s): {unknown}. Valid options: {valid}.")
         config_kwargs = cast(dict[str, Any], dict(options))
+        config_kwargs["nthreads"] = nthreads
         return UnipkaFreeEnergyConfig(**config_kwargs)
 
     # def exclude_sites(self) -> tuple[list[int], list[int]]:
@@ -633,9 +637,11 @@ def resolve_predictor_cls(model: PredictorKey | str) -> type[Predictor]:
         raise ValueError(f"Unknown pKa predictor {model!r}. Valid predictors: {valid_keys}.") from exc
 
 
-def resolve_models(model: ModelInput) -> tuple[ResolvedPredictor, ...]:
+def resolve_models(model: ModelInput, *, nthreads: int = 0) -> tuple[ResolvedPredictor, ...]:
     """Resolve an ordered public model mapping through predictor-owned options."""
 
+    if nthreads < 0:
+        raise ValueError("nthreads must be at least 0.")
     if not isinstance(model, Mapping):
         raise TypeError(
             "model must be a mapping such as {'molgpka': {}} or "
@@ -654,7 +660,7 @@ def resolve_models(model: ModelInput) -> tuple[ResolvedPredictor, ...]:
         resolved.append(
             ResolvedPredictor(
                 predictor_cls=predictor_cls,
-                config=predictor_cls.resolve_options(options),
+                config=predictor_cls.resolve_options(options, nthreads=nthreads),
             )
         )
     return tuple(resolved)
@@ -662,21 +668,19 @@ def resolve_models(model: ModelInput) -> tuple[ResolvedPredictor, ...]:
 
 def predict_acid(
     mol: Mol,
-    device: str = "cpu",
     predictor_cls: type[Predictor] = MolgpkaPredictor,
 ) -> dict[int, float]:
     """Predict acidic pKa values with the selected predictor backend."""
 
-    predictor = predictor_cls(mol, device=device)
+    predictor = predictor_cls(mol)
     return predictor.pred_acid()
 
 
 def predict_base(
     mol: Mol,
-    device: str = "cpu",
     predictor_cls: type[Predictor] = MolgpkaPredictor,
 ) -> dict[int, float]:
     """Predict basic pKa values with the selected predictor backend."""
 
-    predictor = predictor_cls(mol, device=device)
+    predictor = predictor_cls(mol)
     return predictor.pred_base()

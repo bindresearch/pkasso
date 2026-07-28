@@ -88,7 +88,6 @@ def _common_option_conflicts(ctx: click.Context) -> None:
 def _model_kwargs(
     model: str,
     unipka_model_folder: Path | None,
-    nthreads: int,
     gpu: bool,
 ) -> dict[str, Any]:
     """Build Python-interface arguments for the selected CLI model."""
@@ -98,7 +97,6 @@ def _model_kwargs(
 
     unipka_options: dict[str, object] = {
         "folds": 3,
-        "nthreads": nthreads,
         "gpu": gpu,
     }
     if unipka_model_folder is not None:
@@ -135,7 +133,7 @@ COMMON_OPTIONS = [
         type=click.IntRange(min=0),
         default=0,
         show_default=True,
-        help="Number of threads for Uni-pKa; 0 uses automatic thread selection",
+        help="Threads used by RDKit, MolGpKa, and Uni-pKa; 0 selects automatically",
     ),
     click.option(
         "--gpu/--no-gpu",
@@ -259,7 +257,8 @@ def single(
         tautomer_search=tautomer_search,
         max_tautomers=max_tautomers,
         num_confs=num_confs,
-        **_model_kwargs(model, unipka_model_folder, nthreads, gpu),
+        nthreads=nthreads,
+        **_model_kwargs(model, unipka_model_folder, gpu),
     )
     print(f"{name} | pH: {ph}")
     print("Microstate SMILES Probability Net_Charge")
@@ -341,7 +340,8 @@ def batch(
             tautomer_search=tautomer_search,
             max_tautomers=max_tautomers,
             num_confs=num_confs,
-            **_model_kwargs(model, unipka_model_folder, nthreads, gpu),
+            nthreads=nthreads,
+            **_model_kwargs(model, unipka_model_folder, gpu),
         )
         for idx, (name, smiles) in enumerate(batch_input.items()))
 
@@ -415,7 +415,8 @@ def scan(
         tautomer_search=tautomer_search,
         max_tautomers=max_tautomers,
         num_confs=num_confs,
-        **_model_kwargs(model, unipka_model_folder, nthreads, gpu),
+        nthreads=nthreads,
+        **_model_kwargs(model, unipka_model_folder, gpu),
     )
 
     scan.export_macro_pkas(file=pkas_out)

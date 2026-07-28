@@ -124,11 +124,13 @@ model = {
     "unipka": {
         "model_dir": "/path/to/unipka/models",
         "folds": (0,),
-        "nthreads": 8,
         "gpu": True,
     },
 }
-smiles_out, mols_out = protonate(smiles, model=model, pH=pH)
+smiles_out, mols_out = protonate(smiles, model=model, pH=pH, nthreads=8)
 ```
+
+The `nthreads` option controls RDKit preprocessing, MolGpKa
+PyTorch inference, and Uni-pKa preprocessing.
 
 For more examples, see the [jupyter notebook](https://github.com/bindresearch/pkasso/blob/main/example/example.ipynb).

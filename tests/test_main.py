@@ -31,7 +31,7 @@ def load_main_module():
             self.predictor_cls = predictor_cls
             self.config = config
 
-    def resolve_models(model):
+    def resolve_models(model, *, nthreads=0):
         if model != {"molgpka": {}}:
             raise ValueError(f"Unsupported test model: {model}")
         return (ResolvedPredictor(MolgpkaPredictor, None),)
@@ -130,6 +130,31 @@ def load_main_module():
 
 
 main = load_main_module()
+
+
+def test_pkasso_uses_top_level_nthreads_for_runtime_configuration(monkeypatch):
+    configured = []
+    resolved = []
+
+    monkeypatch.setattr(main, "configure_torch_threads", configured.append)
+
+    def resolve_models(model, *, nthreads):
+        resolved.append((model, nthreads))
+        return (main.ResolvedPredictor(main.MolgpkaPredictor, None),)
+
+    monkeypatch.setattr(main, "resolve_models", resolve_models)
+
+    pk = main.pKasso("C", nthreads=3)
+
+    assert pk.nthreads == 3
+    assert configured == [3]
+    assert resolved == [({"molgpka": {}}, 3)]
+
+
+def test_pkasso_rejects_obsolete_device_keyword():
+    with pytest.raises(TypeError, match="unexpected keyword argument 'device'"):
+        main.pKasso("C", device="cpu")
+
 
 # @pytest.mark.parametrize(
 #     ("smiles_raw","net_charge"),
@@ -268,7 +293,7 @@ def test_run_acid_base_calcs_passes_source_charge_to_half_neutralized_predictors
         thermodynamic_prediction = "pka"
         opposite_charge_influence = False
 
-        def __init__(self, mol, device="cpu"):
+        def __init__(self, mol):
             self.mol = mol
 
         def pred_base(self):
