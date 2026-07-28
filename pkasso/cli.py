@@ -250,6 +250,7 @@ def single(
 
     smiles_out, mols_out = protonate(
         smiles,
+        name=name,
         pH=ph,
         matrix_def=matrix_def,
         cutoff_states=cutoff_states,
@@ -268,18 +269,23 @@ def single(
         max_sm = max(max_sm, len(sm))
         max_name = max(max_name, len(str(mol.GetProp("_Name"))))
 
-    print("-"*70)
-    print(f"{name} | pH: {ph:}")
+    name_width = max(max_name, len("Microstate"))
+    smiles_width = max(max_sm, len("SMILES"))
+    title = f"{name} | pH: {ph:}"
+    table_width = name_width + smiles_width + 29
+    output_width = max(table_width, len(title)) + 2
+    print("-" * output_width)
+    print(title.center(output_width))
     # print("{'Microstate':} SMILES Probability Net_Charge")
-    print(f"{'Microstate':{max_name}s} {'SMILES':{max_sm}s} {'Probability':>13s} {'Net charge':>13s}")
-    print("-"*70)
+    print(f"{'Microstate':{name_width}s} {'SMILES':{smiles_width}s} {'Probability':>13s} {'Net charge':>13s}")
+    print("-" * output_width)
 
     for sm, mol in zip(smiles_out, mols_out):
         name_state = mol.GetProp("_Name")
         probability = float(mol.GetProp("Probability"))
         net_charge = float(mol.GetProp("net_charge"))
         # print(name_state, sm, f"{probability:.5f}", net_charge)
-        print(f"{name_state:{max_name}s} {sm:{max_sm}s} {probability:>13.5f} {net_charge:>13.0f}")
+        print(f"{name_state:{name_width}s} {sm:{smiles_width}s} {probability:>13.5f} {net_charge:>13.0f}")
 
     if sdf_out:
         save_sdf(mols_out, sdf_out)
@@ -421,6 +427,7 @@ def scan(
 
     scan = scan_pH(
         smiles,
+        name=name,
         pHs=pHs,
         matrix_def=matrix_def,
         cutoff_states=cutoff_states,

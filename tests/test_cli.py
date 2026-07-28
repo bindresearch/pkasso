@@ -79,6 +79,26 @@ def test_max_tautomers_and_num_confs_can_be_used_together(monkeypatch):
     assert captured["num_confs"] == 2
 
 
+def test_single_forwards_name_and_sizes_output_to_columns(monkeypatch):
+    captured = {}
+
+    monkeypatch.setattr(cli, "protonate", mock_protonate(captured))
+
+    result = CliRunner().invoke(
+        cli.cli,
+        ["single", "--smiles", "C", "--name", "actual_name"],
+    )
+
+    assert result.exit_code == 0
+    assert captured["name"] == "actual_name"
+
+    lines = result.output.splitlines()
+    expected_width = len("Microstate") + len("SMILES") + 31
+    assert lines[0] == "-" * expected_width
+    assert lines[1] == "actual_name | pH: 7.0".center(expected_width)
+    assert lines[3] == "-" * expected_width
+
+
 def test_cutoff_states_must_be_at_least_one():
     result = CliRunner().invoke(cli.cli, ["single", "--smiles", "C", "--cutoff-states", "0"])
 
@@ -240,5 +260,6 @@ def test_scan_pkas_out_without_cutoff_export(monkeypatch):
 
     assert result.exit_code == 0
     assert captured["args"][0] == "C"
+    assert captured["name"] == "2014"
     assert "cutoff_export" not in captured
     assert scan.exported_macro_pkas.name == "2014_pkas.txt"
