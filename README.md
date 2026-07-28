@@ -37,23 +37,10 @@ conda activate pkasso
 pip install pkasso[unipka]
 ```
 
-By default, fold 1 is used and model checkpoints are cached in the user data
-directory. On Linux this is normally:
+Five variants of Uni-pKa were trained (fold 0, fold 1, fold 2, fold 3, fold 4) with similar accuracy. By default, fold 1 is used and model checkpoints are cached in the user data directory. On Linux this is normally:
 
 ```text
 ~/.local/share/unipkainfer/models
-```
-
-The checkpoint can be prefetched for offline use or container preparation:
-
-```bash
-unipka-download-model --fold 1
-```
-
-Choose another cache location or prefetch several folds when needed:
-
-```bash
-unipka-download-model --fold 0 1 2 3 4 --output-folder /path/to/models
 ```
 
 ### Local webserver
@@ -127,7 +114,7 @@ Predictors and their options are selected with a dictionary:
 model = {
     "molgpka": {},
     "unipka": {
-        "model_dir": "/path/to/unipka/models",
+        # "model_dir": "/path/to/unipka/models",
         "folds": (1,),
         "gpu": True,
     },
