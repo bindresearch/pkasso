@@ -88,17 +88,20 @@ def format_microstate_table(
     pH: float,
     smiles: Sequence[str],
     mols: Sequence[Mol],
+    name_width: int = 0,
+    smiles_width: int = 0,
+    output_width: int = 0,
 ) -> str:
     """Format pH-specific microstate output as a plain-text table."""
 
     max_sm = max((len(sm) for sm in smiles), default=0)
     max_name = max((len(str(mol.GetProp("_Name"))) for mol in mols), default=0)
 
-    name_width = max(max_name, len("Microstate"))
-    smiles_width = max(max_sm, len("SMILES"))
+    name_width = max(name_width, max_name, len("Microstate"))
+    smiles_width = max(smiles_width, max_sm, len("SMILES"))
     title = f"{name} | pH: {pH:}"
     table_width = name_width + smiles_width + 29
-    output_width = max(table_width, len(title)) + 2
+    output_width = max(output_width, table_width + 2, len(title) + 2)
 
     lines = [
         "-" * output_width,
@@ -125,11 +128,34 @@ def write_microstate_tables(
 ) -> None:
     """Write one or more microstate tables to a common text file."""
 
+    outputs = list(outputs)
+    name_width = max(
+        (len(str(mol.GetProp("_Name"))) for _, _, _, mols in outputs for mol in mols),
+        default=len("Microstate"),
+    )
+    smiles_width = max(
+        (len(smiles) for _, _, smiles_all, _ in outputs for smiles in smiles_all),
+        default=len("SMILES"),
+    )
+    table_width = max(name_width, len("Microstate")) + max(smiles_width, len("SMILES")) + 31
+    title_width = max((len(f"{name} | pH: {pH:}") + 2 for name, pH, _, _ in outputs), default=0)
+    output_width = max(table_width, title_width)
+
     with open(txt_out, "w", encoding="utf-8") as output_file:
         for output_idx, (name, pH, smiles, mols) in enumerate(outputs):
             if output_idx:
                 output_file.write("\n\n")
-            output_file.write(format_microstate_table(name, pH, smiles, mols))
+            output_file.write(
+                format_microstate_table(
+                    name,
+                    pH,
+                    smiles,
+                    mols,
+                    name_width=name_width,
+                    smiles_width=smiles_width,
+                    output_width=output_width,
+                )
+            )
             output_file.write("\n")
 
 

@@ -202,6 +202,25 @@ def test_single_writes_microstate_table_to_txt_out(monkeypatch):
     assert "state0" in txt_output
 
 
+def test_write_microstate_tables_uses_common_width(tmp_path):
+    txt_out = tmp_path / "overview.txt"
+
+    cli.write_microstate_tables(
+        txt_out,
+        [
+            ("short", 7.0, ["C"], [Mol()]),
+            ("a_much_longer_molecule_name", 7.5, ["CCCCCCCCCCCC"], [Mol()]),
+        ],
+    )
+
+    separator_widths = {
+        len(line)
+        for line in txt_out.read_text(encoding="utf-8").splitlines()
+        if line.startswith("-")
+    }
+    assert len(separator_widths) == 1
+
+
 def test_batch_writes_all_microstate_tables_to_common_txt_out(monkeypatch):
     monkeypatch.setattr(cli, "read_smi", lambda _path: {"first": "C", "second": "N"})
     monkeypatch.setattr(cli, "protonate", mock_protonate({}))
