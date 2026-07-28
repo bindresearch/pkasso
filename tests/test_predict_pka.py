@@ -80,7 +80,7 @@ def test_unipka_predictor_excludes_poly_aza_ring_base_sites():
     assert predictor.exclude_sites() == ([10, 11, 12, 13, 15], [])
 
 
-def test_molgpka_close_cation_penalty_uses_target_net_charge(monkeypatch):
+def test_molgpka_close_cation_penalty_accounts_for_local_negative_charge(monkeypatch):
     mol = mapped_mol("NC(Cc1c[nH]cn1)C(=O)O")
     predictor = MolgpkaPredictor(mol)
     target_map_idx = next(
@@ -96,16 +96,10 @@ def test_molgpka_close_cation_penalty_uses_target_net_charge(monkeypatch):
         "_predict_base_raw",
         lambda: {target_map_idx: 6.0},
     )
-    monkeypatch.setattr(
-        predict_pka,
-        "has_nplus_base_proximity",
-        lambda *args, **kwargs: 1,
-    )
-
-    predictor.source_net_charge = 0
+    predictor.source_mol = mapped_mol("[NH3+]C(Cc1c[nH]cn1)C(=O)[O-]")
     assert predictor.pred_base()[target_map_idx] == pytest.approx(6.0)
 
-    predictor.source_net_charge = 1
+    predictor.source_mol = mapped_mol("[NH3+]C(Cc1c[nH]cn1)C(=O)O")
     assert predictor.pred_base()[target_map_idx] == pytest.approx(3.5)
 
 

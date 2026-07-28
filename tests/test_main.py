@@ -286,7 +286,7 @@ def test_setup_returns_processed_input_space_when_site_limit_exceeded(monkeypatc
     assert Chem.MolToSmiles(distribution.mols_lib[""]) == Chem.MolToSmiles(pk.mol0)
 
 
-def test_run_acid_base_calcs_passes_source_charge_to_half_neutralized_predictors():
+def test_run_acid_base_calcs_passes_source_mol_to_half_neutralized_predictors():
     calls = []
 
     class ChargeRecordingPredictor:
@@ -298,13 +298,21 @@ def test_run_acid_base_calcs_passes_source_charge_to_half_neutralized_predictors
 
         def pred_base(self):
             calls.append(
-                ("base", Chem.GetFormalCharge(self.mol), self.source_net_charge)
+                (
+                    "base",
+                    Chem.GetFormalCharge(self.mol),
+                    Chem.GetFormalCharge(self.source_mol),
+                )
             )
             return {}
 
         def pred_acid(self):
             calls.append(
-                ("acid", Chem.GetFormalCharge(self.mol), self.source_net_charge)
+                (
+                    "acid",
+                    Chem.GetFormalCharge(self.mol),
+                    Chem.GetFormalCharge(self.source_mol),
+                )
             )
             return {}
 

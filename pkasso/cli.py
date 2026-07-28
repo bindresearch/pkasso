@@ -301,7 +301,7 @@ def single(
     type=int,
     default=1,
     show_default=True,
-    help="Number of parallel jobs for batch processing",
+    help="Number of parallel jobs for batch processing. Set --nthreads (per job) accordingly to not overload.",
 )
 @common_options
 def batch(
