@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -50,13 +50,14 @@ class RejectDuplicateOptionsGroup(RejectDuplicateOptionsCommand, click.Group):
 
 
 def _compute_protonate(
-        idx: int,
-        smiles: str,
-        name: str = 'molecule',
-        **kwargs: Any,
-    ) -> tuple[int, str, list[str], list[Mol]]:
-    smiles_out, mols_out = protonate(smiles, **kwargs)
+    idx: int,
+    smiles: str,
+    name: str = "molecule",
+    **kwargs: Any,
+) -> tuple[int, str, list[str], list[Mol]]:
+    smiles_out, mols_out = protonate(smiles, name=name, **kwargs)
     return idx, name, smiles_out, mols_out
+
 
 def protonate(*args: Any, **kwargs: Any) -> Any:
     from .py_interface import protonate as _protonate
@@ -80,6 +81,56 @@ def save_sdf(*args: Any, **kwargs: Any) -> Any:
     from .postprocess import save_sdf as _save_sdf
 
     return _save_sdf(*args, **kwargs)
+
+
+def format_microstate_table(
+    name: str,
+    pH: float,
+    smiles: Sequence[str],
+    mols: Sequence[Mol],
+) -> str:
+    """Format pH-specific microstate output as a plain-text table."""
+
+    max_sm = max((len(sm) for sm in smiles), default=0)
+    max_name = max((len(str(mol.GetProp("_Name"))) for mol in mols), default=0)
+
+    name_width = max(max_name, len("Microstate"))
+    smiles_width = max(max_sm, len("SMILES"))
+    title = f"{name} | pH: {pH:}"
+    table_width = name_width + smiles_width + 29
+    output_width = max(table_width, len(title)) + 2
+
+    lines = [
+        "-" * output_width,
+        title.center(output_width),
+        f"{'Microstate':{name_width}s} {'SMILES':{smiles_width}s} {'Probability':>13s} {'Net charge':>13s}",
+        "-" * output_width,
+    ]
+
+    for sm, mol in zip(smiles, mols):
+        name_state = mol.GetProp("_Name")
+        probability = float(mol.GetProp("Probability"))
+        net_charge = float(mol.GetProp("net_charge"))
+        lines.append(
+            f"{name_state:{name_width}s} {sm:{smiles_width}s} "
+            f"{probability:>13.5f} {net_charge:>13.0f}"
+        )
+
+    return "\n".join(lines)
+
+
+def write_microstate_tables(
+    txt_out: Path,
+    outputs: Iterable[tuple[str, float, Sequence[str], Sequence[Mol]]],
+) -> None:
+    """Write one or more microstate tables to a common text file."""
+
+    with open(txt_out, "w", encoding="utf-8") as output_file:
+        for output_idx, (name, pH, smiles, mols) in enumerate(outputs):
+            if output_idx:
+                output_file.write("\n\n")
+            output_file.write(format_microstate_table(name, pH, smiles, mols))
+            output_file.write("\n")
 
 
 def _common_option_conflicts(ctx: click.Context) -> None:
@@ -143,8 +194,6 @@ def _model_kwargs(
             "unipka": unipka_options,
         },
     }
-
-
 
 COMMON_OPTIONS = [
     click.option(
@@ -211,6 +260,19 @@ COMMON_OPTIONS = [
         show_default=True,
         help="Number of conformations per tautomer",
     ),
+    click.option(
+        "--cutoff-export",
+        type=float,
+        default=0.2,
+        show_default=True,
+        help="Min. probability relative to the most probable microstate for export",
+    ),
+    click.option(
+        "--txt-out",
+        type=click.Path(dir_okay=False, path_type=Path),
+        default=None,
+        help="Write pH-specific microstate tables to this text file",
+    ),
 ]
 
 
@@ -255,14 +317,6 @@ def cli() -> None:
 @click.option("--smiles", required=True, type=str, help="SMILES string")
 @click.option("--ph", "--pH", required=False, type=float, default=7.0, help="pH value (for sdf and csv output)")
 @click.option("--sdf-out", required=False, type=click.Path(path_type=Path), help="sdf output file name")
-@click.option(
-    "--cutoff-export",
-    required=False,
-    type=float,
-    default=0.2,
-    show_default=True,
-    help="Min. probability of microstate w.r.t. highest probable microstate to be included for export",
-)
 @common_options
 def single(
     name: str,
@@ -279,6 +333,7 @@ def single(
     tautomer_search: bool,
     max_tautomers: int,
     num_confs: int,
+    txt_out: Path | None,
 ) -> None:
     """Run single protonation state prediction given a smiles string and pH values."""
 
@@ -298,28 +353,10 @@ def single(
         **_model_kwargs(model, unipka_model_folder, gpu),
     )
 
-    max_sm = 0
-    max_name = 0
+    click.echo(format_microstate_table(name, ph, smiles_out, mols_out))
 
-    for sm, mol in zip(smiles_out, mols_out):
-        max_sm = max(max_sm, len(sm))
-        max_name = max(max_name, len(str(mol.GetProp("_Name"))))
-
-    name_width = max(max_name, len("Microstate"))
-    smiles_width = max(max_sm, len("SMILES"))
-    title = f"{name} | pH: {ph:}"
-    table_width = name_width + smiles_width + 29
-    output_width = max(table_width, len(title)) + 2
-    print("-" * output_width)
-    print(title.center(output_width))
-    print(f"{'Microstate':{name_width}s} {'SMILES':{smiles_width}s} {'Probability':>13s} {'Net charge':>13s}")
-    print("-" * output_width)
-
-    for sm, mol in zip(smiles_out, mols_out):
-        name_state = mol.GetProp("_Name")
-        probability = float(mol.GetProp("Probability"))
-        net_charge = float(mol.GetProp("net_charge"))
-        print(f"{name_state:{name_width}s} {sm:{smiles_width}s} {probability:>13.5f} {net_charge:>13.0f}")
+    if txt_out:
+        write_microstate_tables(txt_out, [(name, ph, smiles_out, mols_out)])
 
     if sdf_out:
         save_sdf(mols_out, sdf_out)
@@ -338,14 +375,6 @@ def single(
     type=click.Path(path_type=Path),
     default=Path("pkasso_output"),
     help="Output folder for sdf files",
-)
-@click.option(
-    "--cutoff-export",
-    required=False,
-    type=float,
-    default=1.0,
-    show_default=True,
-    help="Min. probability of microstate w.r.t. highest probable microstate to be included for export",
 )
 @click.option(
     "--njobs",
@@ -372,6 +401,7 @@ def batch(
     tautomer_search: bool,
     max_tautomers: int,
     num_confs: int,
+    txt_out: Path | None,
 ) -> None:
     """Batch process an input .smi file and write output microstates to csv
     (optionally write sdf files of individual molecules)"""
@@ -411,6 +441,15 @@ def batch(
                 raise FileExistsError("File {file_name} exists and overwrite == False!")
             save_sdf(mols_out, filename)
 
+    if txt_out:
+        write_microstate_tables(
+            txt_out,
+            (
+                (name, ph, smiles_out, mols_out)
+                for _, name, smiles_out, mols_out in results_parallel
+            ),
+        )
+
 
 ### pH scan ###
 
@@ -441,6 +480,8 @@ def scan(
     tautomer_search: bool,
     max_tautomers: int,
     num_confs: int,
+    cutoff_export: float,
+    txt_out: Path | None,
 ) -> None:
     """Scan pH values, output plot of microstate distributions and macro pKa values"""
 
@@ -465,6 +506,8 @@ def scan(
         pHs=pHs,
         matrix_def=matrix_def,
         cutoff_states=cutoff_states,
+        cutoff_export=cutoff_export,
+        output_molecules_from_scan=txt_out is not None,
         tautomer_search=tautomer_search,
         max_tautomers=max_tautomers,
         num_confs=num_confs,
@@ -483,3 +526,10 @@ def scan(
 
     scan.export_scan(fig_out, fig_scan, fig_mols)
     scan.save_sdf(sdf_out)
+
+    if txt_out:
+        scan_outputs = []
+        for pH in scan.pHs:
+            molecule = scan.molecule_at(float(pH))
+            scan_outputs.append((name, float(pH), molecule.smiles, molecule.mols))
+        write_microstate_tables(txt_out, scan_outputs)

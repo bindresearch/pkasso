@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from click.testing import CliRunner
 
 from pkasso import cli
@@ -52,6 +54,18 @@ def test_short_help_option_is_available_for_root_and_subcommands():
         assert "--help" in result.output
 
 
+def test_txt_out_and_cutoff_export_are_common_options():
+    runner = CliRunner()
+
+    for command in ("single", "batch", "scan"):
+        result = runner.invoke(cli.cli, [command, "--help"])
+
+        assert result.exit_code == 0
+        assert "--txt-out" in result.output
+        assert "--cutoff-export" in result.output
+        assert "default: 0.2" in result.output
+
+
 def test_uppercase_ph_alias_is_equivalent_for_single(monkeypatch):
     captured = {}
 
@@ -64,6 +78,7 @@ def test_uppercase_ph_alias_is_equivalent_for_single(monkeypatch):
 
     assert result.exit_code == 0
     assert captured["pH"] == 5.5
+    assert captured["cutoff_export"] == 0.2
 
 
 def test_uppercase_ph_alias_is_equivalent_for_batch(monkeypatch):
@@ -80,6 +95,7 @@ def test_uppercase_ph_alias_is_equivalent_for_batch(monkeypatch):
 
     assert result.exit_code == 0
     assert captured["pH"] == 5.5
+    assert captured["cutoff_export"] == 0.2
 
 
 def test_repeated_option_is_rejected():
@@ -168,6 +184,40 @@ def test_single_forwards_name_and_sizes_output_to_columns(monkeypatch):
     assert lines[0] == "-" * expected_width
     assert lines[1] == "actual_name | pH: 7.0".center(expected_width)
     assert lines[3] == "-" * expected_width
+
+
+def test_single_writes_microstate_table_to_txt_out(monkeypatch):
+    monkeypatch.setattr(cli, "protonate", mock_protonate({}))
+
+    with CliRunner().isolated_filesystem():
+        result = CliRunner().invoke(
+            cli.cli,
+            ["single", "--smiles", "C", "--name", "single_name", "--txt-out", "overview.txt"],
+        )
+        txt_output = Path("overview.txt").read_text(encoding="utf-8")
+
+    assert result.exit_code == 0
+    assert txt_output == result.output
+    assert "single_name | pH: 7.0" in txt_output
+    assert "state0" in txt_output
+
+
+def test_batch_writes_all_microstate_tables_to_common_txt_out(monkeypatch):
+    monkeypatch.setattr(cli, "read_smi", lambda _path: {"first": "C", "second": "N"})
+    monkeypatch.setattr(cli, "protonate", mock_protonate({}))
+    monkeypatch.setattr(cli, "save_sdf", lambda *_args: None)
+
+    with CliRunner().isolated_filesystem():
+        result = CliRunner().invoke(
+            cli.cli,
+            ["batch", "--smi", "mols.smi", "--ph", "6.5", "--txt-out", "overview.txt"],
+        )
+        txt_output = Path("overview.txt").read_text(encoding="utf-8")
+
+    assert result.exit_code == 0
+    assert "first | pH: 6.5" in txt_output
+    assert "second | pH: 6.5" in txt_output
+    assert txt_output.count("Microstate") == 2
 
 
 def test_cutoff_states_must_be_at_least_one():
@@ -316,7 +366,52 @@ def test_mixed_model_options_apply_to_scan(monkeypatch):
     assert result.exit_code == 0
     assert captured["nthreads"] == 2
     assert "nthreads" not in captured["model"]["unipka"]
-def test_scan_pkas_out_without_cutoff_export(monkeypatch):
+
+
+def test_scan_writes_all_ph_tables_to_txt_out(monkeypatch):
+    captured = {}
+
+    class MoleculeOutput:
+        smiles = ("C",)
+        mols = (Mol(),)
+
+    class TextScan(Scan):
+        pHs = [7.0, 7.25]
+
+        def molecule_at(self, pH):
+            return MoleculeOutput()
+
+    def scan_ph(*args, **kwargs):
+        captured.update(kwargs)
+        return TextScan()
+
+    monkeypatch.setattr(cli, "scan_pH", scan_ph)
+
+    with CliRunner().isolated_filesystem():
+        result = CliRunner().invoke(
+            cli.cli,
+            [
+                "scan",
+                "--smiles",
+                "C",
+                "--min-ph",
+                "7.0",
+                "--max-ph",
+                "7.25",
+                "--txt-out",
+                "overview.txt",
+            ],
+        )
+        txt_output = Path("overview.txt").read_text(encoding="utf-8")
+
+    assert result.exit_code == 0
+    assert captured["output_molecules_from_scan"] is True
+    assert "molecule | pH: 7.0" in txt_output
+    assert "molecule | pH: 7.25" in txt_output
+    assert txt_output.count("Microstate") == 2
+
+
+def test_scan_uses_common_cutoff_export_default_and_skips_molecule_output_without_txt_out(monkeypatch):
     captured = {}
     scan = Scan()
 
@@ -332,5 +427,6 @@ def test_scan_pkas_out_without_cutoff_export(monkeypatch):
     assert result.exit_code == 0
     assert captured["args"][0] == "C"
     assert captured["name"] == "2014"
-    assert "cutoff_export" not in captured
+    assert captured["cutoff_export"] == 0.2
+    assert captured["output_molecules_from_scan"] is False
     assert scan.exported_macro_pkas.name == "2014_pkas.txt"
