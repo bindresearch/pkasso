@@ -246,8 +246,6 @@ def single(
 
     _common_option_conflicts(click.get_current_context())
 
-    # click.echo(f"Single: {name}")
-
     smiles_out, mols_out = protonate(
         smiles,
         name=name,
@@ -276,7 +274,6 @@ def single(
     output_width = max(table_width, len(title)) + 2
     print("-" * output_width)
     print(title.center(output_width))
-    # print("{'Microstate':} SMILES Probability Net_Charge")
     print(f"{'Microstate':{name_width}s} {'SMILES':{smiles_width}s} {'Probability':>13s} {'Net charge':>13s}")
     print("-" * output_width)
 
@@ -284,7 +281,6 @@ def single(
         name_state = mol.GetProp("_Name")
         probability = float(mol.GetProp("Probability"))
         net_charge = float(mol.GetProp("net_charge"))
-        # print(name_state, sm, f"{probability:.5f}", net_charge)
         print(f"{name_state:{name_width}s} {sm:{smiles_width}s} {probability:>13.5f} {net_charge:>13.0f}")
 
     if sdf_out:
