@@ -63,14 +63,15 @@ def test_scan_ph_passes_model_mapping_to_pkasso(monkeypatch):
             return "scan"
 
     monkeypatch.setattr(py_interface, "pKasso", PKasso)
-    model = {"molgpka": {}, "unipka": {"nthreads": 4}}
+    model = {"molgpka": {}, "unipka": {}}
 
-    scan = py_interface.scan_pH("C", pHs=[6.0, 7.0], model=model)
+    scan = py_interface.scan_pH("C", pHs=[6.0, 7.0], model=model, nthreads=4)
 
     assert scan == "scan"
     assert captured["smiles"] == "C"
     assert captured["pHs"].tolist() == [6.0, 7.0]
     assert captured["model"] is model
+    assert captured["nthreads"] == 4
 
 
 def test_default_model_is_left_to_pkasso(monkeypatch):

@@ -23,6 +23,7 @@ from .predict_pka import (
     ThermodynamicPredictionMode,
     resolve_models,
 )
+from .external.molgpka.pka import configure_torch_threads
 from .postprocess import Molecule, Scan, combine_results
 from .transitions import (
     calc_freqs_from_states,
@@ -1150,10 +1151,10 @@ class pKasso:
         Optional configuration parameters. Supported keys include:
 
         Pipeline parameters:
-            name, cutoff_states, device, model,
+            name, cutoff_states, model,
             free_energy_cutoff_individual, free_energy_cutoff_combined,
             expert_combination, expert_weights,
-            matrix_def, cutoff_export
+            matrix_def, cutoff_export, nthreads
 
         ``model`` is an ordered mapping from predictor names to their options,
         for example ``{"molgpka": {}, "unipka": {"gpu": True}}``.
@@ -1171,7 +1172,6 @@ class pKasso:
     max_states_combined: int = 20
     cutoff_export: float = 1.0
     matrix_def: str = "dG"
-    device: str = "cpu"  # fixed!
     model: ModelInput = field(default_factory=lambda: {"molgpka": {}})
     expert_combination: str = "product_of_experts"
     expert_weights: Sequence[float] | None = None
@@ -1182,12 +1182,13 @@ class pKasso:
     max_cut_edges: int = 1
     strip_fragments: bool = True
     score_window: int = 0
-    num_threads: int = 0
+    nthreads: int = 0
     fragment_warning_heavy_atoms: int = 6
     resolved_predictors: tuple[ResolvedPredictor, ...] = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
-        self.resolved_predictors = resolve_models(self.model)
+        configure_torch_threads(self.nthreads)
+        self.resolved_predictors = resolve_models(self.model, nthreads=self.nthreads)
 
     def model_classes(self) -> tuple[type[Predictor], ...]:
         """Return the configured model classes in evaluation order."""
@@ -1208,11 +1209,16 @@ class pKasso:
         self,
         mol: Mol,
         context: PredictorContext | None = None,
+        *,
+        source_mol: Mol | None = None,
     ) -> Predictor:
         """Create the configured molecule-specific pKa predictor."""
 
         predictor_cls = context.predictor_cls if context is not None else self.primary_predictor_cls()
-        return predictor_cls(mol, device=self.device)
+        predictor = predictor_cls(mol)
+        if source_mol is not None:
+            predictor.source_mol = source_mol
+        return predictor
 
     def uses_standard_free_energies(self, context: PredictorContext | None = None) -> bool:
         """Return whether this run should use direct microstate free energies."""
@@ -1383,7 +1389,7 @@ class pKasso:
             num_confs=self.num_confs,
             strip_fragments=self.strip_fragments,
             score_window=self.score_window,
-            num_threads=self.num_threads,
+            num_threads=self.nthreads,
             min_fragment_heavy_atoms=self.fragment_warning_heavy_atoms
         )
 
@@ -2205,6 +2211,8 @@ class pKasso:
             if state_str in space.base_lib:
                 continue
 
+            source_mol = space.mols_lib[state_str]
+
             state_vec_base = state_vec.copy()
             if self.opposite_charge_influence_mode(context):
                 state_vec_base = state_vec
@@ -2216,7 +2224,11 @@ class pKasso:
 
             mol_base = space.mols_lib[state_str_base]
 
-            base_tmp = self.pka_predictor(mol_base, context).pred_base()
+            base_tmp = self.pka_predictor(
+                mol_base,
+                context,
+                source_mol=source_mol,
+            ).pred_base()
             base = {}
             for map_idx, b in base_tmp.items():
                 if map_idx not in space.indices:
@@ -2236,7 +2248,11 @@ class pKasso:
 
             mol_acid = space.mols_lib[state_str_acid]
 
-            acid_tmp = self.pka_predictor(mol_acid, context).pred_acid()
+            acid_tmp = self.pka_predictor(
+                mol_acid,
+                context,
+                source_mol=source_mol,
+            ).pred_acid()
 
             acid = {}
             for map_idx, a in acid_tmp.items():

@@ -135,10 +135,25 @@ def test_mixed_model_passes_fixed_fold_and_unipka_options(monkeypatch, tmp_path)
         "unipka": {
             "folds": 3,
             "model_dir": tmp_path,
-            "nthreads": 4,
             "gpu": True,
         },
     }
+    assert captured["nthreads"] == 4
+
+
+def test_molgpka_model_receives_top_level_nthreads(monkeypatch):
+    captured = {}
+
+    monkeypatch.setattr(cli, "protonate", mock_protonate(captured))
+
+    result = CliRunner().invoke(
+        cli.cli,
+        ["single", "--smiles", "C", "--model", "molgpka", "--nthreads", "3"],
+    )
+
+    assert result.exit_code == 0
+    assert captured["nthreads"] == 3
+    assert "model" not in captured
 
 
 def test_mixed_model_uses_unipkainfer_default_model_dir_and_cpu(monkeypatch):
@@ -151,9 +166,9 @@ def test_mixed_model_uses_unipkainfer_default_model_dir_and_cpu(monkeypatch):
     assert result.exit_code == 0
     assert captured["model"]["unipka"] == {
         "folds": 3,
-        "nthreads": 0,
         "gpu": False,
     }
+    assert captured["nthreads"] == 0
 
 
 def test_mixed_model_options_apply_to_batch(monkeypatch):
@@ -208,7 +223,8 @@ def test_mixed_model_options_apply_to_scan(monkeypatch):
         )
 
     assert result.exit_code == 0
-    assert captured["model"]["unipka"]["nthreads"] == 2
+    assert captured["nthreads"] == 2
+    assert "nthreads" not in captured["model"]["unipka"]
 def test_scan_pkas_out_without_cutoff_export(monkeypatch):
     captured = {}
     scan = Scan()

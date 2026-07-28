@@ -30,6 +30,7 @@ def protonate(
     inp: str | Mol,
     pH: float = 7.0,
     model: ModelInput | None = None,
+    nthreads: int = 0,
     **kwargs: Any,
 ) -> tuple[tuple[str, ...], tuple[Mol, ...]]:
     """
@@ -48,6 +49,7 @@ def protonate(
 
     Select and configure predictors with an ordered mapping, for example
     ``model={"molgpka": {}, "unipka": {"gpu": True}}``.
+    ``nthreads`` controls RDKit, MolGpKa, and Uni-pKa CPU thread counts.
     """
 
     if isinstance(inp, Mol):
@@ -55,7 +57,7 @@ def protonate(
     else:
         smiles = inp
 
-    ap = pKasso(smiles, **_resolve_model_kwargs(kwargs, model))
+    ap = pKasso(smiles, nthreads=nthreads, **_resolve_model_kwargs(kwargs, model))
     molecule = ap.run_single(pH=pH)
 
     return molecule.smiles, molecule.mols
@@ -65,6 +67,7 @@ def batch_protonate(
         input_list: list[str | Mol],
         pH: float = 7.0,
         model: ModelInput | None = None,
+        nthreads: int = 0,
         **kwargs: Any
 ) -> tuple[list[tuple[str, ...]], list[tuple[Mol, ...]]]:
     """
@@ -88,7 +91,7 @@ def batch_protonate(
     batch_mols: list[tuple[Mol, ...]] = []
 
     for inp in tqdm(input_list):
-        ap = pKasso(inp, **_resolve_model_kwargs(kwargs, model))
+        ap = pKasso(inp, nthreads=nthreads, **_resolve_model_kwargs(kwargs, model))
         molecule = ap.run_single(pH=pH)
 
         batch_smiles.append(molecule.smiles)
@@ -101,6 +104,7 @@ def scan_pH(
     inp: str | Mol,
     pHs: NDArray[np.float64] | list[float] = np.arange(0, 14.1, 0.25, dtype=np.float64),
     model: ModelInput | None = None,
+    nthreads: int = 0,
     **kwargs: Any,
 ) -> Scan:
     """
@@ -130,5 +134,5 @@ def scan_pH(
 
     pHs_arr: NDArray[np.float64] = np.array(pHs)
 
-    ap = pKasso(smiles, **_resolve_model_kwargs(kwargs, model))
+    ap = pKasso(smiles, nthreads=nthreads, **_resolve_model_kwargs(kwargs, model))
     return ap.run_scan(pHs=pHs_arr)

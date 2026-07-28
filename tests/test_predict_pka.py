@@ -1,9 +1,11 @@
+import inspect
 import sys
 
 import pandas as pd
 import pytest
 from rdkit import Chem
 
+import pkasso.predict_pka as predict_pka
 from pkasso.predict_pka import (
     MolgpkaPredictor,
     UnipkaPredictor,
@@ -29,6 +31,14 @@ def mapped_mol(smiles: str):
     for atom in mol.GetAtoms():
         atom.SetAtomMapNum(atom.GetIdx() + 1)
     return mol
+
+
+def test_predictor_apis_do_not_expose_device_keyword():
+    assert "device" not in inspect.signature(predict_pka.Predictor).parameters
+    assert "device" not in inspect.signature(predict_pka.MolgpkaPredictor).parameters
+    assert "device" not in inspect.signature(predict_pka.UnipkaPredictor).parameters
+    assert "device" not in inspect.signature(predict_pka.predict_acid).parameters
+    assert "device" not in inspect.signature(predict_pka.predict_base).parameters
 
 
 def test_unipka_predictor_carboxylic_acid_site_ids():
@@ -68,6 +78,29 @@ def test_unipka_predictor_excludes_poly_aza_ring_base_sites():
 
     assert predictor.pred_base_ids() == [10, 11, 12]
     assert predictor.exclude_sites() == ([10, 11, 12, 13, 15], [])
+
+
+def test_molgpka_close_cation_penalty_accounts_for_local_negative_charge(monkeypatch):
+    mol = mapped_mol("NC(Cc1c[nH]cn1)C(=O)O")
+    predictor = MolgpkaPredictor(mol)
+    target_map_idx = next(
+        atom.GetAtomMapNum()
+        for atom in mol.GetAtoms()
+        if atom.GetSymbol() == "N"
+        and atom.GetIsAromatic()
+        and atom.GetTotalNumHs() == 0
+    )
+
+    monkeypatch.setattr(
+        predictor,
+        "_predict_base_raw",
+        lambda: {target_map_idx: 6.0},
+    )
+    predictor.source_mol = mapped_mol("[NH3+]C(Cc1c[nH]cn1)C(=O)[O-]")
+    assert predictor.pred_base()[target_map_idx] == pytest.approx(6.0)
+
+    predictor.source_mol = mapped_mol("[NH3+]C(Cc1c[nH]cn1)C(=O)O")
+    assert predictor.pred_base()[target_map_idx] == pytest.approx(3.5)
 
 
 @requires_unipka
@@ -112,10 +145,10 @@ def test_resolve_models_preserves_order_and_delegates_options():
             "molgpka": {},
             "unipka": {
                 "folds": (0, 1),
-                "nthreads": 4,
                 "gpu": False,
             },
-        }
+        },
+        nthreads=4,
     )
 
     assert [item.predictor_cls for item in resolved] == [MolgpkaPredictor, UnipkaPredictor]
@@ -143,6 +176,17 @@ def test_molgpka_rejects_model_options():
 def test_unipka_rejects_unknown_model_options():
     with pytest.raises(ValueError, match="Unknown unipka option"):
         resolve_models({"unipka": {"batch_size": 4}})
+
+
+@requires_unipka
+def test_unipka_rejects_nested_nthreads_option():
+    with pytest.raises(ValueError, match="top-level 'nthreads'"):
+        resolve_models({"unipka": {"nthreads": 4}})
+
+
+def test_resolve_models_rejects_negative_nthreads():
+    with pytest.raises(ValueError, match="nthreads must be at least 0"):
+        resolve_models({"molgpka": {}}, nthreads=-1)
 
 
 def test_unipka_recommends_optional_extra_when_package_is_missing(monkeypatch):

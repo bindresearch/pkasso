@@ -31,7 +31,7 @@ def load_main_module():
             self.predictor_cls = predictor_cls
             self.config = config
 
-    def resolve_models(model):
+    def resolve_models(model, *, nthreads=0):
         if model != {"molgpka": {}}:
             raise ValueError(f"Unsupported test model: {model}")
         return (ResolvedPredictor(MolgpkaPredictor, None),)
@@ -130,6 +130,31 @@ def load_main_module():
 
 
 main = load_main_module()
+
+
+def test_pkasso_uses_top_level_nthreads_for_runtime_configuration(monkeypatch):
+    configured = []
+    resolved = []
+
+    monkeypatch.setattr(main, "configure_torch_threads", configured.append)
+
+    def resolve_models(model, *, nthreads):
+        resolved.append((model, nthreads))
+        return (main.ResolvedPredictor(main.MolgpkaPredictor, None),)
+
+    monkeypatch.setattr(main, "resolve_models", resolve_models)
+
+    pk = main.pKasso("C", nthreads=3)
+
+    assert pk.nthreads == 3
+    assert configured == [3]
+    assert resolved == [({"molgpka": {}}, 3)]
+
+
+def test_pkasso_rejects_obsolete_device_keyword():
+    with pytest.raises(TypeError, match="unexpected keyword argument 'device'"):
+        main.pKasso("C", device="cpu")
+
 
 # @pytest.mark.parametrize(
 #     ("smiles_raw","net_charge"),
@@ -259,6 +284,66 @@ def test_setup_returns_processed_input_space_when_site_limit_exceeded(monkeypatc
     assert distribution.state_strs == [""]
     assert distribution.state_freqs.tolist() == [1.0]
     assert Chem.MolToSmiles(distribution.mols_lib[""]) == Chem.MolToSmiles(pk.mol0)
+
+
+def test_run_acid_base_calcs_passes_source_mol_to_half_neutralized_predictors():
+    calls = []
+
+    class ChargeRecordingPredictor:
+        thermodynamic_prediction = "pka"
+        opposite_charge_influence = False
+
+        def __init__(self, mol):
+            self.mol = mol
+
+        def pred_base(self):
+            calls.append(
+                (
+                    "base",
+                    Chem.GetFormalCharge(self.mol),
+                    Chem.GetFormalCharge(self.source_mol),
+                )
+            )
+            return {}
+
+        def pred_acid(self):
+            calls.append(
+                (
+                    "acid",
+                    Chem.GetFormalCharge(self.mol),
+                    Chem.GetFormalCharge(self.source_mol),
+                )
+            )
+            return {}
+
+    pk = main.pKasso("CO", tautomer_search=False)
+    context = main.PredictorContext(predictor_cls=ChargeRecordingPredictor)
+    space = main.ProtonationIndexSpace(
+        indices=[1, 2],
+        q_options=np.array(
+            [
+                [0, 1, 0],
+                [1, 1, 0],
+            ],
+            dtype=np.int64,
+        ),
+        mols_lib={
+            "10": Chem.MolFromSmiles("C[O-]"),
+            "11": Chem.MolFromSmiles("CO"),
+        },
+    )
+
+    pk.run_acid_base_calcs(
+        space,
+        state_strs=["10"],
+        state_vecs=[np.array([1, 0], dtype=np.int64)],
+        context=context,
+    )
+
+    assert calls == [
+        ("base", 0, -1),
+        ("acid", -1, -1),
+    ]
 
 
 def test_screen_clusters_skips_coupling_when_full_state_space_fits(monkeypatch):
