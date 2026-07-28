@@ -221,7 +221,7 @@ def cli() -> None:
     "--cutoff-export",
     required=False,
     type=float,
-    default=1.0,
+    default=0.2,
     show_default=True,
     help="Min. probability of microstate w.r.t. highest probable microstate to be included for export",
 )
@@ -260,14 +260,26 @@ def single(
         nthreads=nthreads,
         **_model_kwargs(model, unipka_model_folder, gpu),
     )
-    print(f"{name} | pH: {ph}")
-    print("Microstate SMILES Probability Net_Charge")
-    print("----------------------------------------")
+
+    max_sm = 0
+    max_name = 0
+
+    for sm, mol in zip(smiles_out, mols_out):
+        max_sm = max(max_sm, len(sm))
+        max_name = max(max_name, len(str(mol.GetProp("_Name"))))
+
+    print("-"*70)
+    print(f"{name} | pH: {ph:}")
+    # print("{'Microstate':} SMILES Probability Net_Charge")
+    print(f"{'Microstate':{max_name}s} {'SMILES':{max_sm}s} {'Probability':>13s} {'Net charge':>13s}")
+    print("-"*70)
+
     for sm, mol in zip(smiles_out, mols_out):
         name_state = mol.GetProp("_Name")
         probability = float(mol.GetProp("Probability"))
         net_charge = float(mol.GetProp("net_charge"))
-        print(name_state, sm, f"{probability:.5f}", net_charge)
+        # print(name_state, sm, f"{probability:.5f}", net_charge)
+        print(f"{name_state:{max_name}s} {sm:{max_sm}s} {probability:>13.5f} {net_charge:>13.0f}")
 
     if sdf_out:
         save_sdf(mols_out, sdf_out)
