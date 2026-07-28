@@ -96,7 +96,7 @@ def _model_kwargs(
         return {}
 
     unipka_options: dict[str, object] = {
-        "folds": 3,
+        "folds": 1,
         "gpu": gpu,
     }
     if unipka_model_folder is not None:
@@ -124,8 +124,8 @@ COMMON_OPTIONS = [
         type=click.Path(file_okay=False, path_type=Path),
         default=None,
         help=(
-            "Folder containing Uni-pKa model files; defaults to unipkainfer's "
-            "per-user model directory"
+            "Uni-pKa model cache folder; defaults to unipkainfer's per-user "
+            "model directory"
         ),
     ),
     click.option(

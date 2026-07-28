@@ -24,7 +24,9 @@ pip install pkasso
 
 ### Mixed mode (MolGpKa + Uni-pKa)
 
-pKasso can be run with a mixed model based on MolGpKa and Uni-pKa. In that case, `pKasso[unipka]` needs to be installed and the Uni-pKa model checkpoints need to be downloaded with the command `unipka-download-model`.
+pKasso can be run with a mixed model based on MolGpKa and Uni-pKa. In that
+case, install `pKasso[unipka]`. The selected Uni-pKa model fold is downloaded
+from Hugging Face on first use and cached for later processes.
 
 ```
 # Create conda environment
@@ -33,22 +35,12 @@ conda activate pkasso
 
 # Install pkasso with Uni-pKa support from PyPI
 pip install pkasso[unipka]
-
-# Download checkpoint
-unipka-download-model
 ```
 
-By default, model checkpoints are downloaded to the user data directory.
-On Linux this is normally:
+Five variants of Uni-pKa were trained (fold 0, fold 1, fold 2, fold 3, fold 4) with similar accuracy. By default, fold 1 is used and model checkpoints are cached in the user data directory. On Linux this is normally:
 
 ```text
 ~/.local/share/unipkainfer/models
-```
-
-Choose another location when needed:
-
-```bash
-unipka-download-model --output-folder /path/to/models
 ```
 
 ### Local webserver
@@ -87,14 +79,16 @@ pkasso scan --help
 ```
 
 All commands accept `--model molgpka` (the default) or `--model mixed`.
-The mixed model combines MolGpKa with Uni-pKa (1-fold model):
+The mixed model combines MolGpKa with Uni-pKa using fold 1 by default:
 
 ```bash
 pkasso single --smiles "CC(=O)O" --model mixed \
     --unipka-model-folder /path/to/unipka/models \
 ```
 
-If omitted, `--unipka-model-folder` defaults to `~/.local/share/unipkainfer/models` on a typical Linux system (see installation instructions above).
+If omitted, `--unipka-model-folder` defaults to the per-user model cache,
+typically `~/.local/share/unipkainfer/models` on Linux. A missing selected fold
+is downloaded on first use.
 
 ### Python interface
 
@@ -120,8 +114,8 @@ Predictors and their options are selected with a dictionary:
 model = {
     "molgpka": {},
     "unipka": {
-        "model_dir": "/path/to/unipka/models",
-        "folds": (0,),
+        # "model_dir": "/path/to/unipka/models",
+        "folds": (1,),
         "gpu": True,
     },
 }

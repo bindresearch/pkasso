@@ -39,7 +39,7 @@ dependencies = [
 
 [project.optional-dependencies]
 unipka = [
-    "unipkainfer>=0.1,<0.2",
+    "unipkainfer>=0.2,<0.3",
 ]
 webserver = [
     "fastapi>=0.115,<1",
