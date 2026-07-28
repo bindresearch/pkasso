@@ -94,9 +94,7 @@ pkasso single --smiles "CC(=O)O" --model mixed \
     --unipka-model-folder /path/to/unipka/models \
 ```
 
-If omitted, `--unipka-model-folder` defaults to `~/.local/share/unipkainfer/models` on a typical Linux system. To use another location, run
-`unipka-download-model --output-folder /path/to/unipka/models` and pass that
-folder to `--unipka-model-folder`.
+If omitted, `--unipka-model-folder` defaults to `~/.local/share/unipkainfer/models` on a typical Linux system (see installation instructions above).
 
 ### Python interface
 
@@ -130,7 +128,6 @@ model = {
 smiles_out, mols_out = protonate(smiles, model=model, pH=pH, nthreads=8)
 ```
 
-The `nthreads` option controls RDKit preprocessing, MolGpKa
-PyTorch inference, and Uni-pKa preprocessing.
+Ensure that molgpka is the first listed predictor in the dictionary. The `nthreads` option controls RDKit preprocessing, MolGpKa PyTorch inference, and Uni-pKa preprocessing.
 
 For more examples, see the [jupyter notebook](https://github.com/bindresearch/pkasso/blob/main/example/example.ipynb).
