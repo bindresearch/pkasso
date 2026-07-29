@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import os
+import re
 import sys
 from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path
@@ -82,6 +83,13 @@ def save_sdf(*args: Any, **kwargs: Any) -> Any:
     from .postprocess import save_sdf as _save_sdf
 
     return _save_sdf(*args, **kwargs)
+
+
+def _safe_sdf_filename(idx: int, name: str) -> str:
+    """Return a unique, filesystem-safe filename for a batch molecule."""
+
+    safe_name = re.sub(r"[^A-Za-z0-9_-]+", "_", name).strip("_")
+    return f"{idx:04d}_{safe_name or 'molecule'}.sdf"
 
 
 def format_microstate_table(
@@ -312,19 +320,24 @@ COMMON_OPTIONS = [
         help="Number of conformations per tautomer",
     ),
     click.option(
-        "--cutoff-export",
-        type=float,
-        default=0.2,
-        show_default=True,
-        help="Min. probability relative to the most probable microstate for export",
-    ),
-    click.option(
         "--txt-out",
         type=click.Path(dir_okay=False, path_type=Path),
         default=None,
         help="Write pH-specific microstate tables to this text file",
     ),
 ]
+
+
+def cutoff_export_option(default: float = 0.2) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+    """Add the cutoff-export option with a command-specific default."""
+
+    return click.option(
+        "--cutoff-export",
+        type=float,
+        default=default,
+        show_default=True,
+        help="Min. probability relative to the most probable microstate for export",
+    )
 
 
 def common_options(command: Callable[..., Any]) -> Callable[..., Any]:
@@ -368,6 +381,7 @@ def cli() -> None:
 @click.option("--smiles", required=True, type=str, help="SMILES string")
 @click.option("--ph", "--pH", required=False, type=float, default=7.0, help="pH value")
 @click.option("--sdf-out", required=False, type=click.Path(dir_okay=False, path_type=Path), help="sdf output file name")
+@cutoff_export_option()
 @common_options
 def single(
     name: str,
@@ -419,13 +433,36 @@ def single(
 @cli.command()
 @click.option("--smi", required=True, type=click.Path(path_type=Path), help="Input .smi for batch processing")
 @click.option("--ph", "--pH", required=False, type=float, default=7.0, help="pH value")
-@click.option("--overwrite/--no-overwrite", is_flag=True, default=True, help="Overwrite sdf file if exists")
+@click.option(
+    "--overwrite/--no-overwrite",
+    is_flag=True,
+    default=True,
+    help="Overwrite individual SDF files if they exist.",
+)
+@click.option(
+    "--individual-sdfs/--no-individual-sdfs",
+    default=False,
+    show_default=True,
+    help="Also write one SDF file per input molecule to --path-out.",
+)
 @click.option(
     "--path-out",
     required=False,
     type=click.Path(file_okay=False, path_type=Path),
-    default=Path("pkasso_output"),
-    help="Output folder for sdf files",
+    default=Path("batch_individual_sdfs"),
+    show_default=True,
+    help="Output folder used with --individual-sdfs.",
+)
+@click.option(
+    "--sdf-combined",
+    type=click.Path(dir_okay=False, path_type=Path),
+    default=Path("molecules_batch.sdf"),
+    show_default=True,
+    help=(
+        "Write all exported microstates for all input molecules to one SDF file. "
+        "A molecule can have multiple records when multiple microstates meet "
+        "--cutoff-export; the default 1.0 keeps only the most probable state(s)."
+    ),
 )
 @click.option(
     "--njobs",
@@ -435,11 +472,14 @@ def single(
     show_default=True,
     help="Number of parallel jobs for batch processing. Set --nthreads (per job) accordingly to not overload.",
 )
+@cutoff_export_option(default=1.0)
 @common_options
 def batch(
     smi: Path,
     ph: float,
     path_out: Path,
+    sdf_combined: Path,
+    individual_sdfs: bool,
     overwrite: bool,
     cutoff_export: float,
     model: str,
@@ -454,8 +494,7 @@ def batch(
     num_confs: int,
     txt_out: Path | None,
 ) -> None:
-    """Batch process an input .smi file and write output microstates to stdout
-    (optionally write summary txt file and sdf files of individual molecules)"""
+    """Batch process an input .smi file and write a combined SDF and stdout tables."""
 
     _common_option_conflicts(click.get_current_context())
 
@@ -489,13 +528,19 @@ def batch(
     if formatted_output:
         click.echo(formatted_output)
 
-    for _, name, _, mols_out in results_parallel:
-        # Save sdf files
-        if path_out:
-            os.makedirs(path_out, exist_ok=True)
-            filename = path_out / f"{name}.sdf"
+    combined_mols = tuple(
+        mol
+        for _, _, _, mols_out in results_parallel
+        for mol in mols_out
+    )
+    save_sdf(combined_mols, sdf_combined)
+
+    if individual_sdfs:
+        os.makedirs(path_out, exist_ok=True)
+        for idx, name, _, mols_out in results_parallel:
+            filename = path_out / _safe_sdf_filename(idx, name)
             if (not overwrite) and (os.path.isfile(filename)):
-                raise FileExistsError("File {file_name} exists and overwrite == False!")
+                raise FileExistsError(f"File {filename} exists and overwrite == False!")
             save_sdf(mols_out, filename)
 
     if txt_out:
@@ -513,6 +558,7 @@ def batch(
 @click.option("--fig-out", required=False, type=click.Path(dir_okay=False, path_type=Path), help="Figure of scan")
 @click.option("--sdf-out", required=False, type=click.Path(dir_okay=False, path_type=Path), help="File name for sdf output")
 @click.option("--pkas-out", required=False, type=click.Path(dir_okay=False, path_type=Path), help="File for macro pkas")
+@cutoff_export_option()
 @common_options
 def scan(
     name: str,

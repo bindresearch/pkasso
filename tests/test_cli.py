@@ -57,13 +57,13 @@ def test_short_help_option_is_available_for_root_and_subcommands():
 def test_txt_out_and_cutoff_export_are_common_options():
     runner = CliRunner()
 
-    for command in ("single", "batch", "scan"):
+    for command, cutoff_default in (("single", 0.2), ("batch", 1.0), ("scan", 0.2)):
         result = runner.invoke(cli.cli, [command, "--help"])
 
         assert result.exit_code == 0
         assert "--txt-out" in result.output
         assert "--cutoff-export" in result.output
-        assert "default: 0.2" in result.output
+        assert f"default: {cutoff_default}" in result.output
 
 
 def test_uppercase_ph_alias_is_equivalent_for_single(monkeypatch):
@@ -97,7 +97,7 @@ def test_uppercase_ph_alias_is_equivalent_for_batch(monkeypatch, tmp_path):
 
     assert result.exit_code == 0
     assert captured["pH"] == 5.5
-    assert captured["cutoff_export"] == 0.2
+    assert captured["cutoff_export"] == 1.0
 
 
 def test_repeated_option_is_rejected():
@@ -241,6 +241,67 @@ def test_batch_writes_all_microstate_tables_to_common_txt_out(monkeypatch):
     assert "first | pH: 6.5" in txt_output
     assert "second | pH: 6.5" in txt_output
     assert txt_output.count("Microstate") == 2
+
+
+def test_batch_writes_one_combined_sdf_by_default(monkeypatch):
+    saved = []
+
+    def protonate(*_args, **_kwargs):
+        return ["C", "[CH3+]"], [Mol(), Mol()]
+
+    monkeypatch.setattr(cli, "read_smi", lambda _path: {"first": "C", "second": "N"})
+    monkeypatch.setattr(cli, "protonate", protonate)
+    monkeypatch.setattr(cli, "save_sdf", lambda mols, path: saved.append((tuple(mols), path)))
+
+    with CliRunner().isolated_filesystem():
+        Path("mols.smi").write_text("C first\n", encoding="utf-8")
+        result = CliRunner().invoke(cli.cli, ["batch", "--smi", "mols.smi"])
+        individual_folder_exists = Path("batch_individual_sdfs").exists()
+
+    assert result.exit_code == 0
+    assert [(len(mols), path) for mols, path in saved] == [
+        (4, Path("molecules_batch.sdf")),
+    ]
+    assert individual_folder_exists is False
+
+
+def test_batch_individual_sdfs_use_safe_unique_filenames(monkeypatch):
+    saved = []
+
+    monkeypatch.setattr(cli, "read_smi", lambda _path: {"../escape": "C", "..?escape": "N"})
+    monkeypatch.setattr(cli, "protonate", mock_protonate({}))
+    monkeypatch.setattr(cli, "save_sdf", lambda mols, path: saved.append((mols, path)))
+
+    with CliRunner().isolated_filesystem():
+        Path("mols.smi").write_text("C first\n", encoding="utf-8")
+        result = CliRunner().invoke(
+            cli.cli,
+            [
+                "batch",
+                "--smi",
+                "mols.smi",
+                "--individual-sdfs",
+                "--sdf-combined",
+                "all_microstates.sdf",
+            ],
+        )
+
+    assert result.exit_code == 0
+    assert [path for _, path in saved] == [
+        Path("all_microstates.sdf"),
+        Path("batch_individual_sdfs/0000_escape.sdf"),
+        Path("batch_individual_sdfs/0001_escape.sdf"),
+    ]
+
+
+def test_batch_help_explains_combined_sdf_and_cutoff():
+    output = CliRunner().invoke(cli.cli, ["batch", "--help"]).output
+
+    assert "--individual-sdfs / --no-individual-sdfs" in output
+    assert "molecules_batch.sdf" in output
+    assert "all exported microstates for all input" in output
+    assert "multiple records when multiple microstates" in output
+    assert "--cutoff-export" in output
 
 
 def test_cutoff_states_must_be_at_least_one():
