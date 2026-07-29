@@ -1,4 +1,5 @@
 import pytest
+from rdkit import Chem
 
 from pkasso import py_interface
 from pkasso.predict_pka import UnipkaPredictor
@@ -48,6 +49,24 @@ def test_batch_protonate_passes_model_mapping_for_each_molecule(monkeypatch):
 
     assert [smiles for smiles, _ in captured] == ["C", "N"]
     assert all(kwargs["model"] is model for _, kwargs in captured)
+
+
+def test_batch_protonate_converts_rdkit_molecules_to_smiles(monkeypatch):
+    captured = []
+
+    class PKasso:
+        def __init__(self, smiles, **kwargs):
+            captured.append(smiles)
+
+        def run_single(self, pH):
+            return Molecule()
+
+    monkeypatch.setattr(py_interface, "pKasso", PKasso)
+    mol = Chem.MolFromSmiles("CCO")
+
+    py_interface.batch_protonate([mol])
+
+    assert captured == ["CCO"]
 
 
 def test_scan_ph_passes_model_mapping_to_pkasso(monkeypatch):

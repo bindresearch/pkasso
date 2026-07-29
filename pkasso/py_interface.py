@@ -91,7 +91,13 @@ def batch_protonate(
     batch_mols: list[tuple[Mol, ...]] = []
 
     for inp in tqdm(input_list):
-        ap = pKasso(inp, nthreads=nthreads, **_resolve_model_kwargs(kwargs, model))
+
+        if isinstance(inp, Mol):
+            smiles = MolToSmiles(inp)
+        else:
+            smiles = inp
+
+        ap = pKasso(smiles, nthreads=nthreads, **_resolve_model_kwargs(kwargs, model))
         molecule = ap.run_single(pH=pH)
 
         batch_smiles.append(molecule.smiles)

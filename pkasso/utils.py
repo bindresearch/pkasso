@@ -150,18 +150,28 @@ def state_str_to_q(state_str: str) -> str:
 
 
 def read_smi(smi: Path) -> dict[str, str]:
-    """Parse input .smi files"""
+    """Parse an input .smi file, skipping blank lines."""
 
     batch_dict: dict[str, str] = {}
-
-    ct = 0
+    unnamed_count = 0
 
     with open(smi, "r") as f:
-        for line in f.readlines():
-            spl = line.split()
-            if len(spl) > 1:
-                batch_dict[spl[1]] = spl[0]
+        for line_number, line in enumerate(f, start=1):
+            fields = line.split()
+            if not fields:
+                continue
+
+            if len(fields) > 1:
+                name = fields[1]
             else:
-                batch_dict[f'molecule{ct}'] = spl[0]
-                ct += 1
+                name = f"molecule{unnamed_count}"
+                unnamed_count += 1
+
+            if name in batch_dict:
+                raise ValueError(
+                    f"Duplicate molecule name {name!r} on line {line_number}."
+                )
+
+            batch_dict[name] = fields[0]
+
     return batch_dict
