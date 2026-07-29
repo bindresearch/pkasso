@@ -1,5 +1,6 @@
 """High-level Python interface for running pKasso predictions."""
 
+import math
 from typing import Any
 
 import numpy as np
@@ -11,6 +12,7 @@ from rdkit.Chem.rdchem import Mol
 from .main import pKasso
 from .predict_pka import ModelInput
 from .postprocess import Scan
+
 
 def _resolve_model_kwargs(
     kwargs: dict[str, Any],
@@ -24,6 +26,21 @@ def _resolve_model_kwargs(
     if model is not None:
         pkasso_kwargs["model"] = model
     return pkasso_kwargs
+
+
+def _validate_prediction_options(pH: float | None, kwargs: dict[str, Any]) -> None:
+    """Validate numeric options exposed by the Python entry points."""
+
+    if pH is not None and not math.isfinite(pH):
+        raise ValueError("pH must be finite.")
+
+    cutoff_export = kwargs.get("cutoff_export")
+    if cutoff_export is not None and (
+        not math.isfinite(cutoff_export)
+        or cutoff_export < 0
+        or cutoff_export > 1
+    ):
+        raise ValueError("cutoff_export must be between 0 and 1.")
 
 
 def protonate(
@@ -52,6 +69,8 @@ def protonate(
     ``nthreads`` controls RDKit, MolGpKa, and Uni-pKa CPU thread counts.
     """
 
+    _validate_prediction_options(pH, kwargs)
+
     if isinstance(inp, Mol):
         smiles = MolToSmiles(inp)
     else:
@@ -68,6 +87,7 @@ def batch_protonate(
         pH: float = 7.0,
         model: ModelInput | None = None,
         nthreads: int = 0,
+        progress: bool = True,
         **kwargs: Any
 ) -> tuple[list[tuple[str, ...]], list[tuple[Mol, ...]]]:
     """
@@ -85,12 +105,16 @@ def batch_protonate(
 
     smiles_out, mols_out = batch_protonate(batch_input, pH=7., cutoff_export=0.2)
     ```
+
+    Set ``progress=False`` to disable the progress bar.
     """
+
+    _validate_prediction_options(pH, kwargs)
 
     batch_smiles: list[tuple[str, ...]] = []
     batch_mols: list[tuple[Mol, ...]] = []
 
-    for inp in tqdm(input_list):
+    for inp in tqdm(input_list, disable=not progress):
 
         if isinstance(inp, Mol):
             smiles = MolToSmiles(inp)
@@ -133,12 +157,20 @@ def scan_pH(
     ```
     """
 
+    _validate_prediction_options(None, kwargs)
+
     if isinstance(inp, Mol):
         smiles = MolToSmiles(inp)
     else:
         smiles = inp
 
-    pHs_arr: NDArray[np.float64] = np.array(pHs)
+    pHs_arr: NDArray[np.float64] = np.asarray(pHs, dtype=np.float64)
+    if pHs_arr.ndim != 1:
+        raise ValueError("pHs must be one-dimensional.")
+    if pHs_arr.size == 0:
+        raise ValueError("pHs must not be empty.")
+    if not np.all(np.isfinite(pHs_arr)):
+        raise ValueError("pHs must contain only finite values.")
 
     ap = pKasso(smiles, nthreads=nthreads, **_resolve_model_kwargs(kwargs, model))
     return ap.run_scan(pHs=pHs_arr)

@@ -69,6 +69,28 @@ def test_batch_protonate_converts_rdkit_molecules_to_smiles(monkeypatch):
     assert captured == ["CCO"]
 
 
+def test_batch_protonate_can_disable_progress(monkeypatch):
+    captured = {}
+
+    class PKasso:
+        def __init__(self, smiles, **kwargs):
+            pass
+
+        def run_single(self, pH):
+            return Molecule()
+
+    def tqdm(values, disable):
+        captured["disable"] = disable
+        return values
+
+    monkeypatch.setattr(py_interface, "pKasso", PKasso)
+    monkeypatch.setattr(py_interface, "tqdm", tqdm)
+
+    py_interface.batch_protonate(["C"], progress=False)
+
+    assert captured["disable"] is True
+
+
 def test_scan_ph_passes_model_mapping_to_pkasso(monkeypatch):
     captured = {}
 
@@ -98,6 +120,18 @@ def test_scan_ph_passes_model_mapping_to_pkasso(monkeypatch):
     assert captured["model"] is model
     assert captured["nthreads"] == 4
     assert captured["output_molecules_from_scan"] is False
+
+
+def test_python_entry_points_validate_numeric_inputs():
+    with pytest.raises(ValueError, match="pH must be finite"):
+        py_interface.protonate("C", pH=float("nan"))
+
+    with pytest.raises(ValueError, match="cutoff_export"):
+        py_interface.protonate("C", cutoff_export=2.0)
+
+    for pHs in ([], [[6.0, 7.0]], [6.0, float("inf")]):
+        with pytest.raises(ValueError, match="pHs"):
+            py_interface.scan_pH("C", pHs=pHs)
 
 
 def test_default_model_is_left_to_pkasso(monkeypatch):

@@ -304,6 +304,65 @@ def test_batch_help_explains_combined_sdf_and_cutoff():
     assert "--cutoff-export" in output
 
 
+def test_output_paths_must_be_distinct(tmp_path):
+    smi = tmp_path / "molecules.smi"
+    smi.write_text("C molecule\n", encoding="utf-8")
+    output = tmp_path / "same.out"
+
+    result = CliRunner().invoke(
+        cli.cli,
+        [
+            "batch",
+            "--smi",
+            str(smi),
+            "--sdf-combined",
+            str(output),
+            "--txt-out",
+            str(output),
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "--txt-out must not use the same path as --sdf-combined" in result.output
+
+
+def test_scan_sanitizes_name_for_default_output_paths(monkeypatch):
+    scan = Scan()
+    monkeypatch.setattr(cli, "scan_pH", lambda *_args, **_kwargs: scan)
+
+    result = CliRunner().invoke(
+        cli.cli,
+        ["scan", "--smiles", "C", "--name", "../escape"],
+    )
+
+    assert result.exit_code == 0
+    assert scan.exported_macro_pkas == Path("escape_macro_pkas.out")
+    assert scan.exported_scan == Path("escape_scan.svg")
+    assert scan.saved_sdf == Path("escape_mols_scan.sdf")
+
+
+def test_explicit_ignored_options_are_rejected(tmp_path):
+    gpu = CliRunner().invoke(cli.cli, ["single", "--smiles", "C", "--gpu"])
+    model_folder = CliRunner().invoke(
+        cli.cli,
+        ["single", "--smiles", "C", "--unipka-model-folder", str(tmp_path)],
+    )
+    path_out = CliRunner().invoke(
+        cli.cli,
+        ["batch", "--smi", "mols.smi", "--path-out", "individual"],
+    )
+
+    assert "--gpu requires --model mixed." in gpu.output
+    assert "--unipka-model-folder requires --model mixed." in model_folder.output
+    assert "--path-out requires --individual-sdfs." in path_out.output
+
+
+def test_individual_sdf_filename_has_safe_length():
+    filename = cli._safe_sdf_filename(0, "a" * 1000)
+
+    assert len(filename) <= 255
+
+
 def test_cutoff_states_must_be_at_least_one():
     result = CliRunner().invoke(cli.cli, ["single", "--smiles", "C", "--cutoff-states", "0"])
 

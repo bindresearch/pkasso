@@ -85,11 +85,30 @@ def save_sdf(*args: Any, **kwargs: Any) -> Any:
     return _save_sdf(*args, **kwargs)
 
 
+def _safe_filename_stem(name: str) -> str:
+    """Return a short, filesystem-safe name."""
+
+    safe_name = re.sub(r"[^A-Za-z0-9_-]+", "_", name).strip("_")
+    return (safe_name or "molecule")[:200]
+
+
 def _safe_sdf_filename(idx: int, name: str) -> str:
     """Return a unique, filesystem-safe filename for a batch molecule."""
 
-    safe_name = re.sub(r"[^A-Za-z0-9_-]+", "_", name).strip("_")
-    return f"{idx:04d}_{safe_name or 'molecule'}.sdf"
+    return f"{idx:04d}_{_safe_filename_stem(name)}.sdf"
+
+
+def _check_distinct_paths(paths: Iterable[tuple[str, Path | None]]) -> None:
+    """Reject input and output options resolving to the same path."""
+
+    seen: dict[Path, str] = {}
+    for label, path in paths:
+        if path is None:
+            continue
+        resolved = path.resolve()
+        if resolved in seen:
+            raise click.UsageError(f"{label} must not use the same path as {seen[resolved]}.")
+        seen[resolved] = label
 
 
 def format_microstate_table(
@@ -222,6 +241,18 @@ def _common_option_conflicts(ctx: click.Context) -> None:
 
     if params.get("njobs") == 0:
         raise click.UsageError("--njobs must not be 0.")
+
+    if params.get("model") == "molgpka":
+        if params.get("gpu") and ctx.get_parameter_source("gpu") == commandline:
+            raise click.UsageError("--gpu requires --model mixed.")
+        if ctx.get_parameter_source("unipka_model_folder") == commandline:
+            raise click.UsageError("--unipka-model-folder requires --model mixed.")
+
+    if params.get("individual_sdfs") is False:
+        if ctx.get_parameter_source("path_out") == commandline:
+            raise click.UsageError("--path-out requires --individual-sdfs.")
+        if ctx.get_parameter_source("overwrite") == commandline:
+            raise click.UsageError("--overwrite/--no-overwrite requires --individual-sdfs.")
 
     min_ph = params.get("min_ph")
     max_ph = params.get("max_ph")
@@ -403,6 +434,10 @@ def single(
     """Run single protonation state prediction given a smiles string and pH values."""
 
     _common_option_conflicts(click.get_current_context())
+    _check_distinct_paths((
+        ("--sdf-out", sdf_out),
+        ("--txt-out", txt_out),
+    ))
 
     smiles_out, mols_out = protonate(
         smiles,
@@ -501,7 +536,25 @@ def batch(
     if not smi.is_file():
         raise click.BadParameter("must be an existing file", param_hint="--smi")
 
-    batch_input = read_smi(smi)
+    try:
+        batch_input = read_smi(smi)
+    except ValueError as exc:
+        raise click.BadParameter(str(exc), param_hint="--smi") from exc
+
+    batch_paths: list[tuple[str, Path | None]] = [
+        ("--smi", smi),
+        ("--sdf-combined", sdf_combined),
+        ("--txt-out", txt_out),
+    ]
+    if individual_sdfs:
+        batch_paths.extend(
+            (
+                f"individual SDF for {name!r}",
+                path_out / _safe_sdf_filename(idx, name),
+            )
+            for idx, name in enumerate(batch_input)
+        )
+    _check_distinct_paths(batch_paths)
 
     results_parallel = Parallel(n_jobs=njobs, prefer="processes")(
         delayed(_compute_protonate)(
@@ -590,12 +643,20 @@ def scan(
 
     pHs = np.arange(min_ph, max_ph + 0.0001, 0.25, dtype=np.float64)
 
+    output_name = _safe_filename_stem(name)
     if not fig_out:
-        fig_out = Path(f"{name}_scan.svg")
+        fig_out = Path(f"{output_name}_scan.svg")
     if not sdf_out:
-        sdf_out = Path(f"{name}_mols_scan.sdf")
+        sdf_out = Path(f"{output_name}_mols_scan.sdf")
     if not pkas_out:
-        pkas_out = Path(f"{name}_macro_pkas.out")
+        pkas_out = Path(f"{output_name}_macro_pkas.out")
+
+    _check_distinct_paths((
+        ("--fig-out", fig_out),
+        ("--sdf-out", sdf_out),
+        ("--pkas-out", pkas_out),
+        ("--txt-out", txt_out),
+    ))
 
     scan = scan_pH(
         smiles,

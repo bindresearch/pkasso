@@ -167,11 +167,18 @@ def read_smi(smi: Path) -> dict[str, str]:
                 name = f"molecule{unnamed_count}"
                 unnamed_count += 1
 
+            smiles = fields[0]
+            if Chem.MolFromSmiles(smiles) is None:
+                raise ValueError(f"Invalid SMILES {smiles!r} on line {line_number}.")
+
             if name in batch_dict:
                 raise ValueError(
                     f"Duplicate molecule name {name!r} on line {line_number}."
                 )
 
-            batch_dict[name] = fields[0]
+            batch_dict[name] = smiles
+
+    if not batch_dict:
+        raise ValueError("No molecules found in the input .smi file.")
 
     return batch_dict
