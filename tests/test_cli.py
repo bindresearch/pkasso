@@ -237,6 +237,7 @@ def test_batch_writes_all_microstate_tables_to_common_txt_out(monkeypatch):
         txt_output = Path("overview.txt").read_text(encoding="utf-8")
 
     assert result.exit_code == 0
+    assert result.output == txt_output
     assert "first | pH: 6.5" in txt_output
     assert "second | pH: 6.5" in txt_output
     assert txt_output.count("Microstate") == 2

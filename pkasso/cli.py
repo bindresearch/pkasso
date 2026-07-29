@@ -129,6 +129,18 @@ def write_microstate_tables(
 ) -> None:
     """Write one or more microstate tables to a common text file."""
 
+    formatted_output = format_microstate_tables(outputs)
+
+    with open(txt_out, "w", encoding="utf-8") as output_file:
+        if formatted_output:
+            output_file.write(f"{formatted_output}\n")
+
+
+def format_microstate_tables(
+    outputs: Iterable[tuple[str, float, Sequence[str], Sequence[Mol]]],
+) -> str:
+    """Format multiple microstate tables using common column widths."""
+
     outputs = list(outputs)
     name_width = max(
         (len(str(mol.GetProp("_Name"))) for _, _, _, mols in outputs for mol in mols),
@@ -142,22 +154,18 @@ def write_microstate_tables(
     title_width = max((len(f"{name} | pH: {pH:}") + 2 for name, pH, _, _ in outputs), default=0)
     output_width = max(table_width, title_width)
 
-    with open(txt_out, "w", encoding="utf-8") as output_file:
-        for output_idx, (name, pH, smiles, mols) in enumerate(outputs):
-            if output_idx:
-                output_file.write("\n\n")
-            output_file.write(
-                format_microstate_table(
-                    name,
-                    pH,
-                    smiles,
-                    mols,
-                    name_width=name_width,
-                    smiles_width=smiles_width,
-                    output_width=output_width,
-                )
-            )
-            output_file.write("\n")
+    return "\n\n\n".join(
+        format_microstate_table(
+            name,
+            pH,
+            smiles,
+            mols,
+            name_width=name_width,
+            smiles_width=smiles_width,
+            output_width=output_width,
+        )
+        for name, pH, smiles, mols in outputs
+    )
 
 
 def _common_option_conflicts(ctx: click.Context) -> None:
@@ -447,7 +455,7 @@ def batch(
     txt_out: Path | None,
 ) -> None:
     """Batch process an input .smi file and write output microstates to stdout
-    (optionally write sdf files of individual molecules)"""
+    (optionally write summary txt file and sdf files of individual molecules)"""
 
     _common_option_conflicts(click.get_current_context())
 
@@ -473,12 +481,15 @@ def batch(
         )
         for idx, (name, smiles) in enumerate(batch_input.items()))
 
-    for idx, name, smiles_out, mols_out in results_parallel:
-        if len(smiles_out) == 1:
-            print(idx, name, smiles_out[0])
-        else:
-            print(idx, name, smiles_out)
+    batch_outputs = [
+        (name, ph, smiles_out, mols_out)
+        for _, name, smiles_out, mols_out in results_parallel
+    ]
+    formatted_output = format_microstate_tables(batch_outputs)
+    if formatted_output:
+        click.echo(formatted_output)
 
+    for _, name, _, mols_out in results_parallel:
         # Save sdf files
         if path_out:
             os.makedirs(path_out, exist_ok=True)
@@ -488,13 +499,7 @@ def batch(
             save_sdf(mols_out, filename)
 
     if txt_out:
-        write_microstate_tables(
-            txt_out,
-            (
-                (name, ph, smiles_out, mols_out)
-                for _, name, smiles_out, mols_out in results_parallel
-            ),
-        )
+        write_microstate_tables(txt_out, batch_outputs)
 
 
 ### pH scan ###
