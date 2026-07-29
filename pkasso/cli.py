@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 import sys
 from collections.abc import Callable, Iterable, Sequence
@@ -187,8 +188,24 @@ def _common_option_conflicts(ctx: click.Context) -> None:
         raise click.UsageError("--cutoff-states must be >= 1.")
 
     cutoff_export = ctx.params.get("cutoff_export")
-    if cutoff_export is not None and ((cutoff_export < 0) or (cutoff_export > 1)):
+    if cutoff_export is not None and (
+        not math.isfinite(cutoff_export)
+        or (cutoff_export < 0)
+        or (cutoff_export > 1)
+    ):
         raise click.UsageError("--cutoff-export must be >= 0 and <= 1.")
+
+    for parameter, option in (
+        ("ph", "--ph"),
+        ("min_ph", "--min-ph"),
+        ("max_ph", "--max-ph"),
+    ):
+        value = params.get(parameter)
+        if value is not None and not math.isfinite(value):
+            raise click.UsageError(f"{option} must be finite.")
+
+    if params.get("njobs") == 0:
+        raise click.UsageError("--njobs must not be 0.")
 
     min_ph = params.get("min_ph")
     max_ph = params.get("max_ph")
@@ -341,8 +358,8 @@ def cli() -> None:
 @cli.command()
 @click.option("--name", required=False, type=str, default="molecule", help="Molecule name")
 @click.option("--smiles", required=True, type=str, help="SMILES string")
-@click.option("--ph", "--pH", required=False, type=float, default=7.0, help="pH value (for sdf and csv output)")
-@click.option("--sdf-out", required=False, type=click.Path(path_type=Path), help="sdf output file name")
+@click.option("--ph", "--pH", required=False, type=float, default=7.0, help="pH value")
+@click.option("--sdf-out", required=False, type=click.Path(dir_okay=False, path_type=Path), help="sdf output file name")
 @common_options
 def single(
     name: str,
@@ -393,12 +410,12 @@ def single(
 
 @cli.command()
 @click.option("--smi", required=True, type=click.Path(path_type=Path), help="Input .smi for batch processing")
-@click.option("--ph", "--pH", required=False, type=float, default=7.0, help="pH value (for sdf and csv output)")
+@click.option("--ph", "--pH", required=False, type=float, default=7.0, help="pH value")
 @click.option("--overwrite/--no-overwrite", is_flag=True, default=True, help="Overwrite sdf file if exists")
 @click.option(
     "--path-out",
     required=False,
-    type=click.Path(path_type=Path),
+    type=click.Path(file_okay=False, path_type=Path),
     default=Path("pkasso_output"),
     help="Output folder for sdf files",
 )
@@ -429,10 +446,13 @@ def batch(
     num_confs: int,
     txt_out: Path | None,
 ) -> None:
-    """Batch process an input .smi file and write output microstates to csv
+    """Batch process an input .smi file and write output microstates to stdout
     (optionally write sdf files of individual molecules)"""
 
     _common_option_conflicts(click.get_current_context())
+
+    if not smi.is_file():
+        raise click.BadParameter("must be an existing file", param_hint="--smi")
 
     batch_input = read_smi(smi)
 
@@ -485,9 +505,9 @@ def batch(
 @click.option("--smiles", required=True, type=str, help="SMILES string")
 @click.option("--min-ph", required=False, type=float, default=0.0, help="Minimum pH value")
 @click.option("--max-ph", required=False, type=float, default=14.0, help="Maximum pH value")
-@click.option("--fig-out", required=False, type=click.Path(path_type=Path), help="Figure of scan")
-@click.option("--sdf-out", required=False, type=click.Path(path_type=Path), help="File name for sdf output")
-@click.option("--pkas-out", required=False, type=click.Path(path_type=Path), help="File for macro pkas")
+@click.option("--fig-out", required=False, type=click.Path(dir_okay=False, path_type=Path), help="Figure of scan")
+@click.option("--sdf-out", required=False, type=click.Path(dir_okay=False, path_type=Path), help="File name for sdf output")
+@click.option("--pkas-out", required=False, type=click.Path(dir_okay=False, path_type=Path), help="File for macro pkas")
 @common_options
 def scan(
     name: str,

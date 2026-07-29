@@ -81,8 +81,10 @@ def test_uppercase_ph_alias_is_equivalent_for_single(monkeypatch):
     assert captured["cutoff_export"] == 0.2
 
 
-def test_uppercase_ph_alias_is_equivalent_for_batch(monkeypatch):
+def test_uppercase_ph_alias_is_equivalent_for_batch(monkeypatch, tmp_path):
     captured = {}
+    smi = tmp_path / "mols.smi"
+    smi.write_text("C mol\n", encoding="utf-8")
 
     monkeypatch.setattr(cli, "read_smi", lambda _path: {"mol": "C"})
     monkeypatch.setattr(cli, "protonate", mock_protonate(captured))
@@ -90,7 +92,7 @@ def test_uppercase_ph_alias_is_equivalent_for_batch(monkeypatch):
 
     result = CliRunner().invoke(
         cli.cli,
-        ["batch", "--smi", "mols.smi", "--pH", "5.5"],
+        ["batch", "--smi", str(smi), "--pH", "5.5"],
     )
 
     assert result.exit_code == 0
@@ -227,6 +229,7 @@ def test_batch_writes_all_microstate_tables_to_common_txt_out(monkeypatch):
     monkeypatch.setattr(cli, "save_sdf", lambda *_args: None)
 
     with CliRunner().isolated_filesystem():
+        Path("mols.smi").write_text("C mol\n", encoding="utf-8")
         result = CliRunner().invoke(
             cli.cli,
             ["batch", "--smi", "mols.smi", "--ph", "6.5", "--txt-out", "overview.txt"],
@@ -339,6 +342,7 @@ def test_mixed_model_options_apply_to_batch(monkeypatch):
     monkeypatch.setattr(cli, "save_sdf", lambda *_args: None)
 
     with CliRunner().isolated_filesystem():
+        Path("mols.smi").write_text("C mol\n", encoding="utf-8")
         result = CliRunner().invoke(
             cli.cli,
             ["batch", "--smi", "mols.smi", "--model", "mixed", "--no-gpu"],
@@ -346,6 +350,79 @@ def test_mixed_model_options_apply_to_batch(monkeypatch):
 
     assert result.exit_code == 0
     assert captured["model"]["unipka"]["gpu"] is False
+
+
+def test_batch_smi_must_be_an_existing_file(tmp_path):
+    missing = CliRunner().invoke(
+        cli.cli,
+        ["batch", "--smi", str(tmp_path / "missing.smi")],
+    )
+    directory = CliRunner().invoke(
+        cli.cli,
+        ["batch", "--smi", str(tmp_path)],
+    )
+
+    assert missing.exit_code != 0
+    assert "--smi: must be an existing file" in missing.output
+    assert directory.exit_code != 0
+    assert "--smi: must be an existing file" in directory.output
+
+
+def test_batch_njobs_must_not_be_zero():
+    result = CliRunner().invoke(
+        cli.cli,
+        ["batch", "--smi", "mols.smi", "--njobs", "0"],
+    )
+
+    assert result.exit_code != 0
+    assert "--njobs must not be 0." in result.output
+
+
+def test_ph_values_must_be_finite():
+    runner = CliRunner()
+
+    for args, error in (
+        (["single", "--smiles", "C", "--ph", "nan"], "--ph must be finite."),
+        (["batch", "--smi", "mols.smi", "--ph", "nan"], "--ph must be finite."),
+        (["scan", "--smiles", "C", "--min-ph", "nan"], "--min-ph must be finite."),
+        (["scan", "--smiles", "C", "--max-ph", "nan"], "--max-ph must be finite."),
+        (
+            ["single", "--smiles", "C", "--cutoff-export", "nan"],
+            "--cutoff-export must be >= 0 and <= 1.",
+        ),
+    ):
+        result = runner.invoke(cli.cli, args)
+
+        assert result.exit_code != 0
+        assert error in result.output
+
+
+def test_file_outputs_reject_directories(tmp_path):
+    runner = CliRunner()
+    regular_file = tmp_path / "not_a_directory"
+    regular_file.write_text("", encoding="utf-8")
+
+    for args in (
+        ["single", "--smiles", "C", "--sdf-out", str(tmp_path)],
+        ["single", "--smiles", "C", "--txt-out", str(tmp_path)],
+        ["batch", "--smi", "mols.smi", "--txt-out", str(tmp_path)],
+        ["scan", "--smiles", "C", "--fig-out", str(tmp_path)],
+        ["scan", "--smiles", "C", "--sdf-out", str(tmp_path)],
+        ["scan", "--smiles", "C", "--pkas-out", str(tmp_path)],
+        ["scan", "--smiles", "C", "--txt-out", str(tmp_path)],
+    ):
+        result = runner.invoke(cli.cli, args)
+
+        assert result.exit_code != 0
+        assert "is a directory" in result.output
+
+    result = runner.invoke(
+        cli.cli,
+        ["batch", "--smi", "mols.smi", "--path-out", str(regular_file)],
+    )
+
+    assert result.exit_code != 0
+    assert "is a file" in result.output
 
 
 def test_mixed_model_options_apply_to_scan(monkeypatch):
