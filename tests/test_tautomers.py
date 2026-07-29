@@ -1,4 +1,5 @@
 import importlib.util
+import logging
 from pathlib import Path
 
 
@@ -114,16 +115,16 @@ def test_max_tautomers_falls_back_to_input_smiles(caplog):
     tautomers = load_tautomers_module()
 
     smiles = "O=C(NC(=O)c1ccccc1)c1ccccc1"
-    caplog.set_level("INFO", logger=tautomers.__name__)
 
-    assert (
-        tautomers.best_tautomer_smiles(
-            smiles,
-            max_tautomers=1,
-            num_confs=1,
+    with caplog.at_level(logging.INFO, logger=tautomers.logger.name):
+        assert (
+            tautomers.best_tautomer_smiles(
+                smiles,
+                max_tautomers=1,
+                num_confs=1,
+            )
+            == smiles
         )
-        == smiles
-    )
 
     assert f"exceeds max tautomers 1, using input SMILES {smiles}" in caplog.text
 

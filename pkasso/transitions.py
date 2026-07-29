@@ -227,6 +227,48 @@ def calc_populations(Gs: NDArray[np.float64]) -> NDArray[np.float64]:
     return pops
 
 
+def calc_proton_count_offsets(state_vecs: list[NDArray[np.int64]]) -> NDArray[np.float64]:
+    """Compute relative proton counts from pKasso state vectors.
+
+    pKasso encodes each site as 0/1/2 for deprotonated/reference/protonated.
+    The sum of ``state_vec - 1`` is therefore the proton-count offset relative
+    to the reference microstate.
+    """
+
+    return np.array([np.sum(state_vec - 1) for state_vec in state_vecs], dtype=np.float64)
+
+
+def calc_pH_dependent_free_energies(
+    standard_free_energies: NDArray[np.float64],
+    proton_count_offsets: NDArray[np.float64],
+    pH: float,
+    target_mean: float,
+) -> NDArray[np.float64]:
+    """Add the Uni-pKa pH term to standard microstate free energies."""
+
+    standard_free_energies = np.asarray(standard_free_energies, dtype=np.float64)
+    proton_count_offsets = np.asarray(proton_count_offsets, dtype=np.float64)
+    if standard_free_energies.shape != proton_count_offsets.shape:
+        raise ValueError("standard_free_energies and proton_count_offsets must have the same shape.")
+    return standard_free_energies + proton_count_offsets * np.log(10) * (pH - target_mean)
+
+
+def calc_state_pH_dependent_free_energies(
+    standard_free_energies: NDArray[np.float64],
+    state_vecs: list[NDArray[np.int64]],
+    pH: float,
+    target_mean: float,
+) -> NDArray[np.float64]:
+    """Compute pH-dependent free energies for pKasso state vectors."""
+
+    return calc_pH_dependent_free_energies(
+        standard_free_energies,
+        calc_proton_count_offsets(state_vecs),
+        pH,
+        target_mean,
+    )
+
+
 def calc_freqs_from_states(
     state_strs: list[str],
     state_vecs: list[NDArray[np.int64]],
@@ -239,6 +281,13 @@ def calc_freqs_from_states(
     if matrix_def == "msm":
         tmatrix = calc_tmatrix(state_strs, state_vecs, ps_all, N_states)
         state_freqs = calc_state_freqs_sparse(tmatrix)
+        state_freqs = np.asarray(state_freqs, dtype=np.float64)
+        positive = state_freqs > 0.0
+        if not np.any(positive):
+            raise ValueError("MSM produced no positive state frequencies.")
+        Gs = np.full_like(state_freqs, np.inf, dtype=np.float64)
+        Gs[positive] = -np.log(state_freqs[positive])
+        Gs -= np.min(Gs[positive])
     elif matrix_def == "dG":
         dGmatrix = calc_dGmatrix(state_strs, state_vecs, ps_all, N_states)
         dG_clusters = find_dGclusters(dGmatrix)
@@ -247,10 +296,12 @@ def calc_freqs_from_states(
         if not is_connected:
             raise ValueError("Matrix not connected (or not symmetric)")
         Gs = reconstruct_free_energies_weighted(dGmatrix)
-        state_freqs = calc_populations(Gs)
+        Gs -= np.min(Gs)
+        # state_freqs = calc_populations(Gs)
     else:
         raise ValueError
-    return state_strs, state_freqs
+    # return state_strs, state_freqs
+    return state_strs, Gs
 
 
 def calc_state_diffs(

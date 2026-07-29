@@ -2,19 +2,69 @@ from __future__ import annotations
 
 import copy
 import io
+import logging
 import numpy as np
 import os
+from contextlib import contextmanager
+from collections.abc import Iterator
 from typing import Any
 from rdkit.Chem import AllChem
 from rdkit import Chem
 
-from .config import CUTOFF_STATES
+from .config import CUTOFF_STATES, UNIPKA_MODEL_FOLDER
 from .state import AppState
 
 from ..py_interface import scan_pH, protonate
 from ..postprocess import draw_mols
 
 os.environ.setdefault("MPLCONFIGDIR", "/tmp/matplotlib-pkasso")
+
+
+class _WarningCollector(logging.Handler):
+    def __init__(self, messages: list[str]) -> None:
+        super().__init__(level=logging.WARNING)
+        self.messages = messages
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.messages.append(record.getMessage())
+
+
+@contextmanager
+def capture_pkasso_warnings() -> Iterator[list[str]]:
+    """Collect warnings emitted by the core workflow while preserving normal logging."""
+
+    messages: list[str] = []
+    handler = _WarningCollector(messages)
+    core_logger = logging.getLogger("pkasso.main")
+    core_logger.addHandler(handler)
+    try:
+        yield messages
+    finally:
+        core_logger.removeHandler(handler)
+
+
+def _unique(messages: list[str]) -> list[str]:
+    return list(dict.fromkeys(messages))
+
+
+def prediction_kwargs(state: AppState) -> dict[str, Any]:
+    if not state.precision_mode:
+        return {}
+
+    unipka_options: dict[str, object] = {
+        "folds": (1,),
+    }
+    if UNIPKA_MODEL_FOLDER is not None:
+        unipka_options["model_dir"] = UNIPKA_MODEL_FOLDER
+
+    return {
+        "total_max_sites": 8,
+        "nthreads": 0,
+        "model": {
+            "molgpka": {},
+            "unipka": unipka_options,
+        },
+    }
 
 
 def _pyplot() -> Any:
@@ -48,14 +98,23 @@ def figure_to_svg(fig: Any) -> str:
 def compute_prediction(state: AppState) -> None:
 
     state.error = None
-    smiles_out, mols_out = protonate(
-        state.smiles,
-        name=state.ligand,
-        pH=state.ph,
-        cutoff_export=0.0,
-        cutoff_states=CUTOFF_STATES,
-        tautomer_search=state.tautomer_search,
-    )
+    state.warnings.clear()
+    captured_warnings: list[str] = []
+    try:
+        with capture_pkasso_warnings() as captured_warnings:
+            smiles_out, mols_out = protonate(
+                state.smiles,
+                name=state.ligand,
+                pH=state.ph,
+                cutoff_export=0.0,
+                cutoff_states=CUTOFF_STATES,
+                tautomer_search=state.tautomer_search,
+                free_energy_cutoff_individual = 10,
+                free_energy_cutoff_combined = 10,
+                **prediction_kwargs(state),
+            )
+    finally:
+        state.warnings = _unique(captured_warnings)
     state.smiles_out = list(smiles_out[: state.nmols_export])
     state.mols_out = list(mols_out[: state.nmols_export])
     state.scan = None
@@ -65,13 +124,22 @@ def compute_prediction(state: AppState) -> None:
 def compute_scan(state: AppState) -> None:
 
     state.error = None
-    state.scan = scan_pH(
-        state.smiles,
-        name=state.ligand,
-        cutoff_states=CUTOFF_STATES,
-        tautomer_search=state.tautomer_search,
-        pHs=np.arange(0, 14.1, 0.25, dtype=np.float64),
-    )
+    state.warnings.clear()
+    captured_warnings: list[str] = []
+    try:
+        with capture_pkasso_warnings() as captured_warnings:
+            state.scan = scan_pH(
+                state.smiles,
+                name=state.ligand,
+                cutoff_states=CUTOFF_STATES,
+                tautomer_search=state.tautomer_search,
+                free_energy_cutoff_individual = 100,
+                free_energy_cutoff_combined = 100,
+                pHs=np.arange(0, 14.1, 0.25, dtype=np.float64),
+                **prediction_kwargs(state),
+            )
+    finally:
+        state.warnings = _unique(captured_warnings)
     state.scan_figures.clear()
 
 

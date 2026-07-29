@@ -14,9 +14,7 @@ THIOIMIDIC_ACID_PATTERN = Chem.MolFromSmarts("[NX2;!$([N+])]=[CX3]([SX2H1])")
 HYDROXAMATE_PATTERN = Chem.MolFromSmarts("[CX3](=[OX1])-[NX3]-[OX2H1]")
 HYDROXIMIC_ACID_PATTERN = Chem.MolFromSmarts("[CX3]([OX2H1])=[NX2]-[OX2H1]")
 
-
 ConformerEnergy = tuple[int, float]
-
 
 class ScoredTautomerEntry(TypedDict):
     """Store a tautomer and its rule-based ranking data."""

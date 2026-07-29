@@ -135,3 +135,66 @@ def test_cut_search_validation():
             coupling_cutoff=1.0,
             cut_penalty_factor=-1.0,
         )
+
+
+def test_compare_free_energies_measures_target_transition_response():
+    indices = [1, 2]
+    q_options = np.array(
+        [
+            [0, 1, 1],
+            [0, 1, 1],
+        ],
+        dtype=np.int64,
+    )
+    standard_free_energy_lib = {
+        "11": 0.0,
+        "21": 1.0,
+        "12": 2.0,
+        "22": 3.5,
+    }
+
+    diffs = coupling.compare_free_energies(
+        indices,
+        q_options,
+        "11",
+        "21",
+        standard_free_energy_lib,
+    )
+
+    assert diffs[0] == 0.0
+    assert diffs[1] == pytest.approx(0.5 / np.log(10))
+
+
+def test_construct_state_vectors_coupling_includes_single_and_double_perturbations():
+    indices = [1, 2]
+    q_options = np.array(
+        [
+            [1, 1, 1],
+            [1, 1, 0],
+        ],
+        dtype=np.int64,
+    )
+
+    state_vecs = coupling.construct_state_vectors_coupling(indices, q_options)
+    state_strs = ["".join(str(int(q)) for q in state_vec) for state_vec in state_vecs]
+
+    assert state_strs == ["11", "01", "21", "10", "00", "20"]
+
+
+def test_construct_free_energy_coupling_weight_matrix_tracks_perturbed_site():
+    indices = [1, 2]
+    state_vecs = [
+        np.array([1, 1]),
+        np.array([2, 1]),
+    ]
+    state_strs = ["11", "21"]
+    free_energy_diffs = {"21": np.array([0.0, 0.25])}
+
+    weights = coupling.construct_free_energy_coupling_weight_matrix(
+        indices,
+        state_strs,
+        state_vecs,
+        free_energy_diffs,
+    )
+
+    assert weights.tolist() == [[0.0, 0.25], [0.0, 0.0]]

@@ -1,10 +1,10 @@
 """Core pKasso workflow implementation."""
 
-import copy
 import itertools
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 import networkx as nx
 import numpy as np
@@ -15,10 +15,23 @@ from rdkit.Chem.MolStandardize import rdMolStandardize
 from rdkit.Chem.rdchem import Mol
 
 from . import coupling, special_cases, utils
-from .predict_pka import MolgpkaPredictor, Predictor
+from .predict_pka import (
+    ModelInput,
+    MolgpkaPredictor,
+    Predictor,
+    ResolvedPredictor,
+    ThermodynamicPredictionMode,
+    resolve_models,
+)
+from .external.molgpka.pka import configure_torch_threads
 from .postprocess import Molecule, Scan, combine_results
-from .transitions import calc_freqs_from_states, calc_state_diffs
-from .utils import pack_indices, pack_vec, unpack_vec, state_str_to_q
+from .transitions import (
+    calc_freqs_from_states,
+    calc_populations,
+    calc_state_diffs,
+    calc_state_pH_dependent_free_energies,
+)
+from .utils import pack_indices, pack_vec, unpack_vec, construct_mol
 from .tautomers import best_tautomer_smiles
 
 logger = logging.getLogger(__name__)
@@ -122,6 +135,20 @@ def preprocess(
             score_window=score_window,
             num_threads=num_threads,
         )
+    mol = Chem.MolFromSmiles(smiles, sanitize=True)
+
+    logger.debug("Formal charges before cleanup")
+    charges = [at.GetFormalCharge() for at in mol.GetAtoms()]
+    logger.debug(charges)
+
+    mol = rdMolStandardize.Normalize(mol)
+    uncharger = rdMolStandardize.Uncharger(force=True)
+
+    # load/save cycles to clean up the mol atom ordering
+    mol = uncharger.uncharge(mol)
+    smiles = Chem.MolToSmiles(mol, canonical=True)
+    mol = Chem.MolFromSmiles(smiles, sanitize=True)
+    smiles = Chem.MolToSmiles(mol, canonical=True)
 
     mol = Chem.MolFromSmiles(smiles, sanitize=True)
     smiles = Chem.MolToSmiles(mol, canonical=True)
@@ -133,8 +160,8 @@ def preprocess(
 
 
 def find_candidate_sites(
-    base: dict[int, float],
-    acid: dict[int, float],
+    base_map_ids: list[int],
+    acid_map_ids: list[int],
     exclude_base_indices: list[int],
     exclude_acid_indices: list[int],
     charged_indices: list[int],
@@ -146,9 +173,9 @@ def find_candidate_sites(
     Parameters
     ----------
     base
-        Mapping of atom map indices to predicted basic pKa values.
+        Atom base map ids.
     acid
-        Mapping of atom map indices to predicted acidic pKa values.
+        Atom acid map ids.
     exclude_base_indices
         Atom map indices that must not be considered for protonation.
     exclude_acid_indices
@@ -169,10 +196,7 @@ def find_candidate_sites(
         [deprotonated, unchanged, protonated].
     """
 
-    prot_candidates = list(base.keys())  # should be map idx
-    deprot_candidates = list(acid.keys())
-
-    indices_raw = list(sorted(set(prot_candidates + deprot_candidates)))
+    indices_raw = list(sorted(set(base_map_ids + acid_map_ids)))
     indices: list[int] = []
 
     logger.debug(f"relevant indices: {indices_raw}")
@@ -187,10 +211,10 @@ def find_candidate_sites(
     q_options = np.zeros((len(indices), 3), dtype=np.int64)  # deprot=0, stay=1, prot=2
     for rel_idx, map_idx in enumerate(indices):
         q_options[rel_idx, 1] = 1  # always allow stay
-        if map_idx in prot_candidates:
+        if map_idx in base_map_ids:
             if map_idx not in exclude_base_indices:
                 q_options[rel_idx, 2] = 1  # allow protonation
-        if map_idx in deprot_candidates:
+        if map_idx in acid_map_ids:
             if map_idx not in exclude_acid_indices:
                 q_options[rel_idx, 0] = 1  # allow deprotonation
 
@@ -253,59 +277,19 @@ def count_state_combinations(q_options: NDArray[np.int64]) -> int:
     return int(np.prod(q_counts))
 
 
-#########################################
-# rdkit mol object construction
+def _coerce_standard_free_energy_values(result: Any, expected_count: int) -> list[float]:
+    """Extract ordered standard free energies from a predictor result."""
 
+    if hasattr(result, "columns") and "standard_free_energy" in result.columns:
+        values = result["standard_free_energy"].tolist()
+    elif isinstance(result, dict) and "standard_free_energy" in result:
+        values = list(result["standard_free_energy"])
+    else:
+        values = list(result)
 
-def construct_mol(mol0: Mol, indices: list[int], state_vec: NDArray[np.int64]) -> Mol:
-    """
-    Construct a protonation-state-specific molecule from a reference molecule.
-
-    The function applies the protonation/deprotonation state encoded in
-    ``state_vec`` to the atoms specified by ``indices`` (atom map numbers).
-    Formal charges are adjusted accordingly and hydrogens are added or removed
-    where required. The resulting molecule is sanitized and returned.
-
-    Parameters
-    ----------
-    mol0
-        Reference molecule (neutral standardized structure)
-        with atom map numbers assigned.
-    indices
-        Atom map indices corresponding to the sites whose states are
-        defined in ``state_vec``.
-    state_vec
-        Protonation state vector for the selected sites. Values are encoded
-        as [0, 1, 2] corresponding to [deprotonated, unchanged, protonated].
-
-    Returns
-    -------
-    mol
-        RDKit molecule with the specified protonation states applied.
-    """
-
-    mol_cand = copy.deepcopy(mol0)
-
-    qs = state_vec - 1
-
-    rw = Chem.RWMol(Chem.AddHs(mol_cand))
-
-    for map_idx, q in zip(indices, qs):
-        atom = utils.get_atom_with_map_idx(rw, map_idx)
-        if atom is None:
-            raise ValueError(f"Could not find atom with map index {map_idx}.")
-        atom.SetFormalCharge(int(q))
-        if q == -1:
-            for nbr in atom.GetNeighbors():
-                if nbr.GetAtomicNum() == 1:
-                    rw.RemoveAtom(nbr.GetIdx())
-                    break
-
-    mol_cand = Chem.RemoveHs(rw)
-    Chem.SanitizeMol(mol_cand)
-
-    return mol_cand
-
+    if len(values) != expected_count:
+        raise ValueError(f"Expected {expected_count} standard free energies, got {len(values)}.")
+    return [float(value) for value in values]
 
 #############################################################################################
 # Cluster tests and operations
@@ -320,6 +304,7 @@ class ProtonationIndexSpace:
     mols_lib: dict[str, Mol] = field(default_factory=dict)
     base_lib: dict[str, dict[int, float]] = field(default_factory=dict)
     acid_lib: dict[str, dict[int, float]] = field(default_factory=dict)
+    standard_free_energy_lib: dict[str, float] = field(default_factory=dict)
 
     @property
     def indices_str(self) -> str:
@@ -353,17 +338,65 @@ class IndexSpaceRegistry:
 
 
 @dataclass
-class MicrostateDistribution:
-    """pH-dependent microstate distribution over one fixed index space."""
+class RawMicrostateEnergies:
+    """Raw pH-dependent microstate free energies before population analysis."""
 
     index_space: ProtonationIndexSpace
     pH: float
     state_strs: list[str]
     state_vecs: list[NDArray[np.int64]]
+    Gs: list[float] | NDArray[np.float64]
+    Gs_sigmas: list[float] | NDArray[np.float64] | None = None
+
+    @property
+    def indices(self) -> list[int]:
+        return self.index_space.indices
+
+    @property
+    def mols_lib(self) -> dict[str, Mol]:
+        return self.index_space.mols_lib
+
+
+@dataclass
+class PredictorContext:
+    """Model-specific setup state and prediction caches."""
+
+    predictor_cls: type[Predictor]
+    predictor_config: object | None = None
+    index_spaces: IndexSpaceRegistry = field(default_factory=IndexSpaceRegistry)
+    exclude_base_indices: list[int] = field(default_factory=list)
+    exclude_acid_indices: list[int] = field(default_factory=list)
+    acid_map_ids: list[int] = field(default_factory=list)
+    base_map_ids: list[int] = field(default_factory=list)
+    acid0: dict[int, float] = field(default_factory=dict)
+    base0: dict[int, float] = field(default_factory=dict)
+    indices0: list[int] = field(default_factory=list)
+    q_options0: NDArray[np.int64] | None = None
+    index_space0: ProtonationIndexSpace | None = None
+    clusters: list[list[int]] = field(default_factory=list)
+    cluster_spaces: list[ProtonationIndexSpace] = field(default_factory=list)
+    dist_raw: RawMicrostateEnergies | None = None
+
+
+@dataclass
+class MicrostateDistribution:
+    """Final pH-dependent microstate distribution over one fixed index space."""
+
+    index_space: ProtonationIndexSpace
+    pH: float
+    state_strs: list[str]
+    state_vecs: list[NDArray[np.int64]]
+    Gs: list[float] | NDArray[np.float64]
     state_freqs: list[float] | NDArray[np.float64]
+    Gs_sigmas: list[float] | NDArray[np.float64] | None = None
+    state_freqs_sigmas: list[float] | NDArray[np.float64] | None = None
+    state_freq_samples: NDArray[np.float64] | None = None
     state_qs: dict[str, int] | None = None
     net_charge: float | None = None
+    net_charge_sigma: float | None = None
     freqs_macro: dict[int, float] | None = None
+    freqs_macro_sigmas: dict[int, float] | None = None
+    freqs_macro_samples: dict[int, NDArray[np.float64]] | None = None
 
     @property
     def indices(self) -> list[int]:
@@ -376,14 +409,33 @@ class MicrostateDistribution:
     def apply_symmetry(self) -> None:
         """Merge symmetry-equivalent states and keep state fields aligned."""
 
-        state_freqs_by_state = {
-            state_str: float(state_freq) for state_str, state_freq in zip(self.state_strs, self.state_freqs)
-        }
-        self.state_strs, self.state_freqs = calc_symmetry(
-            self.state_strs,
-            state_freqs_by_state,
-            self.mols_lib,
-        )
+        state_hashes = calc_hashes(self.state_strs, self.mols_lib)
+        groups: dict[str, list[int]] = {}
+        for state_idx, state_hash in enumerate(state_hashes):
+            groups.setdefault(state_hash, []).append(state_idx)
+
+        state_strs_symm: list[str] = []
+        state_freqs_symm: list[float] = []
+        state_freq_samples_symm: list[NDArray[np.float64]] | None = [] if self.state_freq_samples is not None else None
+
+        for group in groups.values():
+            state_strs_group = sorted(self.state_strs[state_idx] for state_idx in group)
+            state_strs_symm.append(state_strs_group[0])
+            state_freqs_symm.append(float(np.sum([self.state_freqs[state_idx] for state_idx in group])))
+            if state_freq_samples_symm is not None and self.state_freq_samples is not None:
+                state_freq_samples_symm.append(np.sum(self.state_freq_samples[:, group], axis=1))
+
+        self.state_strs = state_strs_symm
+        self.state_freqs = state_freqs_symm
+        self.state_freqs = np.asarray(self.state_freqs, dtype=np.float64)
+        self.Gs = -np.log(self.state_freqs)
+        self.Gs -= np.min(self.Gs)
+        if state_freq_samples_symm is not None:
+            self.state_freq_samples = np.asarray(state_freq_samples_symm, dtype=np.float64).T
+            self.state_freqs_sigmas = np.std(self.state_freq_samples, axis=0, ddof=1)
+            G_samples = -np.log(np.clip(self.state_freq_samples, np.finfo(float).tiny, 1.0))
+            G_samples -= np.min(G_samples, axis=1, keepdims=True)
+            self.Gs_sigmas = np.std(G_samples, axis=0, ddof=1)
         self.state_vecs = [unpack_vec(state_str) for state_str in self.state_strs]
 
     def assign_macro_props(self) -> None:
@@ -395,6 +447,25 @@ class MicrostateDistribution:
             self.state_freqs,
             self.state_qs,
         )
+        if self.state_freq_samples is None:
+            return
+
+        freqs_macro_samples: dict[int, NDArray[np.float64]] = {}
+        for state_idx, state_str in enumerate(self.state_strs):
+            state_q = self.state_qs[state_str]
+            if state_q not in freqs_macro_samples:
+                freqs_macro_samples[state_q] = np.zeros(self.state_freq_samples.shape[0], dtype=np.float64)
+            freqs_macro_samples[state_q] += self.state_freq_samples[:, state_idx]
+
+        self.freqs_macro_samples = freqs_macro_samples
+        self.freqs_macro_sigmas = {
+            q: float(np.std(freq_samples, ddof=1))
+            for q, freq_samples in freqs_macro_samples.items()
+        }
+        net_charge_samples = np.zeros(self.state_freq_samples.shape[0], dtype=np.float64)
+        for q, freq_samples in freqs_macro_samples.items():
+            net_charge_samples += q * freq_samples
+        self.net_charge_sigma = float(np.std(net_charge_samples, ddof=1))
 
 
 @dataclass
@@ -409,59 +480,60 @@ class PHScanDistribution:
 
     pHs: NDArray[np.float64]
     net_charges: list[float]
+    net_charge_sigmas: list[float]
     state_freqs_all: dict[str, NDArray[np.float64]]
+    state_freqs_sigmas_all: dict[str, NDArray[np.float64]]
     freqs_macro_all: list[dict[int, float]]
+    molecules: dict[float, Molecule]
+    freqs_macro_samples_all: list[dict[int, NDArray[np.float64]]] = field(default_factory=list)
 
 
 def combine_cluster_distributions(
-    cluster_dists: list[MicrostateDistribution],
+    cluster_dists: list[RawMicrostateEnergies],
     index_space: ProtonationIndexSpace,
     pH: float,
-    sfreq_cutoff_combined: float = 0.01,
+    free_energy_cutoff_combined: float = 7.0,
     max_states_combined: int = 100,
-) -> MicrostateDistribution:
+) -> RawMicrostateEnergies:
     """
-    Combine microstate probabilities from independent pKa clusters.
+    Combine microstate free energies from independent pKa clusters.
 
     Microstates from different clusters are combined assuming statistical
-    independence, with the combined microstate probability calculated as:
+    independence, with the combined microstate free energy calculated as:
 
-        p(AB) = p(A) * p(B)
+        G(AB) = G(A) + G(B)
 
-    Prior to combination, low-frequency states are filtered within each
-    cluster using ``sfreq_cutoff_individual``. After generating all possible
-    combinations, a second filter is applied using
-    ``sfreq_cutoff_combined``. Remaining probabilities are renormalized to
-    sum to 1.
+    After generating all possible combinations, high-energy states are
+    filtered relative to the lowest-energy combination.
 
     Parameters
     ----------
     cluster_dists
-        pH-dependent microstate distributions for independent clusters.
+        pH-dependent microstate free energies for independent clusters.
     index_space
         Combined protonation state space that the output distribution belongs to.
     pH
         Current pH value.
-    sfreq_cutoff_individual
-        Minimum relative frequency required for a state to be considered during
-        cluster-wise filtering. Default is 0.01.
-    sfreq_cutoff_combined
-        Minimum relative frequency required for a combined microstate to be kept.
-        Default is 0.001.
+    free_energy_cutoff_combined
+        Maximum relative free energy for a combined microstate to be kept.
     max_states_combined
         Max. number of microstates at given pH value
 
     Returns
     -------
-    microstate_distribution
-        Combined microstate distribution over ``index_space``.
+    microstate_energies
+        Combined raw microstate free energies over ``index_space``.
     """
 
     state_strs_clusters = [dist.state_strs for dist in cluster_dists]
-    state_freqs_clusters = [np.asarray(dist.state_freqs, dtype=np.float64) for dist in cluster_dists]
+    Gs_clusters = [np.asarray(dist.Gs, dtype=np.float64) for dist in cluster_dists]
     indices_clusters = [dist.indices for dist in cluster_dists]
 
-    cluster_state_ids = [range(len(state_freqs_cl)) for state_freqs_cl in state_freqs_clusters]
+    logger.debug(state_strs_clusters)
+    logger.debug(Gs_clusters)
+
+    cluster_state_ids = [range(len(Gs_cl)) for Gs_cl in Gs_clusters]
+
     n_combinations = int(np.prod([len(state_ids) for state_ids in cluster_state_ids]))
     logger.debug(f"N microstate combinations from clusters: {n_combinations}")
 
@@ -475,45 +547,343 @@ def combine_cluster_distributions(
     if indices_str != index_space.indices_str:
         raise ValueError(f"indices_str {indices_str} not equal to full indices list {index_space.indices_str}")
 
-    state_freq_max = float(np.prod([np.max(state_freqs_cl) for state_freqs_cl in state_freqs_clusters]))
-    state_freq_cutoff = sfreq_cutoff_combined * state_freq_max
+    Gs_min = float(np.sum([np.min(Gs_cl) for Gs_cl in Gs_clusters]))
+    G_cutoff = Gs_min + free_energy_cutoff_combined
     sort_state_str = not np.array_equal(ps, np.arange(len(ps)))
 
     state_strs = []
-    state_freqs_list = []
+    Gs_list = []
 
     combinations = itertools.product(*cluster_state_ids)
     for s_idxs in combinations:
-        state_freq = 1.0
+        G_comb = 0.0
         state_str_parts = []
         for c_idx, s_idx in enumerate(s_idxs):
             state_str_parts.append(state_strs_clusters[c_idx][s_idx])
-            state_freq *= float(state_freqs_clusters[c_idx][s_idx])
+            G_comb += float(Gs_clusters[c_idx][s_idx])
 
-        if state_freq >= state_freq_cutoff:
+        if G_comb <= G_cutoff:
             state_str = "".join(state_str_parts)
             if sort_state_str:
                 state_str = utils.sort_string(state_str, ps)  # match sorted indices
             state_strs.append(state_str)
-            state_freqs_list.append(state_freq)
+            Gs_list.append(G_comb)
 
-    state_freqs = np.array(state_freqs_list)
+    Gs = np.array(Gs_list)
 
     if len(state_strs) > max_states_combined:
-        ps_state_strs = np.argsort(state_freqs)[::-1] # descending freq
+        ps_state_strs = np.argsort(Gs)
         state_strs = [state_strs[p] for p in ps_state_strs][:max_states_combined]
-        state_freqs = state_freqs[ps_state_strs][:max_states_combined]
+        Gs = Gs[ps_state_strs][:max_states_combined]
 
     logger.debug(f"N chosen microstate combinations: {len(state_strs)}")
-    # Correct freqs for removal of very unlikely states
-    state_freqs /= np.sum(state_freqs)
-
-    return MicrostateDistribution(
+    return RawMicrostateEnergies(
         index_space=index_space,
         pH=pH,
         state_strs=state_strs,
         state_vecs=[unpack_vec(state_str) for state_str in state_strs],
-        state_freqs=state_freqs,
+        Gs=Gs,
+    )
+
+
+def _normalized_weights(
+    weights: Sequence[float] | None,
+    n_weights: int,
+) -> NDArray[np.float64]:
+    if weights is None:
+        return np.full(n_weights, 1.0 / n_weights, dtype=np.float64)
+
+    weights_arr = np.asarray(weights, dtype=np.float64)
+    if weights_arr.shape != (n_weights,):
+        raise ValueError(f"Expected {n_weights} expert weights, got {len(weights_arr)}.")
+    if np.any(weights_arr <= 0.0):
+        raise ValueError("Expert weights must be positive.")
+    weight_sum = float(np.sum(weights_arr))
+    return weights_arr / weight_sum
+
+
+def _state_population_map(G_by_state: dict[str, float]) -> dict[str, float]:
+    """Compute Boltzmann populations over one expert's finite state set."""
+
+    finite_items = [
+        (state_str, G)
+        for state_str, G in G_by_state.items()
+        if np.isfinite(G)
+    ]
+    if not finite_items:
+        return {}
+
+    state_strs = [state_str for state_str, _ in finite_items]
+    Gs = np.array([G for _, G in finite_items], dtype=np.float64)
+    Gs -= np.min(Gs)
+    pops = calc_populations(Gs)
+    return dict(zip(state_strs, map(float, pops)))
+
+
+def _align_energy_rows(
+    G_by_state_rows: list[dict[str, float]],
+    shared_states: set[str],
+) -> list[dict[str, float]]:
+    """Align model free-energy ladders to the first model.
+
+    The offset is fitted over shared states, weighted by the geometric mean of
+    each model's population over its full finite state set. This keeps the
+    gauge alignment anchored to thermodynamically relevant shared states.
+    """
+
+    reference_row = G_by_state_rows[0]
+    population_rows = [_state_population_map(G_by_state) for G_by_state in G_by_state_rows]
+    aligned_rows: list[dict[str, float]] = []
+    for row_idx, G_by_state in enumerate(G_by_state_rows):
+        if row_idx == 0:
+            offset = 0.0
+        else:
+            diffs = np.array([
+                G_by_state[state_str] - reference_row[state_str]
+                for state_str in shared_states
+            ], dtype=np.float64)
+            weights = np.array([
+                np.sqrt(
+                    population_rows[0].get(state_str, 0.0)
+                    * population_rows[row_idx].get(state_str, 0.0)
+                )
+                for state_str in shared_states
+            ], dtype=np.float64)
+            if np.sum(weights) > 0.0:
+                offset = float(np.average(diffs, weights=weights))
+            else:
+                offset = float(np.mean(diffs))
+        aligned_rows.append({
+            state_str: G - offset
+            for state_str, G in G_by_state.items()
+            if np.isfinite(G)
+        })
+    return aligned_rows
+
+
+def _estimate_energy_sigmas(
+    union_states: list[str],
+    aligned_rows: list[dict[str, float]],
+    sigma_floor: float = 2.0,
+) -> NDArray[np.float64]:
+    """Estimate per-state free-energy uncertainty from aligned model spread."""
+
+    sigmas_by_state: dict[str, float] = {}
+    shared_sigmas = []
+
+    for state_str in union_states:
+        values = np.array([
+            G_by_state[state_str]
+            for G_by_state in aligned_rows
+            if state_str in G_by_state
+        ], dtype=np.float64)
+        if len(values) > 1:
+            sigma = float(np.std(values, ddof=1))
+            sigmas_by_state[state_str] = sigma
+            shared_sigmas.append(sigma)
+
+    sigma_missing = sigma_floor
+    if shared_sigmas:
+        sigma_missing = max(float(np.median(shared_sigmas)), sigma_floor)
+
+    for state_str in union_states:
+        if state_str not in sigmas_by_state:
+            sigmas_by_state[state_str] = sigma_missing
+
+    return np.array([sigmas_by_state[state_str] for state_str in union_states], dtype=np.float64)
+
+
+def _sample_state_freqs(
+    Gs: NDArray[np.float64],
+    Gs_sigmas: NDArray[np.float64] | None,
+    n_samples: int = 200,
+    seed: int = 1,
+) -> NDArray[np.float64] | None:
+    """Monte-Carlo sample populations from independent free-energy errors."""
+
+    if Gs_sigmas is None or n_samples < 2:
+        return None
+
+    sigmas = np.asarray(Gs_sigmas, dtype=np.float64)
+    if sigmas.shape != Gs.shape:
+        raise ValueError(f"Expected {len(Gs)} free-energy sigmas, got {len(sigmas)}.")
+
+    rng = np.random.default_rng(seed)
+    G_samples = rng.normal(loc=Gs, scale=sigmas, size=(n_samples, len(Gs)))
+    G_samples -= np.min(G_samples, axis=1, keepdims=True)
+    weights = np.exp(-G_samples)
+    return weights / np.sum(weights, axis=1, keepdims=True)
+
+
+def combine_expert_energies(
+    raw_dists: Sequence[RawMicrostateEnergies],
+    *,
+    index_space: ProtonationIndexSpace | None = None,
+    method: str = "product_of_experts",
+    weights: Sequence[float] | None = None,
+) -> RawMicrostateEnergies:
+    """Combine aligned raw free-energy predictions from multiple experts.
+
+    The first expert defines the admissible post-pruning state set. Later
+    experts contribute only for states also retained by that reference expert;
+    their exclusive states are ignored.
+    """
+
+    if not raw_dists:
+        raise ValueError("At least one raw distribution is required.")
+    if len(raw_dists) == 1:
+        raw = raw_dists[0]
+        if index_space is None or index_space is raw.index_space:
+            return raw
+        return RawMicrostateEnergies(
+            index_space=index_space,
+            pH=raw.pH,
+            state_strs=list(raw.state_strs),
+            state_vecs=list(raw.state_vecs),
+            Gs=np.asarray(raw.Gs, dtype=np.float64),
+            Gs_sigmas=None if raw.Gs_sigmas is None else np.asarray(raw.Gs_sigmas, dtype=np.float64),
+        )
+
+    reference = raw_dists[0]
+    pH = reference.pH
+    combined_indices = sorted({
+        idx
+        for raw in raw_dists
+        for idx in raw.index_space.indices
+    })
+    combined_q_options = np.zeros((len(combined_indices), 3), dtype=np.int64)
+    combined_q_options[:, 1] = 1
+    for raw in raw_dists:
+        for rel_idx, map_idx in enumerate(raw.index_space.indices):
+            combined_rel_idx = combined_indices.index(map_idx)
+            combined_q_options[combined_rel_idx] = np.maximum(
+                combined_q_options[combined_rel_idx],
+                raw.index_space.q_options[rel_idx],
+            )
+
+    if index_space is not None and index_space.indices == combined_indices:
+        combined_index_space = index_space
+    elif (
+        reference.index_space.indices == combined_indices
+        and np.array_equal(reference.index_space.q_options, combined_q_options)
+    ):
+        combined_index_space = reference.index_space
+    else:
+        combined_index_space = ProtonationIndexSpace(
+            indices=combined_indices,
+            q_options=combined_q_options,
+        )
+
+    G_by_state_rows: list[dict[str, float]] = []
+    state_sets: list[set[str]] = []
+    for raw in raw_dists:
+        if not np.isclose(raw.pH, pH):
+            raise ValueError("Expert raw distributions must use the same pH.")
+
+        state_map = {
+            state_str: "".join(
+                state_str[raw.index_space.indices.index(map_idx)]
+                if map_idx in raw.index_space.indices
+                else "1"
+                for map_idx in combined_indices
+            )
+            for state_str in raw.state_strs
+        }
+        G_by_state = {
+            state_map[state_str]: float(G) for state_str, G in zip(raw.state_strs, raw.Gs)
+        }
+        finite_states = {state_str for state_str, G in G_by_state.items() if np.isfinite(G)}
+        if not finite_states:
+            raise ValueError("Expert raw distribution contains no finite free energies.")
+        G_by_state_rows.append(G_by_state)
+        state_sets.append(finite_states)
+
+    reference_states = state_sets[0]
+    for row_idx in range(1, len(G_by_state_rows)):
+        G_by_state_rows[row_idx] = {
+            state_str: G
+            for state_str, G in G_by_state_rows[row_idx].items()
+            if state_str in reference_states
+        }
+        state_sets[row_idx] = set(G_by_state_rows[row_idx])
+
+    shared_states = set.intersection(*state_sets)
+    if not shared_states:
+        logger.info(
+            "Expert raw distributions do not share any finite microstate strings. "
+            "Falling back to the first model provided."
+        )
+        fallback_G_by_state = G_by_state_rows[0]
+        fallback_state_strs = [
+            state_str
+            for state_str in fallback_G_by_state
+            if state_str in state_sets[0]
+        ]
+        return RawMicrostateEnergies(
+            index_space=combined_index_space,
+            pH=pH,
+            state_strs=fallback_state_strs,
+            state_vecs=[unpack_vec(state_str) for state_str in fallback_state_strs],
+            Gs=np.array([fallback_G_by_state[state_str] for state_str in fallback_state_strs], dtype=np.float64),
+            Gs_sigmas=np.full(len(fallback_state_strs), 2.0, dtype=np.float64),
+        )
+
+    aligned_rows = _align_energy_rows(G_by_state_rows, shared_states)
+
+    combined_states = sorted(reference_states)
+    state_vec_by_str = {
+        state_str: unpack_vec(state_str)
+        for state_str in combined_states
+    }
+    Gs_sigmas = _estimate_energy_sigmas(combined_states, aligned_rows)
+
+    weights_arr = _normalized_weights(weights, len(raw_dists))
+
+    if method == "product_of_experts":
+        Gs_list = []
+        for state_str in combined_states:
+            available = [
+                row_idx for row_idx, G_by_state in enumerate(aligned_rows)
+                if state_str in G_by_state
+            ]
+            available_weights = weights_arr[available]
+            available_weights = available_weights / np.sum(available_weights)
+            Gs_list.append(float(np.sum([
+                available_weights[idx] * aligned_rows[row_idx][state_str]
+                for idx, row_idx in enumerate(available)
+            ])))
+        Gs = np.array(Gs_list, dtype=np.float64)
+    elif method == "mixture_of_experts":
+        pops_rows = []
+        for G_by_state in aligned_rows:
+            state_strs = list(G_by_state)
+            pops = calc_populations(np.array([G_by_state[state_str] for state_str in state_strs], dtype=np.float64))
+            pops_rows.append(dict(zip(state_strs, pops)))
+        pops_matrix = np.array([
+            [pops_by_state.get(state_str, 0.0) for state_str in combined_states]
+            for pops_by_state in pops_rows
+        ], dtype=np.float64)
+        mixed_pops = np.sum(weights_arr[:, None] * pops_matrix, axis=0)
+        positive = mixed_pops > 0.0
+        if not np.any(positive):
+            raise ValueError("Mixture of experts produced no positive populations.")
+        Gs = np.full_like(mixed_pops, np.inf, dtype=np.float64)
+        Gs[positive] = -np.log(mixed_pops[positive])
+    else:
+        raise ValueError("expert_combination must be 'product_of_experts' or 'mixture_of_experts'.")
+
+    finite = np.isfinite(Gs)
+    if not np.any(finite):
+        raise ValueError("Combined expert distribution contains no finite free energies.")
+    Gs -= np.min(Gs[finite])
+
+    return RawMicrostateEnergies(
+        index_space=combined_index_space,
+        pH=pH,
+        state_strs=combined_states,
+        state_vecs=[state_vec_by_str[state_str] for state_str in combined_states],
+        Gs=Gs,
+        Gs_sigmas=Gs_sigmas,
     )
 
 def mol2hash(mol: Mol) -> str:
@@ -730,6 +1100,42 @@ def combine_pkas_macro(
     return pkas_combined
 
 
+def combine_pkas_macro_sigmas(
+    pHs: NDArray[np.float64],
+    freqs_macro_samples_all: list[dict[int, NDArray[np.float64]]],
+) -> dict[int, float]:
+    """Estimate macro-pKa uncertainty from sampled macrostate frequencies."""
+
+    if not freqs_macro_samples_all:
+        return {}
+
+    n_samples = 0
+    for freqs_macro_samples in freqs_macro_samples_all:
+        if freqs_macro_samples:
+            n_samples = len(next(iter(freqs_macro_samples.values())))
+            break
+    if n_samples < 2:
+        return {}
+
+    pkas_by_q: dict[int, list[float]] = {}
+    for sample_idx in range(n_samples):
+        freqs_macro_all = [
+            {
+                q: float(freq_samples[sample_idx])
+                for q, freq_samples in freqs_macro_samples.items()
+            }
+            for freqs_macro_samples in freqs_macro_samples_all
+        ]
+        for q, pka in combine_pkas_macro(pHs, freqs_macro_all).items():
+            pkas_by_q.setdefault(q, []).append(pka)
+
+    return {
+        q: float(np.std(pkas, ddof=1))
+        for q, pkas in pkas_by_q.items()
+        if len(pkas) > 1
+    }
+
+
 ###########
 
 
@@ -746,10 +1152,13 @@ class pKasso:
         Optional configuration parameters. Supported keys include:
 
         Pipeline parameters:
-            name, cutoff_states, device,
-            pka_predictor_cls,
-            sfreq_cutoff_individual, sfreq_cutoff_combined,
-            matrix_def, cutoff_export
+            name, cutoff_states, model,
+            free_energy_cutoff_individual, free_energy_cutoff_combined,
+            expert_combination, expert_weights,
+            matrix_def, cutoff_export, output_molecules_from_scan, nthreads
+
+        ``model`` is an ordered mapping from predictor names to their options,
+        for example ``{"molgpka": {}, "unipka": {"gpu": True}}``.
 
     """
 
@@ -758,14 +1167,16 @@ class pKasso:
 
     # Internal options
     cutoff_states: int = 200
-    sfreq_cutoff_individual: float = 0.01
+    free_energy_cutoff_individual: float = 10.
     max_states_individual: int = 20
-    sfreq_cutoff_combined: float = 0.01
+    free_energy_cutoff_combined: float = 10.
     max_states_combined: int = 20
-    cutoff_export: float = 1.0
+    cutoff_export: float = 0.2
+    output_molecules_from_scan: bool = True
     matrix_def: str = "dG"
-    device: str = "cpu"  # fixed!
-    pka_predictor_cls: type[Predictor] = MolgpkaPredictor
+    model: ModelInput = field(default_factory=lambda: {"molgpka": {}})
+    expert_combination: str = "product_of_experts"
+    expert_weights: Sequence[float] | None = None
     tautomer_search: bool = True
     max_tautomers: int = 20
     num_confs: int = 10
@@ -773,13 +1184,162 @@ class pKasso:
     max_cut_edges: int = 1
     strip_fragments: bool = True
     score_window: int = 0
-    num_threads: int = 1
+    nthreads: int = 0
     fragment_warning_heavy_atoms: int = 6
+    resolved_predictors: tuple[ResolvedPredictor, ...] = field(init=False, repr=False)
 
-    def pka_predictor(self, mol: Mol) -> Predictor:
+    def __post_init__(self) -> None:
+        configure_torch_threads(self.nthreads)
+        self.resolved_predictors = resolve_models(self.model, nthreads=self.nthreads)
+
+    def model_classes(self) -> tuple[type[Predictor], ...]:
+        """Return the configured model classes in evaluation order."""
+
+        return tuple(resolved.predictor_cls for resolved in self.resolved_predictors)
+
+    def primary_predictor_cls(self) -> type[Predictor]:
+        """Return the model used for setup and the first raw-energy pass."""
+
+        return self.model_classes()[0]
+
+    def primary_predictor_config(self) -> object | None:
+        """Return the resolved configuration for the primary model."""
+
+        return self.resolved_predictors[0].config
+
+    def pka_predictor(
+        self,
+        mol: Mol,
+        context: PredictorContext | None = None,
+        *,
+        source_mol: Mol | None = None,
+    ) -> Predictor:
         """Create the configured molecule-specific pKa predictor."""
 
-        return self.pka_predictor_cls(mol, device=self.device)
+        predictor_cls = context.predictor_cls if context is not None else self.primary_predictor_cls()
+        predictor = predictor_cls(mol)
+        if source_mol is not None:
+            predictor.source_mol = source_mol
+        return predictor
+
+    def uses_standard_free_energies(self, context: PredictorContext | None = None) -> bool:
+        """Return whether this run should use direct microstate free energies."""
+
+        return self.thermodynamic_prediction_mode(context) == "standard_free_energy"
+
+    def thermodynamic_prediction_mode(
+        self,
+        context: PredictorContext | None = None,
+    ) -> ThermodynamicPredictionMode:
+        """Return the thermodynamic model route selected for this run."""
+
+        predictor_cls = context.predictor_cls if context is not None else self.primary_predictor_cls()
+        mode = getattr(predictor_cls, "thermodynamic_prediction", None)
+        if mode not in ("pka", "standard_free_energy"):
+            raise ValueError(
+                "Predictor classes must define thermodynamic_prediction as "
+                "'pka' or 'standard_free_energy'."
+            )
+        return cast(ThermodynamicPredictionMode, mode)
+    
+    def opposite_charge_influence_mode(self, context: PredictorContext | None = None) -> bool:
+        predictor_cls = context.predictor_cls if context is not None else self.primary_predictor_cls()
+        mode = getattr(predictor_cls, "opposite_charge_influence", True)
+        return mode
+
+    def molgpka_prediction_mode(self, context: PredictorContext | None = None) -> bool:
+        """Return whether the current predictor context uses MolGpKa."""
+
+        predictor_cls = context.predictor_cls if context is not None else self.primary_predictor_cls()
+        return issubclass(predictor_cls, MolgpkaPredictor)
+
+    def phosphate_relative_clusters(self, indices0: list[int]) -> list[list[int]]:
+        """Return phosphate OH groups as relative site indices in ``indices0``."""
+
+        if not hasattr(self, "mol0"):
+            return []
+
+        _, phosphate_groups = special_cases.has_phosphate(self.mol0)
+        phosphate_clusters: list[list[int]] = []
+
+        for oh_map_ids in phosphate_groups.values():
+            phosphate_rel_indices = sorted(
+                {
+                    indices0.index(oh_map_idx)
+                    for oh_map_idx in oh_map_ids
+                    if oh_map_idx in indices0
+                }
+            )
+            if phosphate_rel_indices:
+                phosphate_clusters.append(phosphate_rel_indices)
+
+        return phosphate_clusters
+
+    def decouple_phosphate_clusters(
+        self,
+        clusters: list[list[int]],
+        phosphate_clusters: list[list[int]],
+    ) -> list[list[int]]:
+        """Extract phosphate OH sites from existing clusters into phosphate-only clusters."""
+
+        if not phosphate_clusters:
+            return clusters
+
+        phosphate_rel_indices = {
+            rel_idx
+            for phosphate_cluster in phosphate_clusters
+            for rel_idx in phosphate_cluster
+        }
+
+        decoupled_clusters = []
+        for cluster in clusters:
+            non_phosphate_cluster = [
+                rel_idx
+                for rel_idx in cluster
+                if rel_idx not in phosphate_rel_indices
+            ]
+            if non_phosphate_cluster:
+                decoupled_clusters.append(non_phosphate_cluster)
+
+        decoupled_clusters.extend(phosphate_clusters)
+        return sorted(decoupled_clusters, key=lambda cluster: cluster[0])
+
+    def standard_free_energy_target_mean(
+        self,
+        context: PredictorContext | None = None,
+    ) -> float:
+        """Return the target-mean offset declared by a free-energy predictor."""
+
+        predictor_cls = context.predictor_cls if context is not None else self.primary_predictor_cls()
+        target_mean = predictor_cls.standard_free_energy_target_mean
+        if target_mean is None:
+            raise ValueError(
+                f"{predictor_cls.__name__} must define standard_free_energy_target_mean."
+            )
+        return float(target_mean)
+
+    def predict_standard_free_energy_values(
+        self,
+        mols: list[Mol],
+        context: PredictorContext | None = None,
+    ) -> list[float]:
+        """Predict ordered standard free energies for a batch of microstate mols."""
+
+        if not mols:
+            return []
+
+        if context is None:
+            predictor_cls = self.primary_predictor_cls()
+            predictor_config = self.primary_predictor_config()
+        else:
+            predictor_cls = context.predictor_cls
+            predictor_config = context.predictor_config
+        result = predictor_cls.predict_standard_free_energies(
+            mols,
+            config=predictor_config,
+        )
+
+        return _coerce_standard_free_energy_values(result, len(mols))
 
     def run_single(self, pH: float = 7.0) -> Molecule:
         """
@@ -792,8 +1352,8 @@ class pKasso:
 
         self.pH = pH
         self._setup()
-        distribution = self._calc_microstates(self.pH)
-        molecule = self.prep_single_output(distribution)
+        dist = self._calc_microstates(self.pH)
+        molecule = self.prep_single_output(dist)
         return molecule
 
     def run_scan(
@@ -824,7 +1384,6 @@ class pKasso:
         """
 
         self.initialize_paths_models_libs()
-
         self.mol0, self.smiles0 = preprocess(
             self.smiles,
             tautomer_search=self.tautomer_search,
@@ -832,76 +1391,212 @@ class pKasso:
             num_confs=self.num_confs,
             strip_fragments=self.strip_fragments,
             score_window=self.score_window,
-            num_threads=self.num_threads,
+            num_threads=self.nthreads,
             min_fragment_heavy_atoms=self.fragment_warning_heavy_atoms
         )
 
         self.charged_indices = special_cases.find_charged(self.mol0)
-        pka_predictor = self.pka_predictor(self.mol0)
-        self.exclude_base_indices, self.exclude_acid_indices = pka_predictor.exclude_sites()
 
         logger.debug("Processed SMILES:")
         logger.debug(self.smiles0)
-        logger.debug(f"Exclude base indices: {self.exclude_base_indices}")
-        logger.debug(f"Exclude acid indices: {self.exclude_acid_indices}")
 
-        self.acid0 = pka_predictor.pred_acid()  # returns pkas for map indices
-        self.base0 = pka_predictor.pred_base()  # returns pkas for map indices
+        self.predictor_contexts = [
+            self._setup_predictor_context(resolved)
+            for resolved in self.resolved_predictors
+        ]
+        self.primary_context = self.predictor_contexts[0]
+        self._bind_combined_context_space()
 
-        if len(self.acid0) + len(self.base0) > self.total_max_sites:
-            logger.warning(f'Molecule has >{self.total_max_sites} protonation sites. Returning processed input molecule.')
-            # raise ValueError(f'Molecule must contain <={self.total_max_sites} protonation sites.')
-            self.indices0: list[int] = []
-            self.q_options0: NDArray[np.int64] = np.array([])
-        else:
-            self.indices0, self.q_options0 = find_candidate_sites(
-                self.base0, self.acid0, self.exclude_base_indices, self.exclude_acid_indices, self.charged_indices
+    def _setup_predictor_context(self, resolved: ResolvedPredictor) -> PredictorContext:
+        """Create model-specific site, cluster, and cache state."""
+
+        predictor_cls = resolved.predictor_cls
+        context = PredictorContext(
+            predictor_cls=predictor_cls,
+            predictor_config=resolved.config,
+        )
+        pka_predictor = self.pka_predictor(self.mol0, context)
+        context.exclude_base_indices, context.exclude_acid_indices = pka_predictor.exclude_sites()
+
+        logger.debug(f"Predictor: {predictor_cls.__name__}")
+        logger.debug(f"Exclude base indices: {context.exclude_base_indices}")
+        logger.debug(f"Exclude acid indices: {context.exclude_acid_indices}")
+
+        context.acid_map_ids = pka_predictor.pred_acid_ids()
+        context.base_map_ids = pka_predictor.pred_base_ids()
+        context.acid0 = pka_predictor.pred_acid()
+        context.base0 = pka_predictor.pred_base()
+
+        n_candidate_sites = len(set(context.acid_map_ids + context.base_map_ids))
+        if n_candidate_sites > self.total_max_sites:
+            logger.warning(
+                f"Molecule has >{self.total_max_sites} protonation sites. "
+                "Returning processed input molecule."
             )
+            context.indices0 = []
+            context.q_options0 = np.empty((0, 3), dtype=np.int64)
+        else:
+            context.indices0, context.q_options0 = find_candidate_sites(
+                context.base_map_ids,
+                context.acid_map_ids,
+                context.exclude_base_indices,
+                context.exclude_acid_indices,
+                self.charged_indices,
+            )
+        context.index_space0 = context.index_spaces.get_or_create(
+            context.indices0,
+            context.q_options0,
+        )
+        context.clusters = self.screen_clusters(
+            context.indices0,
+            context.q_options0,
+            context=context,
+        )
+        context.cluster_spaces = [
+            context.index_spaces.get_or_create(
+                [context.indices0[c] for c in cluster],
+                context.q_options0[cluster],
+            )
+            for cluster in context.clusters
+        ]
+        logger.debug(f"Clusters: {context.clusters}")
+        return context
 
+    def _bind_combined_context_space(self) -> None:
+        """Expose the pH-independent union space through legacy attributes."""
+
+        combined_indices = sorted({
+            idx
+            for context in self.predictor_contexts
+            for idx in context.indices0
+        })
+        combined_q_options = np.zeros((len(combined_indices), 3), dtype=np.int64)
+        combined_q_options[:, 1] = 1
+        for context in self.predictor_contexts:
+            if context.q_options0 is None:
+                raise ValueError("Predictor context is incomplete.")
+            for rel_idx, map_idx in enumerate(context.indices0):
+                combined_rel_idx = combined_indices.index(map_idx)
+                combined_q_options[combined_rel_idx] = np.maximum(
+                    combined_q_options[combined_rel_idx],
+                    context.q_options0[rel_idx],
+                )
+
+        self.index_spaces = IndexSpaceRegistry()
+        self.indices0 = combined_indices
+        self.q_options0 = combined_q_options
         self.indices0_str = pack_indices(self.indices0)
         self.index_space0 = self.index_spaces.get_or_create(self.indices0, self.q_options0)
 
-        # Screen coupling between residues, now pH independent
-        self.clusters = self.screen_clusters(self.indices0, self.q_options0)
-        self.cluster_spaces = [
-            self.index_spaces.get_or_create(
-                [self.indices0[c] for c in cluster],
-                self.q_options0[cluster],
-            )
-            for cluster in self.clusters
-        ]
-        logger.debug(f"Clusters: {self.clusters}")
+        self.exclude_base_indices = self.primary_context.exclude_base_indices
+        self.exclude_acid_indices = self.primary_context.exclude_acid_indices
+        self.acid_map_ids = self.primary_context.acid_map_ids
+        self.base_map_ids = self.primary_context.base_map_ids
+        self.acid0 = self.primary_context.acid0
+        self.base0 = self.primary_context.base0
+        self.clusters = self.primary_context.clusters
+        self.cluster_spaces = self.primary_context.cluster_spaces
 
-    def _calc_microstates(self, pH: float) -> MicrostateDistribution:
-        """Calc microstate frequencies given a pH value"""
+    def _calc_microstates_raw_for_context(
+        self,
+        context: PredictorContext,
+        pH: float,
+    ) -> RawMicrostateEnergies:
+        """Calculate raw microstate free energies for one predictor context."""
 
         # indices0_curated, q_options0 = self.calc_curated_indices(pH)
 
-        cluster_dists: list[MicrostateDistribution] = []
+        cluster_dists: list[RawMicrostateEnergies] = []
 
-        for cluster_space in self.cluster_spaces:
-            cluster_dists.append(self.process_cluster(cluster_space, pH, 
-                                                      sfreq_cutoff_individual=self.sfreq_cutoff_individual,
-                                                      max_states_individual=self.max_states_individual))
+        for cluster_space in context.cluster_spaces:
+            cluster_dists.append(
+                self.process_cluster(
+                    cluster_space,
+                    pH,
+                    free_energy_cutoff_individual=self.free_energy_cutoff_individual,
+                    max_states_individual=self.max_states_individual,
+                    context=context,
+                )
+            )
 
-        # Combine clusters and their frequencies
-        dist = combine_cluster_distributions(
+        if context.index_space0 is None:
+            raise ValueError("Predictor context is missing the full index space.")
+        context.dist_raw = combine_cluster_distributions(
             cluster_dists,
-            self.index_space0,
+            context.index_space0,
             pH,
-            sfreq_cutoff_combined=self.sfreq_cutoff_combined,
+            free_energy_cutoff_combined=self.free_energy_cutoff_combined,
             max_states_combined=self.max_states_combined,
+        )
+        return context.dist_raw
+
+    def _calc_microstates_raw(self, pH: float) -> list[RawMicrostateEnergies]:
+        """Calculate one raw microstate free-energy distribution per model."""
+
+        return [
+            self._calc_microstates_raw_for_context(context, pH)
+            for context in self.predictor_contexts
+        ]
+
+    def _finalize_microstates(
+        self,
+        raw: RawMicrostateEnergies | Sequence[RawMicrostateEnergies],
+    ) -> MicrostateDistribution:
+        """Convert raw free energies to final populations and macro properties."""
+
+        raw_dists = [raw] if isinstance(raw, RawMicrostateEnergies) else list(raw)
+        if not raw_dists:
+            raise ValueError("At least one raw distribution is required.")
+        index_space = getattr(self, "index_space0", raw_dists[0].index_space)
+        raw_combined = combine_expert_energies(
+            raw_dists,
+            index_space=index_space,
+            method=self.expert_combination,
+            weights=self.expert_weights,
+        )
+
+        Gs = np.asarray(raw_combined.Gs, dtype=np.float64)
+        finite = np.isfinite(Gs)
+        if not np.any(finite):
+            raise ValueError("Raw microstate distribution contains no finite free energies.")
+        Gs = Gs - np.min(Gs[finite])
+        state_freqs = calc_populations(Gs)
+        Gs_sigmas = (
+            None
+            if raw_combined.Gs_sigmas is None
+            else np.asarray(raw_combined.Gs_sigmas, dtype=np.float64)
+        )
+        state_freq_samples = _sample_state_freqs(
+            Gs,
+            Gs_sigmas,
+        )
+        state_freqs_sigmas = (
+            None
+            if state_freq_samples is None
+            else np.std(state_freq_samples, axis=0, ddof=1)
+        )
+
+        dist = MicrostateDistribution(
+            index_space=raw_combined.index_space,
+            pH=raw_combined.pH,
+            state_strs=list(raw_combined.state_strs),
+            state_vecs=list(raw_combined.state_vecs),
+            Gs=Gs,
+            state_freqs=state_freqs,
+            Gs_sigmas=Gs_sigmas,
+            state_freqs_sigmas=state_freqs_sigmas,
+            state_freq_samples=state_freq_samples,
         )
 
         self.construct_mols(dist.index_space, dist.state_strs, dist.state_vecs)
-
-        # Symmetry (combine frequencies for chemically identical microstates)
         dist.apply_symmetry()
-
-        # Macro-pka properties from combined microstates
         dist.assign_macro_props()
-
         return dist
+
+    def _calc_microstates(self, pH: float) -> MicrostateDistribution:
+        """Calculate finalized microstate frequencies for one pH value."""
+
+        return self._finalize_microstates(self._calc_microstates_raw(pH))
 
     def _scan_pH(self, pHs: NDArray[np.float64]) -> PHScanDistribution:
         """
@@ -911,38 +1606,57 @@ class pKasso:
 
         - Identifies curated candidate titration sites
         - Screens residue coupling and builds clusters of coupled sites
-        - Processes each cluster to generate microstates and frequencies
-        - Optionally injects phosphate-specific clusters
-        - Combines cluster results into global state distributions
-        - Applies symmetry reduction
-        - Computes macrostate properties (net charge and macro-pKa data)
+        - Runs the finalized single-pH microstate calculation
+        - Collects macrostate properties (net charge and macro-pKa data)
         - Stores results for later visualization
-        - Optionally exports pH-specific outputs
         """
 
         net_charges: list[float] = []
+        net_charge_sigmas: list[float] = []
         state_freqs_all: dict[str, NDArray[np.float64]] = {}
+        state_freqs_sigmas_all: dict[str, NDArray[np.float64]] = {}
         freqs_macro_all: list[dict[int, float]] = []
+        freqs_macro_samples_all: list[dict[int, NDArray[np.float64]]] = []
+        molecules: dict[float, Molecule] = {}
 
         for pH_idx, pH in enumerate(pHs.flat):
             distribution = self._calc_microstates(float(pH))
+            if self.output_molecules_from_scan:
+                molecules[float(pH)] = self.prep_single_output(distribution)
 
             if distribution.net_charge is None or distribution.freqs_macro is None:
                 raise ValueError("Microstate distribution is missing macro properties.")
             net_charges.append(distribution.net_charge)
+            net_charge_sigmas.append(0.0 if distribution.net_charge_sigma is None else distribution.net_charge_sigma)
             freqs_macro_all.append(distribution.freqs_macro)
+            freqs_macro_samples_all.append(distribution.freqs_macro_samples or {})
 
             # Add to results for pH scan
-            for state_str, state_freq in zip(distribution.state_strs, distribution.state_freqs):
+            state_freqs_sigmas = (
+                np.zeros(len(distribution.state_freqs), dtype=np.float64)
+                if distribution.state_freqs_sigmas is None
+                else np.asarray(distribution.state_freqs_sigmas, dtype=np.float64)
+            )
+            for state_str, state_freq, state_freq_sigma in zip(
+                distribution.state_strs,
+                distribution.state_freqs,
+                state_freqs_sigmas,
+            ):
                 if state_str not in state_freqs_all:
                     state_freqs_all[state_str] = np.zeros(len(pHs))
+                    state_freqs_sigmas_all[state_str] = np.zeros(len(pHs))
                 state_freqs_all[state_str][pH_idx] = state_freq
+                state_freqs_sigmas_all[state_str][pH_idx] = state_freq_sigma
 
         return PHScanDistribution(
             pHs=pHs,
             net_charges=net_charges,
+            net_charge_sigmas=net_charge_sigmas,
             state_freqs_all=state_freqs_all,
+            state_freqs_sigmas_all=state_freqs_sigmas_all,
             freqs_macro_all=freqs_macro_all,
+            freqs_macro_samples_all=freqs_macro_samples_all,
+            molecules=molecules,
         )
 
     def _finalize_scan(self, distribution: PHScanDistribution) -> Scan:
@@ -960,21 +1674,33 @@ class pKasso:
             np.round(np.array(distribution.net_charges), decimals=4),
             dtype=np.float64,
         )
+        net_charge_sigmas = np.array(distribution.net_charge_sigmas, dtype=np.float64)
 
         pkas_macro = combine_pkas_macro(distribution.pHs, distribution.freqs_macro_all)
+        pkas_macro_sigmas = combine_pkas_macro_sigmas(
+            distribution.pHs,
+            distribution.freqs_macro_samples_all,
+        )
 
         state_strs_relevant: list[str] = []
         sfreqs_relevant: list[NDArray[np.float64]] = []
+        sfreqs_relevant_sigmas: list[NDArray[np.float64]] = []
         mols_relevant: list[Mol] = []
         sfreqs_not_relevant: list[NDArray[np.float64]] = []
+        sfreqs_not_relevant_sigmas: list[NDArray[np.float64]] = []
 
         if distribution.state_freqs_all:
             (
                 state_strs_relevant,
                 sfreqs_relevant,
+                sfreqs_relevant_sigmas,
                 mols_relevant,
                 sfreqs_not_relevant,
-            ) = self.calc_relevant_states(distribution.state_freqs_all)
+                sfreqs_not_relevant_sigmas,
+            ) = self.calc_relevant_states(
+                distribution.state_freqs_all,
+                distribution.state_freqs_sigmas_all,
+            )
 
         return Scan(
             self.name,
@@ -982,46 +1708,62 @@ class pKasso:
             state_strs_relevant,
             mols_relevant,
             sfreqs_relevant,
+            sfreqs_relevant_sigmas,
             distribution.pHs,
             net_charges,
+            net_charge_sigmas,
             sfreqs_not_relevant,
+            sfreqs_not_relevant_sigmas,
             pkas_macro,
+            pkas_macro_sigmas,
+            molecules=distribution.molecules,
         )
 
     def calc_relevant_states(
         self,
         state_freqs_all: dict[str, NDArray[np.float64]],
+        state_freqs_sigmas_all: dict[str, NDArray[np.float64]] | None = None,
         max_states: int = 18,
     ) -> tuple[
         list[str],
         list[NDArray[np.float64]],
+        list[NDArray[np.float64]],
         list[Mol],
+        list[NDArray[np.float64]],
         list[NDArray[np.float64]],
     ]:
         """Reduce number of states to max_states for plotting."""
 
         cutoff = 0.01
+        if state_freqs_sigmas_all is None:
+            state_freqs_sigmas_all = {
+                state_str: np.zeros_like(sfreqs, dtype=np.float64)
+                for state_str, sfreqs in state_freqs_all.items()
+            }
 
         while True:
             state_strs_relevant: list[str] = []
             sfreqs_relevant: list[NDArray[np.float64]] = []
+            sfreqs_relevant_sigmas: list[NDArray[np.float64]] = []
             sfreqs_not_relevant: list[NDArray[np.float64]] = []
+            sfreqs_not_relevant_sigmas: list[NDArray[np.float64]] = []
             mols_relevant: list[Mol] = []
             pH_argmaxs: list[int] = []
 
             for state_str, sfreqs in state_freqs_all.items():
                 mol = self.index_space0.mols_lib[state_str]
-                mol.SetProp("_Name", state_str_to_q(state_str))
                 for atom in mol.GetAtoms():
                     atom.SetAtomMapNum(0)
 
                 if np.max(sfreqs) > cutoff:
                     state_strs_relevant.append(state_str)
                     sfreqs_relevant.append(sfreqs)
+                    sfreqs_relevant_sigmas.append(state_freqs_sigmas_all[state_str])
                     mols_relevant.append(mol)
                     pH_argmaxs.append(int(np.argmax(sfreqs)))
                 else:
                     sfreqs_not_relevant.append(sfreqs)
+                    sfreqs_not_relevant_sigmas.append(state_freqs_sigmas_all[state_str])
 
             N_relevant_states = len(state_strs_relevant)
             if N_relevant_states <= max_states:
@@ -1030,13 +1772,20 @@ class pKasso:
             cutoff += 0.02
 
         ps: list[int] = [int(p) for p in np.argsort(pH_argmaxs)]
+        mols_relevant = [mols_relevant[p] for p in ps]
+        for idx, mol in enumerate(mols_relevant, start=1):
+            q = Chem.GetFormalCharge(mol)
+            qstr = f"{q:+d}"
+            mol.SetProp("_Name", f"{idx} ({qstr})")
 
         logger.debug(f"Final N relevant states: {N_relevant_states} with cutoff {cutoff}")
         return (
             [state_strs_relevant[p] for p in ps],
             [sfreqs_relevant[p] for p in ps],
-            [mols_relevant[p] for p in ps],
+            [sfreqs_relevant_sigmas[p] for p in ps],
+            mols_relevant,
             sfreqs_not_relevant,
+            sfreqs_not_relevant_sigmas,
         )
 
     #########################
@@ -1047,15 +1796,17 @@ class pKasso:
         """
 
         self.index_spaces = IndexSpaceRegistry()
+        self.predictor_contexts = []
 
     def process_cluster(
         self,
         space: ProtonationIndexSpace,
         pH: float,
-        sfreq_cutoff_individual: float = 0.01,
+        free_energy_cutoff_individual: float = 7.0,
         max_states_individual: int = 100,
+        context: PredictorContext | None = None,
 
-    ) -> MicrostateDistribution:
+    ) -> RawMicrostateEnergies:
         """
         Generate and evaluate microstates for a single protonation cluster at a given pH value.
 
@@ -1068,8 +1819,8 @@ class pKasso:
 
         Returns
         -------
-        microstate_distribution
-            pH-dependent microstate distribution for this cluster.
+        microstate_energies
+            pH-dependent raw microstate free energies for this cluster.
         """
 
         state_vecs = construct_state_vectors(space.q_options, self.cutoff_states)
@@ -1077,51 +1828,66 @@ class pKasso:
         state_strs = utils.calc_state_strs(state_vecs)
 
         self.construct_mols(space, state_strs, state_vecs)
-        self.run_acid_base_calcs(space, state_strs, state_vecs)
 
-        ps_all = calc_state_diffs(
-            state_strs,
-            state_vecs,
-            space.indices,
-            space.base_lib,
-            space.acid_lib,
-            pH=pH,
-            matrix_def=self.matrix_def,
-        )
-
-        state_strs, state_freqs = calc_freqs_from_states(
-            state_strs,
-            state_vecs,
-            ps_all,
-            self.matrix_def,
-        )
+        if self.uses_standard_free_energies(context):
+            self.run_standard_free_energy_calcs(space, state_strs, context)
+            standard_free_energies = np.array(
+                [space.standard_free_energy_lib[state_str] for state_str in state_strs],
+                dtype=np.float64,
+            )
+            Gs = calc_state_pH_dependent_free_energies(
+                standard_free_energies,
+                state_vecs,
+                pH,
+                self.standard_free_energy_target_mean(context),
+            )
+            Gs -= np.min(Gs)
+        else:
+            self.run_acid_base_calcs(space, state_strs, state_vecs, context)
+            
+            ps_all = calc_state_diffs(
+                state_strs,
+                state_vecs,
+                space.indices,
+                space.base_lib,
+                space.acid_lib,
+                pH=pH,
+                matrix_def=self.matrix_def,
+            )
+            
+            state_strs, Gs = calc_freqs_from_states(
+                state_strs,
+                state_vecs,
+                ps_all,
+                self.matrix_def,
+            )
 
         # Cull
 
-        ps = np.argsort(state_freqs)[::-1]
+        ps = np.argsort(Gs)
         state_strs = [state_strs[p] for p in ps][:max_states_individual]
-        state_freqs = state_freqs[ps][:max_states_individual]
+        Gs = Gs[ps][:max_states_individual]
 
-        max_state_freqs = np.max(state_freqs)
+        min_G = np.min(Gs)
 
         state_strs_list = []
-        state_freqs_list = []
+        Gs_list = []
 
-        for state_str, state_freq in zip(state_strs, state_freqs):
-            if (state_freq / max_state_freqs) >= sfreq_cutoff_individual:
+        for state_str, G in zip(state_strs, Gs):
+            if (G - min_G) <= free_energy_cutoff_individual:
                 state_strs_list.append(state_str)
-                state_freqs_list.append(state_freq)
+                Gs_list.append(G)
 
         state_strs = state_strs_list
-        state_freqs = np.array(state_freqs_list)
+        Gs = np.array(Gs_list)
 
         state_vecs = [unpack_vec(state_str) for state_str in state_strs]
-        return MicrostateDistribution(
+        return RawMicrostateEnergies(
             index_space=space,
             pH=pH,
             state_strs=state_strs,
             state_vecs=state_vecs,
-            state_freqs=state_freqs,
+            Gs=Gs,
         )
 
     #########################
@@ -1130,6 +1896,8 @@ class pKasso:
         self,
         indices: list[int],
         q_options: NDArray[np.int64],
+        standard_free_energy_lib: dict[str, float] | None = None,
+        context: PredictorContext | None = None,
     ) -> NDArray[np.float64]:
         """
         Perform pairwise pKa sensitivity analysis and return raw coupling weights.
@@ -1156,17 +1924,49 @@ class pKasso:
             Square matrix containing max acid/base pKa differences between sites.
         """
 
-        space = self.index_spaces.get_or_create(indices, q_options)
+        index_spaces = context.index_spaces if context is not None else self.index_spaces
+        space = index_spaces.get_or_create(indices, q_options)
 
+        if standard_free_energy_lib is not None:
+            space.standard_free_energy_lib.update(standard_free_energy_lib)
+
+        if self.uses_standard_free_energies(context) or space.standard_free_energy_lib:
+            state_vecs_screen = coupling.construct_state_vectors_coupling(indices, q_options)
+            state_strs_screen = utils.calc_state_strs(state_vecs_screen)
+            self.construct_mols(space, state_strs_screen, state_vecs_screen)
+
+            if self.uses_standard_free_energies(context):
+                self.run_standard_free_energy_calcs(space, state_strs_screen, context)
+
+            state_vecs = coupling.construct_state_vectors_single(indices, q_options)
+            state_strs = utils.calc_state_strs(state_vecs)
+            state_str0 = state_strs[0]  # Neutral state
+            free_energy_diffs = {}
+            for state_str1 in state_strs[1:]:
+                free_energy_diffs[state_str1] = coupling.compare_free_energies(
+                    indices,
+                    q_options,
+                    state_str0,
+                    state_str1,
+                    space.standard_free_energy_lib,
+                )
+
+            return coupling.construct_free_energy_coupling_weight_matrix(
+                indices,
+                state_strs,
+                state_vecs,
+                free_energy_diffs,
+            )
+
+        # Compare pKas if molgpka (no standard free energies directly)
         state_vecs = coupling.construct_state_vectors_single(indices, q_options)
         state_strs = utils.calc_state_strs(state_vecs)
-
         self.construct_mols(space, state_strs, state_vecs)
-        self.run_acid_base_calcs(space, state_strs, state_vecs)
+        self.run_acid_base_calcs(space, state_strs, state_vecs, context)
 
-        state_str0 = state_strs[0]  # Neutral state
         base_pka_diffs = {}
         acid_pka_diffs = {}
+        state_str0 = state_strs[0]  # Neutral state
         for state_str1 in state_strs[1:]:
             base_pka_diffs[state_str1], acid_pka_diffs[state_str1] = coupling.compare_pkas(
                 indices, q_options, state_str0, state_str1, space.base_lib, space.acid_lib
@@ -1261,7 +2061,12 @@ class pKasso:
             max_cut_edges=max_cut_edges
         )
 
-    def screen_clusters(self, indices0: list[int], q_options0: NDArray[np.int64]) -> list[list[int]]:
+    def screen_clusters(
+        self,
+        indices0: list[int],
+        q_options0: NDArray[np.int64],
+        context: PredictorContext | None = None,
+    ) -> list[list[int]]:
         """
         Determine stable pKa coupling clusters using adaptive thresholding.
 
@@ -1291,8 +2096,19 @@ class pKasso:
             Final set of stable coupling clusters.
         """
 
+        phosphate_clusters = (
+            self.phosphate_relative_clusters(indices0)
+            if self.molgpka_prediction_mode(context)
+            else []
+        )
+
+        if count_state_combinations(q_options0) <= self.cutoff_states and not phosphate_clusters:
+            if len(indices0) == 0:
+                return []
+            return [list(range(len(indices0)))]
+
         coupling_cutoff = 0.1
-        coupling_weights = self.coupling_assay_weights(indices0, q_options0)
+        coupling_weights = self.coupling_assay_weights(indices0, q_options0, context=context)
         graph = coupling.coupling_weights_to_graph(coupling_weights, coupling_cutoff)
         clusters = [sorted(component) for component in nx.connected_components(graph)]
 
@@ -1307,7 +2123,7 @@ class pKasso:
                     max_cut_edges=self.max_cut_edges
                 )
             )
-        return split_clusters
+        return self.decouple_phosphate_clusters(split_clusters, phosphate_clusters)
 
     def construct_mols(
         self,
@@ -1345,6 +2161,28 @@ class pKasso:
                 space.mols_lib[state_str] = mol_cand
 
     ###################################
+    # Standard free energy calculation
+
+    def run_standard_free_energy_calcs(
+        self,
+        space: ProtonationIndexSpace,
+        state_strs: list[str],
+        context: PredictorContext | None = None,
+    ) -> None:
+        """Compute and cache Uni-pKa standard free energies for microstates."""
+
+        missing_state_strs = [
+            state_str for state_str in state_strs if state_str not in space.standard_free_energy_lib
+        ]
+        if not missing_state_strs:
+            return
+
+        mols = [space.mols_lib[state_str] for state_str in missing_state_strs]
+        standard_free_energies = self.predict_standard_free_energy_values(mols, context)
+        for state_str, standard_free_energy in zip(missing_state_strs, standard_free_energies):
+            space.standard_free_energy_lib[state_str] = standard_free_energy
+
+    ###################################
     # Acid-base calculation
 
     def run_acid_base_calcs(
@@ -1352,6 +2190,7 @@ class pKasso:
         space: ProtonationIndexSpace,
         state_strs: list[str],
         state_vecs: list[NDArray[np.int64]],
+        context: PredictorContext | None = None,
     ) -> None:
         """Compute and cache acid/base pKa predictions for microstates.
 
@@ -1374,18 +2213,29 @@ class pKasso:
         space
             Fixed protonation site space that owns the pKa caches.
         """
-
+        
         for state_str, state_vec in zip(state_strs, state_vecs):
             if state_str in space.base_lib:
                 continue
 
-            state_vec_base = np.maximum(state_vec, 1)  # disregard de-protonations of other sites to assess base probability
+            source_mol = space.mols_lib[state_str]
+
+            state_vec_base = state_vec.copy()
+            if self.opposite_charge_influence_mode(context):
+                state_vec_base = state_vec
+            else:
+                # Disregard deprotonations of other sites to assess base probability.
+                state_vec_base = np.maximum(state_vec, 1)
 
             state_str_base = pack_vec(state_vec_base)
 
             mol_base = space.mols_lib[state_str_base]
 
-            base_tmp = self.pka_predictor(mol_base).pred_base()
+            base_tmp = self.pka_predictor(
+                mol_base,
+                context,
+                source_mol=source_mol,
+            ).pred_base()
             base = {}
             for map_idx, b in base_tmp.items():
                 if map_idx not in space.indices:
@@ -1396,12 +2246,20 @@ class pKasso:
                 ):  # Only consider predicted protonation/de-protonation predictions from neutral state
                     base[map_idx] = b
 
-            state_vec_acid = np.minimum(state_vec, 1)  # disregard protonations of other sites to assess acid probability
+            state_vec_acid = state_vec.copy()
+            if self.opposite_charge_influence_mode(context):
+                state_vec_acid = state_vec
+            else:
+                state_vec_acid = np.minimum(state_vec, 1)  # disregard protonations of other sites to assess acid probability
             state_str_acid = pack_vec(state_vec_acid)
 
             mol_acid = space.mols_lib[state_str_acid]
 
-            acid_tmp = self.pka_predictor(mol_acid).pred_acid()
+            acid_tmp = self.pka_predictor(
+                mol_acid,
+                context,
+                source_mol=source_mol,
+            ).pred_acid()
 
             acid = {}
             for map_idx, a in acid_tmp.items():
@@ -1448,16 +2306,28 @@ class pKasso:
         # Select states for pH-specific export
         state_strs_export: list[str] = []
         state_freqs_export: list[float] = []
+        state_freqs_sigmas_export: list[float | None] = []
+        state_freqs_sigmas = (
+            [None for _ in distribution.state_freqs]
+            if distribution.state_freqs_sigmas is None
+            else list(distribution.state_freqs_sigmas)
+        )
 
-        for state_str, state_freq in zip(distribution.state_strs, distribution.state_freqs):
+        for state_str, state_freq, state_freq_sigma in zip(
+            distribution.state_strs,
+            distribution.state_freqs,
+            state_freqs_sigmas,
+        ):
             if state_freq >= self.cutoff_export * state_freq_max:  # Include all high prob states
                 state_strs_export.append(state_str)
                 state_freqs_export.append(state_freq)
+                state_freqs_sigmas_export.append(state_freq_sigma)
 
         state_freqs_arr: NDArray[np.float64] = np.array(state_freqs_export)
         ps = np.argsort(state_freqs_arr)[::-1]  # Sort by highest probability
 
         state_freqs_export = [state_freqs_export[p] for p in ps]
+        state_freqs_sigmas_export = [state_freqs_sigmas_export[p] for p in ps]
         state_strs_export = [state_strs_export[p] for p in ps]
 
         self.check_chiral_consistency(distribution.state_strs, distribution.indices)
@@ -1469,6 +2339,7 @@ class pKasso:
             state_freqs_export,
             space.mols_lib,
             distribution.state_qs,
+            state_freqs_sigmas_export,
         )
         return molecule
 

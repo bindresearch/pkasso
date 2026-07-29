@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pkasso"
-version = "0.5.5"
+version = "0.6.0"
 description = "Prediction of protonation states for small molecules"
 readme = "README.md"
 license = { text = "MIT" }
@@ -38,6 +38,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+unipka = [
+    "unipkainfer>=0.2,<0.3",
+]
 webserver = [
     "fastapi>=0.115,<1",
     "uvicorn[standard]",
@@ -60,16 +63,22 @@ pkasso-web = "pkasso.api.app:main"
 "pkasso" = [
     "data/*.csv",
     "data/*.pth",
-    "data/*.tsv"]
+    "data/*.tsv",
+    "data/*.pt",
+    "data/*.txt"]
 "pkasso.api" = [
     "templates/*.html",
     "static/*.css",
     "static/*.js",
     "static/*.svg",
     "static/*.ico"]
-
 [tool.setuptools.packages.find]
 include = ["pkasso*"]
+
+[tool.pytest.ini_options]
+filterwarnings = [
+    'ignore::DeprecationWarning:torch\.jit\._script',
+]
 
 [tool.ruff]
 line-length = 127

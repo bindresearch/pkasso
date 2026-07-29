@@ -1,4 +1,6 @@
 import importlib.util
+import itertools
+import logging
 import sys
 import types
 from pathlib import Path
@@ -16,8 +18,30 @@ def load_main_module():
     package.__path__ = [str(root / "pkasso")]
 
     predict_pka = types.ModuleType("pkasso.predict_pka")
-    predict_pka.Predictor = object
-    predict_pka.MolgpkaPredictor = object
+    class Predictor:
+        model_key = "predictor"
+        thermodynamic_prediction = "pka"
+        standard_free_energy_target_mean = None
+
+    class MolgpkaPredictor(Predictor):
+        model_key = "molgpka"
+
+    class ResolvedPredictor:
+        def __init__(self, predictor_cls, config):
+            self.predictor_cls = predictor_cls
+            self.config = config
+
+    def resolve_models(model, *, nthreads=0):
+        if model != {"molgpka": {}}:
+            raise ValueError(f"Unsupported test model: {model}")
+        return (ResolvedPredictor(MolgpkaPredictor, None),)
+
+    predict_pka.ModelInput = dict
+    predict_pka.Predictor = Predictor
+    predict_pka.MolgpkaPredictor = MolgpkaPredictor
+    predict_pka.ResolvedPredictor = ResolvedPredictor
+    predict_pka.ThermodynamicPredictionMode = str
+    predict_pka.resolve_models = resolve_models
 
     postprocess = types.ModuleType("pkasso.postprocess")
     postprocess.Molecule = type("Molecule", (), {})
@@ -27,10 +51,48 @@ def load_main_module():
     transitions = types.ModuleType("pkasso.transitions")
     transitions.calc_freqs_from_states = lambda *args, **kwargs: None
     transitions.calc_state_diffs = lambda *args, **kwargs: None
+    transitions.calc_state_pH_dependent_free_energies = (
+        lambda standard_free_energies, state_vecs, pH, target_mean:
+        np.asarray(standard_free_energies, dtype=np.float64)
+        + np.array([np.sum(state_vec - 1) for state_vec in state_vecs]) * np.log(10) * (pH - target_mean)
+    )
+    transitions.calc_populations = lambda Gs: np.exp(-Gs) / np.sum(np.exp(-Gs))
 
     coupling = types.ModuleType("pkasso.coupling")
     coupling.compare_pkas = lambda *args, **kwargs: None
+    coupling.compare_free_energies = lambda indices, *args, **kwargs: np.zeros(len(indices), dtype=np.float64)
+    coupling.construct_free_energy_coupling_weight_matrix = (
+        lambda indices, *args, **kwargs: np.zeros((len(indices), len(indices)), dtype=np.float64)
+    )
+    coupling.construct_coupling_weight_matrix = (
+        lambda indices, *args, **kwargs: np.zeros((len(indices), len(indices)), dtype=np.float64)
+    )
     coupling.find_coupled_sites = lambda *args, **kwargs: []
+    def construct_state_vectors_single(indices, q_options):
+        state_vecs = [np.ones(len(indices), dtype=np.int64)]
+        for rel_idx, qs in enumerate(q_options):
+            for q in (0, 2):
+                if qs[q] == 1:
+                    state_vec = np.ones(len(indices), dtype=np.int64)
+                    state_vec[rel_idx] = q
+                    state_vecs.append(state_vec)
+        return state_vecs
+
+    def construct_state_vectors_coupling(indices, q_options):
+        state_vecs = construct_state_vectors_single(indices, q_options)
+        state_vecs_by_str = {"".join(str(int(q)) for q in state_vec): state_vec for state_vec in state_vecs}
+        for state_vec0, state_vec1 in itertools.combinations(state_vecs[1:], 2):
+            changed0 = np.where(state_vec0 != 1)[0]
+            changed1 = np.where(state_vec1 != 1)[0]
+            if len(changed0) == 1 and len(changed1) == 1 and changed0[0] != changed1[0]:
+                state_vec = np.ones(len(indices), dtype=np.int64)
+                state_vec[changed0[0]] = state_vec0[changed0[0]]
+                state_vec[changed1[0]] = state_vec1[changed1[0]]
+                state_vecs_by_str.setdefault("".join(str(int(q)) for q in state_vec), state_vec)
+        return list(state_vecs_by_str.values())
+
+    coupling.construct_state_vectors_single = construct_state_vectors_single
+    coupling.construct_state_vectors_coupling = construct_state_vectors_coupling
 
     old_modules = {
         name: sys.modules.get(name)
@@ -69,6 +131,32 @@ def load_main_module():
 
 main = load_main_module()
 
+
+def test_pkasso_uses_top_level_nthreads_for_runtime_configuration(monkeypatch):
+    configured = []
+    resolved = []
+
+    monkeypatch.setattr(main, "configure_torch_threads", configured.append)
+
+    def resolve_models(model, *, nthreads):
+        resolved.append((model, nthreads))
+        return (main.ResolvedPredictor(main.MolgpkaPredictor, None),)
+
+    monkeypatch.setattr(main, "resolve_models", resolve_models)
+
+    pk = main.pKasso("C", nthreads=3)
+
+    assert pk.nthreads == 3
+    assert pk.output_molecules_from_scan is True
+    assert configured == [3]
+    assert resolved == [({"molgpka": {}}, 3)]
+
+
+def test_pkasso_rejects_obsolete_device_keyword():
+    with pytest.raises(TypeError, match="unexpected keyword argument 'device'"):
+        main.pKasso("C", device="cpu")
+
+
 # @pytest.mark.parametrize(
 #     ("smiles_raw","net_charge"),
 #     [
@@ -92,12 +180,8 @@ main = load_main_module()
 
 
 def test_find_candidate_sites():
-    base = {
-        0: 2.0,
-        1: 7.0,
-        2: 12.0,
-    }
-    acid = {0: 4.0, 3: 12.0}
+    base = [0, 1, 2]
+    acid = [0, 3]
     exclude_base_indices = []
     exclude_acid_indices = []
     charged_indices = []
@@ -115,15 +199,8 @@ def test_find_candidate_sites():
 
 
 def test_find_candidate_sites_respects_excluded_and_charged_indices():
-    base = {
-        0: 2.0,
-        1: 7.0,
-        2: 12.0,
-    }
-    acid = {
-        0: 4.0,
-        3: 12.0,
-    }
+    base = [0, 1, 2]
+    acid = [0, 3]
     indices, q_options = main.find_candidate_sites(
         base,
         acid,
@@ -165,27 +242,16 @@ def test_count_state_combinations():
     assert main.count_state_combinations(q_options) == 6
 
 
-def test_preprocess_warns_and_keeps_largest_sizeable_fragment(caplog):
-    caplog.set_level("WARNING", logger=main.__name__)
-
-    mol, smiles = main.preprocess(
-        "CCCCCC.CCCCCCC",
-        strip_fragments=True,
-        min_fragment_heavy_atoms=6,
-    )
-
-    assert smiles == "CCCCCCC"
-    assert mol.GetNumHeavyAtoms() == 7
-    assert "Input SMILES contains multiple sizeable organic fragments" in caplog.text
-
-
 def test_setup_returns_processed_input_space_when_site_limit_exceeded(monkeypatch, caplog):
     class TooManySitesPredictor:
-        def __init__(self, mol, device=None):
-            pass
-
         def exclude_sites(self):
             return [], []
+
+        def pred_acid_ids(self):
+            return [1]
+
+        def pred_base_ids(self):
+            return [2]
 
         def pred_acid(self):
             return {1: 4.0}
@@ -193,33 +259,504 @@ def test_setup_returns_processed_input_space_when_site_limit_exceeded(monkeypatc
         def pred_base(self):
             return {2: 8.0}
 
-    seen_clusters = []
-
-    def screen_clusters(self, indices0, q_options0):
-        seen_clusters.append((indices0, q_options0.copy()))
-        return []
-
-    monkeypatch.setattr(main.pKasso, "screen_clusters", screen_clusters)
-    caplog.set_level("WARNING", logger=main.__name__)
-
     pk = main.pKasso(
         "CCN",
-        pka_predictor_cls=TooManySitesPredictor,
         total_max_sites=1,
         tautomer_search=False,
     )
+    predictor = TooManySitesPredictor()
+    monkeypatch.setattr(pk, "pka_predictor", lambda mol, context=None: predictor)
 
-    pk._setup()
+    with caplog.at_level(logging.WARNING, logger=main.logger.name):
+        pk._setup()
 
     assert pk.indices0 == []
-    assert np.array_equal(pk.q_options0, np.array([]))
+    assert pk.q_options0.shape == (0, 3)
+    assert pk.primary_context.indices0 == []
+    assert pk.primary_context.q_options0 is not None
+    assert pk.primary_context.q_options0.shape == (0, 3)
     assert pk.index_space0.indices == []
-    assert np.array_equal(pk.index_space0.q_options, np.array([]))
-    assert len(seen_clusters) == 1
-    assert seen_clusters[0][0] == []
-    assert np.array_equal(seen_clusters[0][1], np.array([]))
+    assert pk.index_space0.q_options.shape == (0, 3)
+    assert pk.primary_context.clusters == []
     assert "Returning processed input molecule" in caplog.text
 
+    distribution = pk._calc_microstates(7.0)
+
+    assert distribution.state_strs == [""]
+    assert distribution.state_freqs.tolist() == [1.0]
+    assert Chem.MolToSmiles(distribution.mols_lib[""]) == Chem.MolToSmiles(pk.mol0)
+
+
+@pytest.mark.parametrize(
+    ("output_molecules_from_scan", "expected_molecules", "expected_prep_calls"),
+    [
+        (
+            True,
+            {
+                7.0: "molecule-7.0",
+                7.5: "molecule-7.5",
+            },
+            [7.0, 7.5],
+        ),
+        (False, {}, []),
+    ],
+)
+def test_scan_optionally_collects_molecule_output_for_each_ph(
+    output_molecules_from_scan,
+    expected_molecules,
+    expected_prep_calls,
+):
+    pk = main.pKasso.__new__(main.pKasso)
+    pk.output_molecules_from_scan = output_molecules_from_scan
+    prep_calls = []
+
+    def calc_microstates(pH):
+        return types.SimpleNamespace(
+            pH=pH,
+            net_charge=0.0,
+            net_charge_sigma=None,
+            freqs_macro={0: 1.0},
+            freqs_macro_samples=None,
+            state_strs=["1"],
+            state_freqs=np.array([1.0], dtype=np.float64),
+            state_freqs_sigmas=None,
+        )
+
+    def prep_single_output(distribution):
+        prep_calls.append(distribution.pH)
+        return f"molecule-{distribution.pH}"
+
+    pk._calc_microstates = calc_microstates
+    pk.prep_single_output = prep_single_output
+
+    distribution = pk._scan_pH(np.array([7.0, 7.5], dtype=np.float64))
+
+    assert distribution.molecules == expected_molecules
+    assert prep_calls == expected_prep_calls
+
+
+def test_run_acid_base_calcs_passes_source_mol_to_half_neutralized_predictors():
+    calls = []
+
+    class ChargeRecordingPredictor:
+        thermodynamic_prediction = "pka"
+        opposite_charge_influence = False
+
+        def __init__(self, mol):
+            self.mol = mol
+
+        def pred_base(self):
+            calls.append(
+                (
+                    "base",
+                    Chem.GetFormalCharge(self.mol),
+                    Chem.GetFormalCharge(self.source_mol),
+                )
+            )
+            return {}
+
+        def pred_acid(self):
+            calls.append(
+                (
+                    "acid",
+                    Chem.GetFormalCharge(self.mol),
+                    Chem.GetFormalCharge(self.source_mol),
+                )
+            )
+            return {}
+
+    pk = main.pKasso("CO", tautomer_search=False)
+    context = main.PredictorContext(predictor_cls=ChargeRecordingPredictor)
+    space = main.ProtonationIndexSpace(
+        indices=[1, 2],
+        q_options=np.array(
+            [
+                [0, 1, 0],
+                [1, 1, 0],
+            ],
+            dtype=np.int64,
+        ),
+        mols_lib={
+            "10": Chem.MolFromSmiles("C[O-]"),
+            "11": Chem.MolFromSmiles("CO"),
+        },
+    )
+
+    pk.run_acid_base_calcs(
+        space,
+        state_strs=["10"],
+        state_vecs=[np.array([1, 0], dtype=np.int64)],
+        context=context,
+    )
+
+    assert calls == [
+        ("base", 0, -1),
+        ("acid", -1, -1),
+    ]
+
+
+def test_screen_clusters_skips_coupling_when_full_state_space_fits(monkeypatch):
+    q_options = np.array(
+        [
+            [0, 1, 1],
+            [1, 1, 1],
+        ],
+        dtype=np.int64,
+    )
+    pk = main.pKasso("CC", cutoff_states=6)
+
+    def coupling_assay_weights(*args, **kwargs):
+        raise AssertionError("coupling assay should be skipped")
+
+    monkeypatch.setattr(pk, "coupling_assay_weights", coupling_assay_weights)
+
+    assert pk.screen_clusters([1, 2], q_options) == [[0, 1]]
+
+
+def test_screen_clusters_runs_coupling_when_full_state_space_exceeds_cutoff(monkeypatch):
+    q_options = np.array(
+        [
+            [0, 1, 1],
+            [1, 1, 1],
+        ],
+        dtype=np.int64,
+    )
+    pk = main.pKasso("CC", cutoff_states=5)
+    calls = []
+
+    def coupling_assay_weights(indices, q_options, context=None):
+        calls.append((indices, q_options.copy(), context))
+        return np.zeros((len(indices), len(indices)), dtype=np.float64)
+
+    def coupling_weights_to_graph(coupling_weights, coupling_cutoff, nodes=None):
+        graph = nx.Graph()
+        graph.add_nodes_from(range(coupling_weights.shape[0]) if nodes is None else nodes)
+        return graph
+
+    monkeypatch.setattr(pk, "coupling_assay_weights", coupling_assay_weights)
+    monkeypatch.setattr(main.coupling, "coupling_weights_to_graph", coupling_weights_to_graph, raising=False)
+
+    assert pk.screen_clusters([1, 2], q_options) == [[0], [1]]
+    assert len(calls) == 1
+    assert calls[0][0] == [1, 2]
+    assert np.array_equal(calls[0][1], q_options)
+
+
+def test_screen_clusters_decouples_phosphate_groups_after_coupling(monkeypatch):
+    mol = Chem.MolFromSmiles("CCOP(=O)(O)O")
+    for atom in mol.GetAtoms():
+        atom.SetAtomMapNum(atom.GetIdx() + 1)
+
+    _, phosphate_groups = main.special_cases.has_phosphate(mol)
+    phosphate_ohs = next(iter(phosphate_groups.values()))
+    indices = [1, *phosphate_ohs]
+    q_options = np.tile(np.array([[1, 1, 0]], dtype=np.int64), (len(indices), 1))
+
+    pk = main.pKasso("CCOP(=O)(O)O", cutoff_states=100)
+    pk.mol0 = mol
+    calls = []
+
+    def coupling_assay_weights(indices_arg, q_options_arg, context=None):
+        calls.append((indices_arg, q_options_arg.copy(), context))
+        weights = np.ones((len(indices_arg), len(indices_arg)), dtype=np.float64)
+        np.fill_diagonal(weights, 0.0)
+        return weights
+
+    def coupling_weights_to_graph(coupling_weights, coupling_cutoff, nodes=None):
+        graph = nx.Graph()
+        graph.add_nodes_from(range(coupling_weights.shape[0]) if nodes is None else nodes)
+        for idx, i in enumerate(graph.nodes):
+            for j in list(graph.nodes)[idx + 1:]:
+                if max(coupling_weights[i, j], coupling_weights[j, i]) >= coupling_cutoff:
+                    graph.add_edge(i, j)
+        return graph
+
+    monkeypatch.setattr(pk, "coupling_assay_weights", coupling_assay_weights)
+    monkeypatch.setattr(main.coupling, "coupling_weights_to_graph", coupling_weights_to_graph, raising=False)
+
+    assert pk.screen_clusters(indices, q_options) == [[0], list(range(1, len(indices)))]
+    assert len(calls) == 1
+
+
+def test_screen_clusters_does_not_decouple_phosphates_for_non_molgpka_context(monkeypatch):
+    class OtherPredictor(main.Predictor):
+        pass
+
+    mol = Chem.MolFromSmiles("CCOP(=O)(O)O")
+    for atom in mol.GetAtoms():
+        atom.SetAtomMapNum(atom.GetIdx() + 1)
+
+    _, phosphate_groups = main.special_cases.has_phosphate(mol)
+    phosphate_ohs = next(iter(phosphate_groups.values()))
+    indices = [1, *phosphate_ohs]
+    q_options = np.tile(np.array([[1, 1, 0]], dtype=np.int64), (len(indices), 1))
+
+    pk = main.pKasso("CCOP(=O)(O)O", cutoff_states=100)
+    pk.mol0 = mol
+    context = main.PredictorContext(predictor_cls=OtherPredictor)
+
+    def coupling_assay_weights(*args, **kwargs):
+        raise AssertionError("coupling assay should be skipped")
+
+    monkeypatch.setattr(pk, "coupling_assay_weights", coupling_assay_weights)
+
+    assert pk.screen_clusters(indices, q_options, context=context) == [list(range(len(indices)))]
+
+
+def test_combine_expert_energies_uses_reference_states_and_aligns_shared_states():
+    space = main.ProtonationIndexSpace(
+        indices=[1, 2],
+        q_options=np.array([[1, 1, 0], [1, 1, 0]], dtype=np.int64),
+    )
+    raw_a = main.RawMicrostateEnergies(
+        index_space=space,
+        pH=7.0,
+        state_strs=["00", "01", "11"],
+        state_vecs=[np.array([0, 0]), np.array([0, 1]), np.array([1, 1])],
+        Gs=np.array([0.0, 3.0, 2.0]),
+    )
+    raw_b = main.RawMicrostateEnergies(
+        index_space=space,
+        pH=7.0,
+        state_strs=["10", "11", "00"],
+        state_vecs=[np.array([1, 0]), np.array([1, 1]), np.array([0, 0])],
+        Gs=np.array([3.0, 5.0, 1.0]),
+    )
+
+    combined = main.combine_expert_energies([raw_a, raw_b])
+
+    assert combined.state_strs == ["00", "01", "11"]
+    assert combined.Gs.tolist() == pytest.approx([0.0, 3.04742587, 3.0])
+    assert combined.Gs_sigmas.tolist() == pytest.approx([0.06707031, 2.0, 1.34714325])
+
+
+def test_combine_expert_energies_falls_back_to_first_model_without_shared_state(caplog):
+    space = main.ProtonationIndexSpace(
+        indices=[1],
+        q_options=np.array([[1, 1, 0]], dtype=np.int64),
+    )
+    raw_a = main.RawMicrostateEnergies(
+        index_space=space,
+        pH=7.0,
+        state_strs=["0"],
+        state_vecs=[np.array([0])],
+        Gs=np.array([0.0]),
+    )
+    raw_b = main.RawMicrostateEnergies(
+        index_space=space,
+        pH=7.0,
+        state_strs=["1"],
+        state_vecs=[np.array([1])],
+        Gs=np.array([0.0]),
+    )
+
+    with caplog.at_level(logging.INFO, logger=main.logger.name):
+        combined = main.combine_expert_energies([raw_a, raw_b])
+
+    assert "Falling back to the first model provided" in caplog.text
+    assert combined.index_space is space
+    assert combined.state_strs == ["0"]
+    assert combined.state_vecs[0].tolist() == [0]
+    assert combined.Gs.tolist() == pytest.approx([0.0])
+    assert combined.Gs_sigmas.tolist() == pytest.approx([2.0])
+
+
+def test_combine_expert_energies_pads_different_index_spaces_with_neutral_state():
+    space_a = main.ProtonationIndexSpace(
+        indices=[1],
+        q_options=np.array([[1, 1, 0]], dtype=np.int64),
+    )
+    space_b = main.ProtonationIndexSpace(
+        indices=[2],
+        q_options=np.array([[1, 1, 0]], dtype=np.int64),
+    )
+    raw_a = main.RawMicrostateEnergies(
+        index_space=space_a,
+        pH=7.0,
+        state_strs=["0", "1"],
+        state_vecs=[np.array([0]), np.array([1])],
+        Gs=np.array([2.0, 0.0]),
+    )
+    raw_b = main.RawMicrostateEnergies(
+        index_space=space_b,
+        pH=7.0,
+        state_strs=["0", "1"],
+        state_vecs=[np.array([0]), np.array([1])],
+        Gs=np.array([3.0, 1.0]),
+    )
+
+    combined = main.combine_expert_energies([raw_a, raw_b])
+
+    assert combined.index_space.indices == [1, 2]
+    assert combined.index_space.q_options.tolist() == [[1, 1, 0], [1, 1, 0]]
+    assert combined.state_strs == ["01", "11"]
+    assert combined.Gs.tolist() == pytest.approx([2.0, 0.0])
+
+
+def test_bind_combined_context_space_uses_union_of_predictor_indices():
+    pk = main.pKasso("CC", tautomer_search=False)
+    context_a = main.PredictorContext(predictor_cls=main.MolgpkaPredictor)
+    context_a.indices0 = [2]
+    context_a.q_options0 = np.array([[1, 1, 0]], dtype=np.int64)
+    context_a.clusters = [[0]]
+    context_b = main.PredictorContext(predictor_cls=main.MolgpkaPredictor)
+    context_b.indices0 = [1]
+    context_b.q_options0 = np.array([[0, 1, 1]], dtype=np.int64)
+    context_b.clusters = [[0]]
+    pk.predictor_contexts = [context_a, context_b]
+    pk.primary_context = context_a
+
+    pk._bind_combined_context_space()
+
+    assert pk.indices0 == [1, 2]
+    assert pk.q_options0.tolist() == [[0, 1, 1], [1, 1, 0]]
+    assert pk.index_space0.indices == [1, 2]
+
+
+def test_relevant_states_are_named_in_scan_order():
+    pk = main.pKasso("N", tautomer_search=False)
+    pk.index_space0 = main.ProtonationIndexSpace(
+        indices=[],
+        q_options=np.empty((0, 3), dtype=np.int64),
+        mols_lib={
+            state: Chem.MolFromSmiles(smiles)
+            for state, smiles in {
+                "0": "N",
+                "1": "[NH2-]",
+                "2": "[NH4+]",
+            }.items()
+        },
+    )
+    state_freqs = {
+        "0": np.array([0.1, 0.2, 0.8]),
+        "1": np.array([0.8, 0.2, 0.1]),
+        "2": np.array([0.2, 0.8, 0.2]),
+    }
+
+    state_strs, _, _, mols, _, _ = pk.calc_relevant_states(state_freqs)
+
+    assert state_strs == ["1", "2", "0"]
+    assert [mol.GetProp("_Name") for mol in mols] == [
+        "1 (-1)",
+        "2 (+1)",
+        "3 (+0)",
+    ]
+
+
+def test_process_cluster_uses_batched_standard_free_energies_for_unipka_path():
+    mol = Chem.MolFromSmiles("N")
+    for atom in mol.GetAtoms():
+        atom.SetAtomMapNum(atom.GetIdx() + 1)
+
+    calls = []
+
+    class StandardFreeEnergyPredictor(main.Predictor):
+        thermodynamic_prediction = "standard_free_energy"
+        standard_free_energy_target_mean = 6.0
+
+        @classmethod
+        def predict_standard_free_energies(cls, mols, *, config=None):
+            calls.append([mol.GetProp("_Name") for mol in mols])
+            return [0.0 for _ in mols]
+
+    pk = main.pKasso(
+        "N",
+        tautomer_search=False,
+    )
+    pk.resolved_predictors = (
+        main.ResolvedPredictor(StandardFreeEnergyPredictor, None),
+    )
+    pk.mol0 = mol
+    space = main.ProtonationIndexSpace(
+        indices=[1],
+        q_options=np.array([[1, 1, 1]], dtype=np.int64),
+    )
+
+    raw = pk.process_cluster(space, pH=7.0, free_energy_cutoff_individual=np.inf, max_states_individual=10)
+    dist = pk._finalize_microstates(raw)
+    freqs_by_state = dict(zip(dist.state_strs, dist.state_freqs))
+
+    assert calls == [["0", "1", "2"]]
+    assert freqs_by_state["0"] > freqs_by_state["1"] > freqs_by_state["2"]
+    assert np.sum(dist.state_freqs) == pytest.approx(1.0)
+
+
+def test_process_cluster_can_use_standard_free_energy_predictor_class():
+    mol = Chem.MolFromSmiles("N")
+    for atom in mol.GetAtoms():
+        atom.SetAtomMapNum(atom.GetIdx() + 1)
+
+    calls = []
+
+    class StandardFreeEnergyPredictor(main.Predictor):
+        thermodynamic_prediction = "standard_free_energy"
+        standard_free_energy_target_mean = 6.0
+
+        @classmethod
+        def predict_standard_free_energies(cls, mols, *, config=None):
+            calls.append(([mol.GetProp("_Name") for mol in mols], config.target_mean))
+            return [0.0 for _ in mols]
+
+    pk = main.pKasso(
+        "N",
+        tautomer_search=False,
+    )
+    pk.resolved_predictors = (
+        main.ResolvedPredictor(
+            StandardFreeEnergyPredictor,
+            types.SimpleNamespace(target_mean=6.0),
+        ),
+    )
+    pk.mol0 = mol
+    space = main.ProtonationIndexSpace(
+        indices=[1],
+        q_options=np.array([[1, 1, 1]], dtype=np.int64),
+    )
+
+    pk.process_cluster(space, pH=7.0, free_energy_cutoff_individual=np.inf, max_states_individual=10)
+
+    assert calls == [(["0", "1", "2"], 6.0)]
+
+
+def test_coupling_assay_weights_batches_double_states_for_unipka_path():
+    mol = Chem.MolFromSmiles("NCCN")
+    for atom in mol.GetAtoms():
+        atom.SetAtomMapNum(atom.GetIdx() + 1)
+
+    calls = []
+
+    class StandardFreeEnergyPredictor(main.Predictor):
+        thermodynamic_prediction = "standard_free_energy"
+        standard_free_energy_target_mean = 6.457855284082695
+
+        @classmethod
+        def predict_standard_free_energies(cls, mols, *, config=None):
+            calls.append([mol.GetProp("_Name") for mol in mols])
+            return [0.0 for _ in mols]
+
+    pk = main.pKasso(
+        "NCCN",
+        tautomer_search=False,
+    )
+    pk.resolved_predictors = (
+        main.ResolvedPredictor(StandardFreeEnergyPredictor, None),
+    )
+    pk.mol0 = mol
+    pk.initialize_paths_models_libs()
+
+    weights = pk.coupling_assay_weights(
+        [1, 4],
+        np.array(
+            [
+                [0, 1, 1],
+                [0, 1, 1],
+            ],
+            dtype=np.int64,
+        ),
+    )
+
+    assert calls == [["11", "21", "12", "22"]]
+    assert weights.shape == (2, 2)
 
 def test_split_cluster_preserves_explicit_max_cut_edges_through_recursion(monkeypatch):
     q_options = np.ones((4, 3), dtype=np.int64)

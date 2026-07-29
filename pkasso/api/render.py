@@ -34,9 +34,25 @@ def render_alert(message: str) -> str:
     """
 
 
+def render_warnings(messages: list[str]) -> str:
+    if not messages:
+        return ""
+
+    items = "".join(f"<li>{esc(message)}</li>" for message in messages)
+    return f"""
+    <div role="alert" class="alert alert-warning items-start rounded-lg">
+      <div>
+        <p class="font-semibold">pKasso reported a warning</p>
+        <ul class="mt-1 list-disc space-y-1 pl-5 text-sm">{items}</ul>
+      </div>
+    </div>
+    """
+
+
 def render_form(state: AppState, root_path: str = "") -> str:
     tautomer_checked = "checked" if state.tautomer_search else ""
     scan_checked = "checked" if state.scan_enabled else ""
+    precision_checked = "checked" if state.precision_mode else ""
     predict_url = prefixed_path(root_path, "/predict")
     return f"""
     <form id="pkasso-form"
@@ -66,6 +82,12 @@ def render_form(state: AppState, root_path: str = "") -> str:
           <label class="flex min-w-0 cursor-pointer items-center gap-3 rounded-lg border border-[color:var(--bind-border)] bg-[color:var(--bind-soft)] px-3 py-2">
             <input name="scan_enabled" type="checkbox" class="bind-toggle" {scan_checked} />
             <span class="min-w-0 text-sm font-medium">Full pH scan</span>
+            <span class="bind-toggle-state ml-auto text-[11px] font-bold uppercase tracking-[0.12em] text-[color:var(--bind-muted)]"></span>
+          </label>
+
+          <label class="flex min-w-0 cursor-pointer items-center gap-3 rounded-lg border border-[color:var(--bind-border)] bg-[color:var(--bind-soft)] px-3 py-2">
+            <input name="precision_mode" type="checkbox" class="bind-toggle" {precision_checked} />
+            <span class="min-w-0 text-sm font-medium">Precision Mode (slower)</span>
             <span class="bind-toggle-state ml-auto text-[11px] font-bold uppercase tracking-[0.12em] text-[color:var(--bind-muted)]"></span>
           </label>
         </div>
@@ -121,8 +143,10 @@ def render_results(state: AppState, root_path: str = "") -> str:
         if state.scan is not None
         else render_empty("Enable pH scan and calculate states to inspect microstate distributions.")
     )
+    warnings_html = render_warnings(state.warnings)
     return f"""
     <section class="space-y-4">
+      {warnings_html}
       <div class="flex flex-wrap items-start justify-between gap-3 border-b border-[color:var(--bind-border)] pb-4">
         <div>
           <p class="section-kicker">Single pH prediction</p>

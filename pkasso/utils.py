@@ -2,11 +2,63 @@
 
 from pathlib import Path
 from typing import cast
+import copy
 
 import numpy as np
 from numpy.typing import NDArray
 from rdkit.Chem.rdchem import Atom, Mol
+from rdkit import Chem
 
+
+
+def construct_mol(mol0: Mol, indices: list[int], state_vec: NDArray[np.int64]) -> Mol:
+    """
+    Construct a protonation-state-specific molecule from a reference molecule.
+
+    The function applies the protonation/deprotonation state encoded in
+    ``state_vec`` to the atoms specified by ``indices`` (atom map numbers).
+    Formal charges are adjusted accordingly and hydrogens are added or removed
+    where required. The resulting molecule is sanitized and returned.
+
+    Parameters
+    ----------
+    mol0
+        Reference molecule (neutral standardized structure)
+        with atom map numbers assigned.
+    indices
+        Atom map indices corresponding to the sites whose states are
+        defined in ``state_vec``.
+    state_vec
+        Protonation state vector for the selected sites. Values are encoded
+        as [0, 1, 2] corresponding to [deprotonated, unchanged, protonated].
+
+    Returns
+    -------
+    mol
+        RDKit molecule with the specified protonation states applied.
+    """
+
+    mol_cand = copy.deepcopy(mol0)
+
+    qs = state_vec - 1
+
+    rw = Chem.RWMol(Chem.AddHs(mol_cand))
+
+    for map_idx, q in zip(indices, qs):
+        atom = get_atom_with_map_idx(rw, map_idx)
+        if atom is None:
+            raise ValueError(f"Could not find atom with map index {map_idx}.")
+        atom.SetFormalCharge(int(q))
+        if q == -1:
+            for nbr in atom.GetNeighbors():
+                if nbr.GetAtomicNum() == 1:
+                    rw.RemoveAtom(nbr.GetIdx())
+                    break
+
+    mol_cand = Chem.RemoveHs(rw)
+    Chem.SanitizeMol(mol_cand)
+
+    return mol_cand
 
 def pack_vec(state_vec: NDArray[np.int64]) -> str:
     """Pack vector into string."""
@@ -14,13 +66,11 @@ def pack_vec(state_vec: NDArray[np.int64]) -> str:
     state_str = "".join([str(x) for x in state_vec])
     return state_str
 
-
 def unpack_vec(state_str: str) -> NDArray[np.int64]:
     """Unpack string into vector."""
 
     state_vec = np.array([int(s) for s in state_str], dtype=int)
     return state_vec
-
 
 def calc_state_strs(state_vecs: list[NDArray[np.int64]]) -> list[str]:
     """Calc state strings from vectors."""
@@ -100,18 +150,35 @@ def state_str_to_q(state_str: str) -> str:
 
 
 def read_smi(smi: Path) -> dict[str, str]:
-    """Parse input .smi files"""
+    """Parse an input .smi file, skipping blank lines."""
 
     batch_dict: dict[str, str] = {}
-
-    ct = 0
+    unnamed_count = 0
 
     with open(smi, "r") as f:
-        for line in f.readlines():
-            spl = line.split()
-            if len(spl) > 1:
-                batch_dict[spl[1]] = spl[0]
+        for line_number, line in enumerate(f, start=1):
+            fields = line.split()
+            if not fields:
+                continue
+
+            if len(fields) > 1:
+                name = fields[1]
             else:
-                batch_dict[f'molecule{ct}'] = spl[0]
-                ct += 1
+                name = f"molecule{unnamed_count}"
+                unnamed_count += 1
+
+            smiles = fields[0]
+            if Chem.MolFromSmiles(smiles) is None:
+                raise ValueError(f"Invalid SMILES {smiles!r} on line {line_number}.")
+
+            if name in batch_dict:
+                raise ValueError(
+                    f"Duplicate molecule name {name!r} on line {line_number}."
+                )
+
+            batch_dict[name] = smiles
+
+    if not batch_dict:
+        raise ValueError("No molecules found in the input .smi file.")
+
     return batch_dict

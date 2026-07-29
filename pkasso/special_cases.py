@@ -293,3 +293,49 @@ def has_nplus_base_proximity(map_idx: int, mol: Mol, max_distance: int = 3) -> i
             count += 1
 
     return count
+
+
+def has_negative_charge_proximity(map_idx: int, mol: Mol, max_distance: int = 3) -> int:
+    """Count negatively charged atoms near the mapped atom."""
+
+    atom0 = get_atom_with_map_idx(mol, map_idx)
+    assert atom0 is not None
+    at_idx = atom0.GetIdx()
+    dist_matrix = rdmolops.GetDistanceMatrix(mol)
+
+    return sum(
+        atom.GetFormalCharge() < 0
+        and atom.GetIdx() != at_idx
+        and dist_matrix[atom.GetIdx()][at_idx] <= max_distance
+        for atom in mol.GetAtoms()
+    )
+
+
+def has_double_nplus_ring(mol: Mol) -> int:
+    """
+    Detec if two positively charged nitrogens are in the same ring system
+    """
+
+    rings = [set(r) for r in mol.GetRingInfo().AtomRings()]
+    systems: list[set[int]] = []
+
+    for ring in rings:
+        hits = [s for s in systems if s & ring]
+
+        if hits:
+            merged = set(ring)
+            for h in hits:
+                merged |= h
+                systems.remove(h)
+            systems.append(merged)
+        else:
+            systems.append(ring)
+
+    return any(
+        sum(
+            mol.GetAtomWithIdx(i).GetAtomicNum() == 7
+            and mol.GetAtomWithIdx(i).GetFormalCharge() > 0
+            for i in system
+        ) >= 2
+        for system in systems
+    )

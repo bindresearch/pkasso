@@ -2,9 +2,11 @@
 # mypy: disable-error-code=no-untyped-call
 
 from abc import ABC, abstractmethod
+from collections.abc import Mapping
+from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path
-from typing import ClassVar
+from typing import Any, ClassVar, Literal, cast
 
 import numpy as np
 from rdkit import Chem
@@ -13,19 +15,35 @@ from rdkit.Chem.rdchem import Mol
 from .special_cases import (
     add_exclusion,
     has_invalid_amine,
+    has_negative_charge_proximity,
     has_nplus_base_proximity,
     has_phosphate,
     match_smarts,
     oh_ring_sulfonate,
+    has_double_nplus_ring
 )
-from .external.net import GCNNet
-from .external.pka import load_model
-from .external.pka import predict_acid as molgpka_predict_acid
-from .external.pka import predict_base as molgpka_predict_base
+from .external.molgpka.net import GCNNet
+from .external.molgpka.pka import load_model
+from .external.molgpka.pka import predict_acid as molgpka_predict_acid
+from .external.molgpka.pka import predict_base as molgpka_predict_base
+from .external.molgpka.ionization_group import get_ionization_aid
 
 pkg_base = resources.files("pkasso")
 
 ROOT = Path(f"{pkg_base}/data")
+UNIPKA_TARGET_MEAN = 6.457855284082695
+ThermodynamicPredictionMode = Literal["pka", "standard_free_energy"]
+PredictorKey = Literal["molgpka", "unipka"]
+ModelOptions = Mapping[str, object]
+ModelInput = Mapping[str, ModelOptions]
+
+
+@dataclass(frozen=True)
+class ResolvedPredictor:
+    """Predictor class paired with its model-specific resolved configuration."""
+
+    predictor_cls: type["Predictor"]
+    config: object | None
 
 
 def get_acid_neighbors(mol_h: Mol, acid: dict[int, float]) -> dict[int, float]:
@@ -40,6 +58,27 @@ def get_acid_neighbors(mol_h: Mol, acid: dict[int, float]) -> dict[int, float]:
             acid_heavy[neighbor_map_idx] = pka
     return acid_heavy
 
+def get_acid_id_neighbors(mol_h: Mol, acid_ids: list[int]) -> list[int]:
+    """Find acidic heavy-atom map ids.
+
+    MolGpKa SMARTS patterns identify acidic hydrogens, while Uni-pKa patterns
+    identify the titrating heavy atom. Support both conventions.
+    """
+    acid_heavy_ids = []
+
+    for at_idx in acid_ids:
+        atom = mol_h.GetAtomWithIdx(at_idx)
+        if atom.GetAtomicNum() != 1:
+            map_idx = atom.GetAtomMapNum()
+            if map_idx > 0:
+                acid_heavy_ids.append(map_idx)
+            continue
+        for bond in atom.GetBonds():
+            neighbor = bond.GetOtherAtom(atom)
+            neighbor_map_idx = neighbor.GetAtomMapNum()
+            if neighbor_map_idx > 0:
+                acid_heavy_ids.append(neighbor_map_idx)
+    return sorted(set(acid_heavy_ids))
 
 def convert_base_map_idx(mol_h: Mol, base_res: dict[int, float]) -> dict[int, float]:
     base_res_map_ids: dict[int, float] = {}
@@ -49,15 +88,41 @@ def convert_base_map_idx(mol_h: Mol, base_res: dict[int, float]) -> dict[int, fl
         base_res_map_ids[map_idx] = pka
     return base_res_map_ids
 
+def convert_base_ids_to_map_ids(mol_h: Mol, base_ids: list[int]) -> list[int]:
+    base_map_ids: list[int] = []
+    for aid in base_ids:
+        atom = mol_h.GetAtomWithIdx(aid)
+        map_idx = atom.GetAtomMapNum()
+        if map_idx > 0:
+            base_map_ids.append(map_idx)
+    return sorted(set(base_map_ids))
 
 class Predictor(ABC):
-    def __init__(self, mol: Mol, device: str = "cpu"):
+    model_key: ClassVar[str]
+    thermodynamic_prediction: ClassVar[ThermodynamicPredictionMode]
+    standard_free_energy_target_mean: ClassVar[float | None] = None
+
+    def __init__(self, mol: Mol):
         self.mol = mol
-        self.device = device
+        self.source_mol = mol
+
+    @classmethod
+    def resolve_options(cls, options: ModelOptions, *, nthreads: int = 0) -> object | None:
+        """Validate public model options and return an internal configuration."""
+
+        if options:
+            option_names = ", ".join(sorted(options))
+            raise ValueError(f"{cls.model_key!r} does not accept model options: {option_names}.")
+        return None
 
     @abstractmethod
     def pred_acid(self) -> dict[int, float]:
         """Predict acidic pKa values keyed by atom map index."""
+        ...
+
+    @abstractmethod
+    def pred_acid_ids(self) -> list[int]:
+        """Predict acidic map ids."""
         ...
 
     @abstractmethod
@@ -66,35 +131,54 @@ class Predictor(ABC):
         ...
 
     @abstractmethod
+    def pred_base_ids(self) -> list[int]:
+        """Predict base map ids."""
+        ...
+
+    @abstractmethod
     def exclude_sites(self) -> tuple[list[int], list[int]]:
         """Return base and acid atom map indices to exclude for this backend."""
         ...
 
+    @classmethod
+    def predict_standard_free_energies(cls, mols: list[Mol], *, config: Any | None = None) -> Any:
+        """Predict standard free energies for a batch of microstate molecules."""
+
+        raise NotImplementedError(f"{cls.__name__} does not provide standard free-energy predictions.")
 
 class MolgpkaPredictor(Predictor):
+    model_key = "molgpka"
+    thermodynamic_prediction: ClassVar[ThermodynamicPredictionMode] = "pka"
     model_file_base: ClassVar[Path] = ROOT / "weight_base.pth"
     model_file_acid: ClassVar[Path] = ROOT / "weight_acid.pth"
-    _model_cache: ClassVar[dict[tuple[type, str], tuple[GCNNet, GCNNet]]] = {}
+    smarts_pattern: ClassVar[Path] = ROOT / "smarts_pattern_molgpka.tsv"
+    opposite_charge_influence = False
 
-    def __init__(self, mol: Mol, device: str = "cpu") -> None:
-        super().__init__(mol, device=device)
-        self.model_base, self.model_acid = self._load_models(device)
+    _model_cache: ClassVar[dict[type, tuple[GCNNet, GCNNet]]] = {}
+
+    def __init__(self, mol: Mol) -> None:
+        super().__init__(mol)
+        self.model_base, self.model_acid = self._load_models()
         self.mol_h = Chem.rdmolops.AddHs(Chem.Mol(mol))
         self.atom_indices = [atom.GetIdx() for atom in mol.GetAtoms()]
         self.qs = np.array([at.GetFormalCharge() for at in mol.GetAtoms()])
 
     @classmethod
-    def _load_models(cls, device: str) -> tuple[GCNNet, GCNNet]:
-        cache_key = (cls, device)
-        if cache_key not in cls._model_cache:
-            model_base = load_model(cls.model_file_base, device=device)
-            model_acid = load_model(cls.model_file_acid, device=device)
-            cls._model_cache[cache_key] = (model_base, model_acid)
-        return cls._model_cache[cache_key]
+    def _load_models(cls) -> tuple[GCNNet, GCNNet]:
+        if cls not in cls._model_cache:
+            model_base = load_model(cls.model_file_base)
+            model_acid = load_model(cls.model_file_acid)
+            cls._model_cache[cls] = (model_base, model_acid)
+        return cls._model_cache[cls]
 
     def pred_acid(self) -> dict[int, float]:
         acid = self._predict_acid_raw()
         return self._curate_acid(acid)
+
+    def pred_acid_ids(self) -> list[int]:
+        acid = self._predict_acid_raw()
+        acid_curated = self._curate_acid(acid)
+        return list(acid_curated.keys())
 
     def exclude_sites(self) -> tuple[list[int], list[int]]:
         return self._exclude_molgpka_sites()
@@ -181,7 +265,7 @@ class MolgpkaPredictor(Predictor):
     def _predict_acid_raw(self) -> dict[int, float]:
         """Run molgpka acid prediction and convert results to atom map indices."""
 
-        acid = molgpka_predict_acid(self.mol_h, self.model_acid, device=self.device)
+        acid = molgpka_predict_acid(self.mol_h, self.model_acid, self.smarts_pattern)
         return get_acid_neighbors(self.mol_h, acid)
 
     def _curate_acid(self, acid: dict[int, float]) -> dict[int, float]:
@@ -268,10 +352,15 @@ class MolgpkaPredictor(Predictor):
         base = self._predict_base_raw()
         return self._curate_base(base)
 
+    def pred_base_ids(self) -> list[int]:
+        base = self._predict_base_raw()
+        base_curated = self._curate_base(base)
+        return list(base_curated.keys())
+
     def _predict_base_raw(self) -> dict[int, float]:
         """Run molgpka base prediction and convert results to atom map indices."""
 
-        base_aid = molgpka_predict_base(self.mol_h, self.model_base, device=self.device)
+        base_aid = molgpka_predict_base(self.mol_h, self.model_base, self.smarts_pattern)
         return convert_base_map_idx(self.mol_h, base_aid)
 
     def _curate_base(self, base: dict[int, float]) -> dict[int, float]:
@@ -300,8 +389,17 @@ class MolgpkaPredictor(Predictor):
             if map_idx in base:
                 pka = base[map_idx]
 
-                ncat = has_nplus_base_proximity(map_idx, self.mol, max_distance=5)
-                correction = 2.5 * max(0, (ncat - 1.0))
+                ncat = has_nplus_base_proximity(
+                    map_idx,
+                    self.source_mol,
+                    max_distance=5,
+                )
+                ncat -= has_negative_charge_proximity(
+                    map_idx,
+                    self.source_mol,
+                    max_distance=5,
+                )
+                correction = 2.5 * max(0, ncat - 1)
                 pka -= correction
 
                 if atom.GetSymbol() == "N":
@@ -331,3 +429,267 @@ class MolgpkaPredictor(Predictor):
 
         base = base_curated
         return base
+
+###########################################################################
+
+class UnipkaPredictor(Predictor):
+    model_key = "unipka"
+    thermodynamic_prediction: ClassVar[ThermodynamicPredictionMode] = "standard_free_energy"
+    standard_free_energy_target_mean = UNIPKA_TARGET_MEAN
+    # smarts_pattern: ClassVar[Path] = ROOT / "smarts_pattern_unipka.tsv"
+    smarts_pattern: ClassVar[Path] = ROOT / "simple_smarts_pattern.tsv"
+
+    def __init__(self, mol: Mol) -> None:
+        super().__init__(mol)
+        self.mol_h = Chem.rdmolops.AddHs(Chem.Mol(mol))
+        self.atom_indices = [atom.GetIdx() for atom in mol.GetAtoms()]
+        self.qs = np.array([at.GetFormalCharge() for at in mol.GetAtoms()])
+
+    @classmethod
+    def resolve_options(cls, options: ModelOptions, *, nthreads: int = 0) -> object:
+        """Resolve the public Uni-pKa options into its inference configuration."""
+
+        try:
+            from unipkainfer import UnipkaFreeEnergyConfig
+        except ModuleNotFoundError as exc:
+            if exc.name != "unipkainfer":
+                raise
+            raise ModuleNotFoundError(
+                "Uni-pKa support is not installed. Install it with "
+                "`python -m pip install 'pkasso[unipka]'`."
+            ) from exc
+
+        if "nthreads" in options:
+            raise ValueError(
+                "'unipka.nthreads' has moved to the top-level 'nthreads' option."
+            )
+
+        valid_options = {"model_dir", "folds", "gpu"}
+        unknown_options = sorted(set(options) - valid_options)
+        if unknown_options:
+            unknown = ", ".join(unknown_options)
+            valid = ", ".join(sorted(valid_options))
+            raise ValueError(f"Unknown unipka option(s): {unknown}. Valid options: {valid}.")
+        config_kwargs = cast(dict[str, Any], dict(options))
+        config_kwargs["nthreads"] = nthreads
+        return UnipkaFreeEnergyConfig(**config_kwargs)
+
+    # def exclude_sites(self) -> tuple[list[int], list[int]]:
+    #     exclude_base_indices: set[int] = set()
+    #     exclude_acid_indices: set[int] = set()
+
+    #     smarts_nnn = "nnn"
+
+    #     for atom in self.mol.GetAtoms():
+    #         if atom.GetFormalCharge() != 0:
+    #             continue
+
+    #         if atom.GetSymbol() == "N" and atom.GetIsAromatic():
+    #             exclude_base_indices = add_exclusion(exclude_base_indices, self.mol, atom, smarts_nnn)
+
+    #             if atom.GetTotalNumHs() > 0 or atom.GetDegree() == 3:
+    #                 exclude_base_indices.add(atom.GetAtomMapNum())
+
+    #     return sorted(exclude_base_indices), sorted(exclude_acid_indices)
+
+    def exclude_sites(self) -> tuple[list[int], list[int]]:
+        """
+        Exclude sites where predictions are not used directly.
+
+        Exclusions act on the q_options level and are tracked separately
+        for protonation (base behavior) and deprotonation (acid behavior).
+        """
+
+        exclude_acid_indices: set[int] = set()
+        exclude_base_indices: set[int] = set()
+
+        smarts_imine = "NC(=N)"
+        matches_imine = match_smarts(self.mol, smarts_imine)
+
+        smarts_sulfonamide = "NS(=O)(=O)"
+
+        smarts_Ncnn = "Nc(n)n"
+        smarts_Nccn = "Nc(c)n"
+        smarts_Nccn2 = "Nccn"
+        smarts_nnn = "nnn"
+        smarts_ncnn = "ncnn"
+        smarts_cnnc = "cnnc"
+        smarts_cNO = "C=NO"
+        smarts_NNC = "N-N=C"
+        smarts_carbonyl = "[#7]~[#6X3](=[#8])"
+
+        smarts_ONphos = "OC=NP(=O)(O)O"
+        matches_ONphos = match_smarts(self.mol, smarts_ONphos)
+        smarts_ONO = "[O]-[N+]([O-])"
+        smarts_ONCO1 = "O=N-C=O"
+        smarts_ONCO2 = "C=C(N=O)O"
+
+        for at_idx, q in zip(self.atom_indices, self.qs):
+            atom = self.mol.GetAtomWithIdx(at_idx)
+            map_idx = atom.GetAtomMapNum()
+
+            if q != 0:
+                continue
+            if atom.GetSymbol() == "O":
+                for mat in matches_ONphos:
+                    if atom.GetIdx() in mat:
+                        correct_O = False
+                        neighbors = atom.GetNeighbors()
+                        for nbr in neighbors:
+                            if nbr.GetSymbol() == "C":
+                                correct_O = True  # O=CN part of the match
+                        if correct_O:
+                            exclude_acid_indices.add(map_idx)
+                for smarts in [smarts_ONO, smarts_ONCO1, smarts_ONCO2]:
+                    exclude_acid_indices = add_exclusion(exclude_acid_indices, self.mol, atom, smarts)
+
+            if atom.GetSymbol() == "N":
+                exclude_base_indices = add_exclusion(exclude_base_indices, self.mol, atom, smarts_carbonyl)
+                # aromatic n
+                if atom.GetIsAromatic():
+                    for smarts in [
+                        smarts_nnn,smarts_cnnc,
+                    ]:
+                        exclude_base_indices = add_exclusion(exclude_base_indices, self.mol, atom, smarts)
+                    if not any(neigh.GetAtomicNum() == 7 for neigh in atom.GetNeighbors()):
+                        exclude_base_indices = add_exclusion(exclude_base_indices, self.mol, atom, smarts_ncnn)
+
+                    # ring Ns contributing to pi system
+                    if (atom.GetTotalNumHs() > 0) or (atom.GetDegree() == 3):
+                        exclude_base_indices.add(map_idx)
+                # non-aromatic N
+                else:
+                    for smarts in [smarts_sulfonamide, smarts_Ncnn, smarts_Nccn, smarts_Nccn2, smarts_cNO, smarts_NNC]:
+                        exclude_base_indices = add_exclusion(exclude_base_indices, self.mol, atom, smarts)
+                    for mat in matches_imine:  # ...N-C(=N)...
+                        if atom.GetIdx() in mat:
+                            accept = True
+                            for bond in atom.GetBonds():  # Find the correct of the two Ns
+                                if bond.GetBondType() == Chem.BondType.DOUBLE:
+                                    accept = False
+                            if accept:
+                                exclude_base_indices.add(map_idx)
+
+        return sorted(exclude_base_indices), sorted(exclude_acid_indices)
+
+    # def exclude_sites(self) -> tuple[list[int], list[int]]:
+    #     return {}, {}
+
+    def pred_acid(self) -> dict[int, float]:
+        return {}
+
+    def pred_acid_ids(self) -> list[int]:
+        acid_ids = get_ionization_aid(self.mol_h, "acid", self.smarts_pattern)
+        acid_map_ids = get_acid_id_neighbors(self.mol_h, acid_ids)
+        return acid_map_ids
+
+    def pred_base(self) -> dict[int, float]:
+        return {}
+
+    def pred_base_ids(self) -> list[int]:
+        base_ids = get_ionization_aid(self.mol_h, "base", self.smarts_pattern)
+        base_map_ids = convert_base_ids_to_map_ids(self.mol_h, base_ids)
+        return base_map_ids
+
+    def _curate_free_energy(self, standard_free_energy: float) -> float:
+        """Apply molecule-specific corrections to a Uni-pKa free-energy prediction."""
+
+        fe_out = standard_free_energy
+
+        if has_double_nplus_ring(self.mol):
+            fe_out += 5.
+
+        return fe_out
+
+    @classmethod
+    def predict_standard_free_energies(cls, mols: list[Mol], *, config: Any | None = None) -> Any:
+        try:
+            from unipkainfer import predict_standard_free_energies
+        except ModuleNotFoundError as exc:
+            if exc.name != "unipkainfer":
+                raise
+            raise ModuleNotFoundError(
+                "Uni-pKa support is not installed. Install it with "
+                "`python -m pip install 'pkasso[unipka]'`."
+            ) from exc
+
+        results = predict_standard_free_energies(mols, config=config)
+
+        if hasattr(results, "columns") and "standard_free_energy" in results.columns:
+            standard_free_energies = results["standard_free_energy"].tolist()
+            if len(standard_free_energies) != len(mols):
+                raise ValueError(f"Expected {len(mols)} standard free energies, got {len(standard_free_energies)}.")
+
+            results = results.copy()
+            results["standard_free_energy"] = [
+                cls(mol)._curate_free_energy(float(standard_free_energy))
+                for mol, standard_free_energy in zip(mols, standard_free_energies)
+            ]
+
+        return results
+
+############################################################################
+
+PREDICTOR_CLASSES: dict[str, type[Predictor]] = {
+    "molgpka": MolgpkaPredictor,
+    "unipka": UnipkaPredictor,
+}
+
+
+def resolve_predictor_cls(model: PredictorKey | str) -> type[Predictor]:
+    """Resolve a public model key to a predictor class."""
+
+    try:
+        return PREDICTOR_CLASSES[model]
+    except KeyError as exc:
+        valid_keys = ", ".join(sorted(PREDICTOR_CLASSES))
+        raise ValueError(f"Unknown pKa predictor {model!r}. Valid predictors: {valid_keys}.") from exc
+
+
+def resolve_models(model: ModelInput, *, nthreads: int = 0) -> tuple[ResolvedPredictor, ...]:
+    """Resolve an ordered public model mapping through predictor-owned options."""
+
+    if nthreads < 0:
+        raise ValueError("nthreads must be at least 0.")
+    if not isinstance(model, Mapping):
+        raise TypeError(
+            "model must be a mapping such as {'molgpka': {}} or "
+            "{'molgpka': {}, 'unipka': {'gpu': True}}."
+        )
+    if not model:
+        raise ValueError("model must contain at least one predictor.")
+
+    resolved = []
+    for model_key, options in model.items():
+        if not isinstance(model_key, str):
+            raise TypeError("model keys must be predictor names.")
+        if not isinstance(options, Mapping):
+            raise TypeError(f"Options for model {model_key!r} must be a mapping.")
+        predictor_cls = resolve_predictor_cls(model_key)
+        resolved.append(
+            ResolvedPredictor(
+                predictor_cls=predictor_cls,
+                config=predictor_cls.resolve_options(options, nthreads=nthreads),
+            )
+        )
+    return tuple(resolved)
+
+
+def predict_acid(
+    mol: Mol,
+    predictor_cls: type[Predictor] = MolgpkaPredictor,
+) -> dict[int, float]:
+    """Predict acidic pKa values with the selected predictor backend."""
+
+    predictor = predictor_cls(mol)
+    return predictor.pred_acid()
+
+
+def predict_base(
+    mol: Mol,
+    predictor_cls: type[Predictor] = MolgpkaPredictor,
+) -> dict[int, float]:
+    """Predict basic pKa values with the selected predictor backend."""
+
+    predictor = predictor_cls(mol)
+    return predictor.pred_base()
