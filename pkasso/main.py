@@ -37,6 +37,16 @@ from .tautomers import best_tautomer_smiles
 logger = logging.getLogger(__name__)
 RDLogger.DisableLog("rdApp.*")
 
+
+def _suppress_standardizer_debug_logs() -> None:
+    """Hide routine standardization messages from verbose application loggers."""
+
+    for namespace in ("rdkit.Chem.MolStandardize", "molvs"):
+        logging.getLogger(namespace).setLevel(logging.INFO)
+        for module in ("fragment", "normalize", "charge"):
+            logging.getLogger(f"{namespace}.{module}").setLevel(logging.INFO)
+
+
 def sizeable_organic_fragments(
         mol: Mol,
         min_heavy_atoms: int = 6
@@ -93,6 +103,9 @@ def preprocess(
     smiles
         Canonical SMILES representation of the processed molecule.
     """
+
+    # Apply this for every call because notebooks may reconfigure logging after import.
+    _suppress_standardizer_debug_logs()
 
     logger.debug("Raw:")
     logger.debug(smiles_raw)
