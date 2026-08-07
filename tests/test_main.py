@@ -9,7 +9,7 @@ import networkx as nx
 import pytest
 import numpy as np
 
-from rdkit import Chem
+from rdkit import Chem, rdBase, RDLogger
 
 
 def load_main_module():
@@ -130,6 +130,29 @@ def load_main_module():
 
 
 main = load_main_module()
+
+
+def test_preprocess_resets_native_rdkit_debug_logging(capfd):
+    original_log_status = rdBase.LogStatus()
+    RDLogger.EnableLog("rdApp.*")
+
+    try:
+        main.preprocess("CC.O", tautomer_search=False)
+        log_status = rdBase.LogStatus()
+        captured = capfd.readouterr()
+    finally:
+        for line in original_log_status.splitlines():
+            channel, status = line.split(":")
+            if status == "enabled":
+                RDLogger.EnableLog(channel)
+            else:
+                RDLogger.DisableLog(channel)
+
+    assert "rdApp.debug:disabled" in log_status
+    assert "rdApp.info:disabled" in log_status
+    assert "rdApp.warning:enabled" in log_status
+    assert "rdApp.error:enabled" in log_status
+    assert "Running LargestFragmentChooser" not in captured.err
 
 
 def test_pkasso_uses_top_level_nthreads_for_runtime_configuration(monkeypatch):

@@ -35,11 +35,18 @@ from .utils import pack_indices, pack_vec, unpack_vec, construct_mol
 from .tautomers import best_tautomer_smiles
 
 logger = logging.getLogger(__name__)
-RDLogger.DisableLog("rdApp.*")
+RDLogger.DisableLog("rdApp.debug")
+RDLogger.DisableLog("rdApp.info")
 
 
 def _suppress_standardizer_debug_logs() -> None:
     """Hide routine standardization messages from verbose application loggers."""
+
+    # Libraries such as OpenFF NAGL may globally re-enable RDKit's native log
+    # channels. Reset the noisy channels on every call while preserving genuine
+    # warnings and errors.
+    RDLogger.DisableLog("rdApp.debug")
+    RDLogger.DisableLog("rdApp.info")
 
     for namespace in ("rdkit.Chem.MolStandardize", "molvs"):
         logging.getLogger(namespace).setLevel(logging.INFO)
