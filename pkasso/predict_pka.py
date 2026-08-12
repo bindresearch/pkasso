@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, ClassVar, Literal, cast
 
 import numpy as np
-from rdkit import Chem
+from rdkit import Chem, rdBase
 from rdkit.Chem.rdchem import Mol
 
 from .special_cases import (
@@ -613,7 +613,8 @@ class UnipkaPredictor(Predictor):
                 "`python -m pip install 'pkasso[unipka]'`."
             ) from exc
 
-        results = predict_standard_free_energies(mols, config=config)
+        with rdBase.BlockLogs():
+            results = predict_standard_free_energies(mols, config=config)
 
         if hasattr(results, "columns") and "standard_free_energy" in results.columns:
             standard_free_energies = results["standard_free_energy"].tolist()
