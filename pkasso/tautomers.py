@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from typing import TypedDict
 
-from rdkit import Chem
+from rdkit import Chem, rdBase
 from rdkit.Chem import AllChem
 from rdkit.Chem.MolStandardize import rdMolStandardize
 
@@ -64,26 +64,27 @@ def rdkit_tautomer_conformers(
     params.useRandomCoords = False
     params.numThreads = num_threads
 
-    conf_ids = AllChem.EmbedMultipleConfs(
-        mol,
-        numConfs=num_confs,
-        params=params,
-    )
+    with rdBase.BlockLogs():
+        conf_ids = AllChem.EmbedMultipleConfs(
+            mol,
+            numConfs=num_confs,
+            params=params,
+        )
 
-    if len(conf_ids) == 0:
-        return None
+        if len(conf_ids) == 0:
+            return None
 
-    # MMFF optimization
-    mmff_props = AllChem.MMFFGetMoleculeProperties(mol)
+        # MMFF optimization
+        mmff_props = AllChem.MMFFGetMoleculeProperties(mol)
 
-    if mmff_props is None:
-        return None
+        if mmff_props is None:
+            return None
 
-    results = AllChem.MMFFOptimizeMoleculeConfs(
-        mol,
-        numThreads=num_threads,
-        mmffVariant="MMFF94s",
-    )
+        results = AllChem.MMFFOptimizeMoleculeConfs(
+            mol,
+            numThreads=num_threads,
+            mmffVariant="MMFF94s",
+        )
 
     conf_energies: list[ConformerEnergy] = []
 
@@ -112,7 +113,8 @@ def best_tautomer_smiles(
     enumerator = rdMolStandardize.TautomerEnumerator()
     enumerator.SetMaxTautomers(max_tautomers + 1)
 
-    tautomers = list(enumerator.Enumerate(mol))
+    with rdBase.BlockLogs():
+        tautomers = list(enumerator.Enumerate(mol))
 
     if len(tautomers) == 1:
         return str(Chem.MolToSmiles(tautomers[0]))

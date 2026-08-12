@@ -9,7 +9,7 @@ from typing import Any, cast
 import networkx as nx
 import numpy as np
 from numpy.typing import NDArray
-from rdkit import Chem, RDLogger
+from rdkit import Chem, RDLogger, rdBase
 from rdkit.Chem import AllChem, Descriptors, RegistrationHash
 from rdkit.Chem.MolStandardize import rdMolStandardize
 from rdkit.Chem.rdchem import Mol
@@ -183,7 +183,8 @@ def _can_embed_with_stereochemistry(mol: Mol) -> bool:
     """Return whether RDKit can embed a sanitized copy of ``mol``."""
 
     mol_h = Chem.AddHs(Chem.Mol(mol))
-    return bool(AllChem.EmbedMolecule(mol_h, randomSeed=1, useRandomCoords=True) == 0)
+    with rdBase.BlockLogs():
+        return bool(AllChem.EmbedMolecule(mol_h, randomSeed=1, useRandomCoords=True) == 0)
 
 
 def _validate_smiles_roundtrip_and_embedding(mol: Mol) -> None:
