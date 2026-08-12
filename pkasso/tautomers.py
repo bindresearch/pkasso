@@ -110,6 +110,7 @@ def best_tautomer_smiles(
         return smiles
 
     enumerator = rdMolStandardize.TautomerEnumerator()
+    enumerator.SetMaxTautomers(max_tautomers + 1)
 
     tautomers = list(enumerator.Enumerate(mol))
 
