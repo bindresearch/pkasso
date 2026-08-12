@@ -49,7 +49,11 @@ def construct_mol(mol0: Mol, indices: list[int], state_vec: NDArray[np.int64]) -
         if atom is None:
             raise ValueError(f"Could not find atom with map index {map_idx}.")
         atom.SetFormalCharge(int(q))
-        if q == -1:
+        if q == 1:
+            atom_idx = atom.GetIdx()
+            hydrogen_idx = rw.AddAtom(Chem.Atom(1))
+            rw.AddBond(atom_idx, hydrogen_idx, Chem.BondType.SINGLE)
+        elif q == -1:
             for nbr in atom.GetNeighbors():
                 if nbr.GetAtomicNum() == 1:
                     rw.RemoveAtom(nbr.GetIdx())

@@ -9,7 +9,7 @@ from typing import Any, cast
 import networkx as nx
 import numpy as np
 from numpy.typing import NDArray
-from rdkit import Chem, RDLogger
+from rdkit import Chem, RDLogger, rdBase
 from rdkit.Chem import AllChem, Descriptors, RegistrationHash
 from rdkit.Chem.MolStandardize import rdMolStandardize
 from rdkit.Chem.rdchem import Mol
@@ -35,7 +35,24 @@ from .utils import pack_indices, pack_vec, unpack_vec, construct_mol
 from .tautomers import best_tautomer_smiles
 
 logger = logging.getLogger(__name__)
-RDLogger.DisableLog("rdApp.*")
+RDLogger.DisableLog("rdApp.debug")
+RDLogger.DisableLog("rdApp.info")
+
+
+def _suppress_standardizer_debug_logs() -> None:
+    """Hide routine standardization messages from verbose application loggers."""
+
+    # Libraries such as OpenFF NAGL may globally re-enable RDKit's native log
+    # channels. Reset the noisy channels on every call while preserving genuine
+    # warnings and errors.
+    RDLogger.DisableLog("rdApp.debug")
+    RDLogger.DisableLog("rdApp.info")
+
+    for namespace in ("rdkit.Chem.MolStandardize", "molvs"):
+        logging.getLogger(namespace).setLevel(logging.INFO)
+        for module in ("fragment", "normalize", "charge"):
+            logging.getLogger(f"{namespace}.{module}").setLevel(logging.INFO)
+
 
 def sizeable_organic_fragments(
         mol: Mol,
@@ -93,6 +110,9 @@ def preprocess(
     smiles
         Canonical SMILES representation of the processed molecule.
     """
+
+    # Apply this for every call because notebooks may reconfigure logging after import.
+    _suppress_standardizer_debug_logs()
 
     logger.debug("Raw:")
     logger.debug(smiles_raw)
@@ -157,6 +177,88 @@ def preprocess(
         atom.SetAtomMapNum(atom.GetIdx() + 1)
 
     return mol, smiles
+
+
+def _can_embed_with_stereochemistry(mol: Mol) -> bool:
+    """Return whether RDKit can embed a sanitized copy of ``mol``."""
+
+    mol_h = Chem.AddHs(Chem.Mol(mol))
+    with rdBase.BlockLogs():
+        return bool(AllChem.EmbedMolecule(mol_h, randomSeed=1, useRandomCoords=True) == 0)
+
+
+def _validate_smiles_roundtrip_and_embedding(mol: Mol) -> None:
+    """Ensure the final isomeric SMILES can be loaded and embedded."""
+
+    output_mol = Chem.Mol(mol)
+    for atom in output_mol.GetAtoms():
+        atom.SetAtomMapNum(0)
+
+    smiles = Chem.MolToSmiles(output_mol, isomericSmiles=True)
+    roundtrip = Chem.MolFromSmiles(smiles, sanitize=True)
+    if roundtrip is None:
+        raise ValueError(f"Generated microstate SMILES could not be loaded: {smiles}")
+    if not _can_embed_with_stereochemistry(roundtrip):
+        raise ValueError(f"Generated microstate SMILES could not be embedded: {smiles}")
+
+
+def relax_stereochemistry_for_embedding(
+    mol: Mol,
+    changed_map_indices: set[int] | None = None,
+) -> Mol:
+    """Return an embeddable copy while retaining compatible atom stereochemistry.
+
+    If the fully specified molecule cannot be embedded, all atom chiral tags are
+    removed on a trial copy and then restored one at a time. Unchanged carbon
+    stereocentres are restored first, while changed sites and heteroatom centres
+    are restored later. This preserves the most stable stereochemical constraints
+    without ever mutating the input molecule during failed embedding trials.
+    """
+
+    changed_map_indices = changed_map_indices or set()
+    original = Chem.Mol(mol)
+    Chem.SanitizeMol(original)
+
+    if _can_embed_with_stereochemistry(original):
+        _validate_smiles_roundtrip_and_embedding(original)
+        return original
+
+    chiral_atoms = [
+        (atom.GetIdx(), atom.GetAtomMapNum(), atom.GetAtomicNum(), atom.GetChiralTag())
+        for atom in original.GetAtoms()
+        if atom.GetChiralTag() != Chem.ChiralType.CHI_UNSPECIFIED
+    ]
+
+    relaxed = Chem.Mol(original)
+    for atom in relaxed.GetAtoms():
+        atom.SetChiralTag(Chem.ChiralType.CHI_UNSPECIFIED)
+
+    if not _can_embed_with_stereochemistry(relaxed):
+        raise ValueError(
+            "Microstate could not be embedded even after removing all atom stereochemistry."
+        )
+
+    def restore_priority(item: tuple[int, int, int, Chem.ChiralType]) -> tuple[bool, bool, int]:
+        atom_idx, map_idx, atomic_num, _ = item
+        return atomic_num != 6, map_idx in changed_map_indices, atom_idx
+
+    removed_centres: list[int] = []
+    for atom_idx, map_idx, _, chiral_tag in sorted(chiral_atoms, key=restore_priority):
+        trial = Chem.Mol(relaxed)
+        trial.GetAtomWithIdx(atom_idx).SetChiralTag(chiral_tag)
+        if _can_embed_with_stereochemistry(trial):
+            relaxed = trial
+        else:
+            removed_centres.append(map_idx or atom_idx + 1)
+
+    if removed_centres:
+        logger.warning(
+            "Removed incompatible atom stereochemistry at atom map indices %s.",
+            removed_centres,
+        )
+
+    _validate_smiles_roundtrip_and_embedding(relaxed)
+    return relaxed
 
 
 def find_candidate_sites(
@@ -2330,7 +2432,7 @@ class pKasso:
         state_freqs_sigmas_export = [state_freqs_sigmas_export[p] for p in ps]
         state_strs_export = [state_strs_export[p] for p in ps]
 
-        self.check_chiral_consistency(distribution.state_strs, distribution.indices)
+        self.check_chiral_consistency(state_strs_export, distribution.indices)
         space = self.index_spaces.get(distribution.indices)
 
         molecule = combine_results(
@@ -2348,15 +2450,13 @@ class pKasso:
         state_strs: list[str],
         indices: list[int],
     ) -> None:
-        """Ensure generated microstate molecules can be embedded consistently.
+        """Retain the compatible stereochemistry of exported microstates.
 
-        This method attempts to generate 3D embeddings for each microstate
-        molecule. If embedding fails due to stereochemical constraints,
-        chiral tags are removed and embedding is retried.
-
-        Updated molecules are written back to the internal molecular cache.
-
-        Note that this globally removes chirality when embedding fails!
+        Each exported molecule is checked for 3D embeddability. If its atom
+        stereochemistry is inconsistent, compatible centres are restored to a
+        trial copy in priority order and only the incompatible constraints are
+        omitted. The final isomeric SMILES is round-tripped and embedded before
+        the validated molecule is written back to the cache.
 
         Parameters
         ----------
@@ -2369,19 +2469,12 @@ class pKasso:
         space = self.index_spaces.get(indices)
         for state_str in state_strs:
             mol = space.mols_lib[state_str]
-
-            mol_h = Chem.AddHs(mol)
-
-            cid = AllChem.EmbedMolecule(mol_h, randomSeed=1, useRandomCoords=True)
-            if cid != 0:
-                logger.warning(f"Needed to remove chirality for embedding for {state_str}!")
-                for atom in mol_h.GetAtoms():
-                    atom.SetChiralTag(Chem.ChiralType.CHI_UNSPECIFIED)
-            cid = AllChem.EmbedMolecule(mol_h, randomSeed=1, useRandomCoords=True)
-
-            if cid != 0:
-                raise ValueError(f"{state_str} could not be embedded.")
-            for atom in mol.GetAtoms():
-                atom.SetChiralTag(Chem.ChiralType.CHI_UNSPECIFIED)
-
-            space.mols_lib[state_str] = mol
+            changed_map_indices = {
+                map_idx
+                for map_idx, state in zip(indices, unpack_vec(state_str))
+                if state != 1
+            }
+            space.mols_lib[state_str] = relax_stereochemistry_for_embedding(
+                mol,
+                changed_map_indices,
+            )

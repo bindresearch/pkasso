@@ -9,7 +9,7 @@ import networkx as nx
 import pytest
 import numpy as np
 
-from rdkit import Chem
+from rdkit import Chem, rdBase, RDLogger
 
 
 def load_main_module():
@@ -130,6 +130,29 @@ def load_main_module():
 
 
 main = load_main_module()
+
+
+def test_preprocess_resets_native_rdkit_debug_logging(capfd):
+    original_log_status = rdBase.LogStatus()
+    RDLogger.EnableLog("rdApp.*")
+
+    try:
+        main.preprocess("CC.O", tautomer_search=False)
+        log_status = rdBase.LogStatus()
+        captured = capfd.readouterr()
+    finally:
+        for line in original_log_status.splitlines():
+            channel, status = line.split(":")
+            if status == "enabled":
+                RDLogger.EnableLog(channel)
+            else:
+                RDLogger.DisableLog(channel)
+
+    assert "rdApp.debug:disabled" in log_status
+    assert "rdApp.info:disabled" in log_status
+    assert "rdApp.warning:enabled" in log_status
+    assert "rdApp.error:enabled" in log_status
+    assert "Running LargestFragmentChooser" not in captured.err
 
 
 def test_pkasso_uses_top_level_nthreads_for_runtime_configuration(monkeypatch):
@@ -816,3 +839,75 @@ def test_construct_mol(smiles_raw, net_charge):
     state_vec = np.array(state_vec)
     mol_cand = main.construct_mol(mol, indices, state_vec)
     assert Chem.GetFormalCharge(mol_cand) == net_charge
+
+
+@pytest.mark.parametrize(
+    ("smiles_raw", "expected_hydrogens"),
+    [
+        ("CN(C)C", 1),
+        ("CN", 3),
+        ("c1ccncc1", 1),
+    ],
+)
+def test_construct_mol_protonation_adds_hydrogen_without_radical(
+    smiles_raw,
+    expected_hydrogens,
+):
+    mol = Chem.MolFromSmiles(smiles_raw)
+    for atom in mol.GetAtoms():
+        atom.SetAtomMapNum(atom.GetIdx() + 1)
+
+    nitrogen = next(atom for atom in mol.GetAtoms() if atom.GetSymbol() == "N")
+    mol_cand = main.construct_mol(
+        mol,
+        [nitrogen.GetAtomMapNum()],
+        np.array([2], dtype=np.int64),
+    )
+    protonated_nitrogen = next(
+        atom for atom in mol_cand.GetAtoms() if atom.GetSymbol() == "N"
+    )
+
+    assert protonated_nitrogen.GetFormalCharge() == 1
+    assert protonated_nitrogen.GetTotalNumHs() == expected_hydrogens
+    assert protonated_nitrogen.GetNumRadicalElectrons() == 0
+
+
+def test_stereochemistry_relaxation_preserves_compatible_carbon_centres():
+    smiles = (
+        "C=C[C@H]1C[N@@]2CC[C@H]1C[C@@H]2[C@@H](OC(=O)OCC)"
+        "c1ccnc2ccc(OC)cc12"
+    )
+    mol, _ = main.preprocess(smiles, tautomer_search=False)
+    nitrogen = next(
+        atom
+        for atom in mol.GetAtoms()
+        if atom.GetSymbol() == "N" and not atom.GetIsAromatic()
+    )
+    nitrogen_map_idx = nitrogen.GetAtomMapNum()
+    protonated = main.construct_mol(
+        mol,
+        [nitrogen_map_idx],
+        np.array([2], dtype=np.int64),
+    )
+
+    relaxed = main.relax_stereochemistry_for_embedding(
+        protonated,
+        {nitrogen_map_idx},
+    )
+
+    specified_carbons = [
+        atom
+        for atom in relaxed.GetAtoms()
+        if atom.GetAtomicNum() == 6
+        and atom.GetChiralTag() != Chem.ChiralType.CHI_UNSPECIFIED
+    ]
+    relaxed_nitrogen = next(
+        atom for atom in relaxed.GetAtoms() if atom.GetAtomMapNum() == nitrogen_map_idx
+    )
+
+    assert len(specified_carbons) == 4
+    assert relaxed_nitrogen.GetChiralTag() == Chem.ChiralType.CHI_UNSPECIFIED
+    assert relaxed_nitrogen.GetFormalCharge() == 1
+    assert relaxed_nitrogen.GetTotalNumHs() == 1
+    assert relaxed_nitrogen.GetNumRadicalElectrons() == 0
+    assert main._can_embed_with_stereochemistry(relaxed)
