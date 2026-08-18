@@ -528,7 +528,7 @@ def test_screen_clusters_does_not_decouple_phosphates_for_non_molgpka_context(mo
     assert pk.screen_clusters(indices, q_options, context=context) == [list(range(len(indices)))]
 
 
-def test_combine_expert_energies_disables_uncertainty_for_incomplete_expert_coverage(caplog):
+def test_combine_expert_energies_treats_supported_pruned_state_as_zero(caplog):
     space = main.ProtonationIndexSpace(
         indices=[1, 2],
         q_options=np.array([[1, 1, 0], [1, 1, 0]], dtype=np.int64),
@@ -548,14 +548,19 @@ def test_combine_expert_energies_disables_uncertainty_for_incomplete_expert_cove
         Gs=np.array([3.0, 5.0, 1.0]),
     )
 
-    with caplog.at_level(logging.WARNING, logger=main.logger.name):
+    with caplog.at_level(logging.DEBUG, logger=main.logger.name):
         combined = main.combine_expert_energies([raw_a, raw_b])
 
     assert combined.state_strs == ["00", "01", "11"]
     assert combined.Gs.tolist() == pytest.approx([0.0, 3.04742587, 3.0])
-    assert combined.expert_state_freqs is None
-    assert "Microstate 01" in caplog.text
-    assert "found by only 1 of 2 experts" in caplog.text
+    assert combined.expert_state_freqs is not None
+    assert combined.expert_state_freqs[0] == pytest.approx(
+        main.calc_populations(np.array([0.0, 3.0, 2.0]))
+    )
+    expected_second = np.zeros(3)
+    expected_second[[0, 2]] = main.calc_populations(np.array([1.0, 5.0]))
+    assert combined.expert_state_freqs[1] == pytest.approx(expected_second)
+    assert "Treating supported states ['01']" in caplog.text
 
 
 def test_combine_expert_energies_falls_back_to_first_model_without_shared_state(caplog):
@@ -636,7 +641,7 @@ def test_complete_expert_populations_drive_microstate_and_macro_uncertainty():
     assert distribution.freqs_macro_samples is not None
 
 
-def test_missing_expert_state_disables_all_population_uncertainty(caplog):
+def test_supported_pruned_state_keeps_population_uncertainty():
     space = main.ProtonationIndexSpace(
         indices=[1],
         q_options=np.array([[1, 1, 0]], dtype=np.int64),
@@ -665,10 +670,53 @@ def test_missing_expert_state_disables_all_population_uncertainty(caplog):
     pk.expert_weights = None
     pk.construct_mols = lambda *_args: None
 
+    distribution = pk._finalize_microstates([raw_a, raw_b])
+
+    assert distribution.state_freq_samples is not None
+    assert distribution.state_freq_samples[1] == pytest.approx([1.0, 0.0])
+    assert distribution.state_freqs_sigmas is not None
+    assert distribution.net_charge_sigma is not None
+    assert distribution.freqs_macro_samples is not None
+
+
+def test_unsupported_expert_state_disables_all_population_uncertainty(caplog):
+    primary_space = main.ProtonationIndexSpace(
+        indices=[1],
+        q_options=np.array([[1, 1, 0]], dtype=np.int64),
+        mols_lib={
+            "0": Chem.MolFromSmiles("[NH2-]"),
+            "1": Chem.MolFromSmiles("N"),
+        },
+    )
+    secondary_space = main.ProtonationIndexSpace(
+        indices=[1],
+        q_options=np.array([[0, 1, 0]], dtype=np.int64),
+    )
+    raw_a = main.RawMicrostateEnergies(
+        index_space=primary_space,
+        pH=7.0,
+        state_strs=["0", "1"],
+        state_vecs=[np.array([0]), np.array([1])],
+        Gs=np.array([0.0, 2.0]),
+    )
+    raw_b = main.RawMicrostateEnergies(
+        index_space=secondary_space,
+        pH=7.0,
+        state_strs=["1"],
+        state_vecs=[np.array([1])],
+        Gs=np.array([0.0]),
+    )
+    pk = main.pKasso.__new__(main.pKasso)
+    pk.index_space0 = primary_space
+    pk.expert_combination = "product_of_experts"
+    pk.expert_weights = None
+    pk.construct_mols = lambda *_args: None
+
     with caplog.at_level(logging.WARNING, logger=main.logger.name):
         distribution = pk._finalize_microstates([raw_a, raw_b])
 
-    assert "Microstate 1" in caplog.text
+    assert "Microstate 0" in caplog.text
+    assert "unsupported by expert 2" in caplog.text
     assert distribution.state_freq_samples is None
     assert distribution.state_freqs_sigmas is None
     assert distribution.net_charge_sigma is None
@@ -821,6 +869,22 @@ def test_macro_pka_uncertainty_uses_complete_expert_trajectories():
     sigmas = main.combine_pkas_macro_sigmas(pHs, samples)
 
     assert sigmas[0] == pytest.approx(np.std(expert_pkas, ddof=1))
+
+
+def test_macro_pka_uncertainty_skips_expert_with_zero_macrostate_population():
+    pHs = np.array([6.0, 7.0], dtype=np.float64)
+    samples = [
+        {
+            0: np.array([0.8, 0.0]),
+            1: np.array([0.2, 1.0]),
+        },
+        {
+            0: np.array([0.4, 0.0]),
+            1: np.array([0.6, 1.0]),
+        },
+    ]
+
+    assert main.combine_pkas_macro_sigmas(pHs, samples) == {}
 
 
 def test_process_cluster_uses_batched_standard_free_energies_for_unipka_path():

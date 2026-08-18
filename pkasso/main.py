@@ -760,44 +760,101 @@ def _align_energy_rows(
     return aligned_rows
 
 
+def _state_supported_by_expert(
+    state_str: str,
+    combined_indices: list[int],
+    expert_space: ProtonationIndexSpace,
+) -> bool:
+    """Return whether an expert's original state space can represent a state."""
+
+    options_by_index = {
+        map_idx: expert_space.q_options[rel_idx]
+        for rel_idx, map_idx in enumerate(expert_space.indices)
+    }
+    for map_idx, state_char in zip(combined_indices, state_str):
+        state_value = int(state_char)
+        options = options_by_index.get(map_idx)
+        if options is None:
+            if state_value != 1:
+                return False
+        elif options[state_value] == 0:
+            return False
+    return True
+
+
 def _expert_population_rows(
     state_strs: list[str],
     G_by_state_rows: list[dict[str, float]],
+    raw_dists: Sequence[RawMicrostateEnergies],
+    combined_indices: list[int],
     pH: float,
 ) -> NDArray[np.float64] | None:
-    """Return comparable expert populations over one complete state space."""
+    """Return expert populations, treating supported pruned states as zero."""
 
-    missing_states = {
-        state_str: [
-            expert_idx
-            for expert_idx, G_by_state in enumerate(G_by_state_rows)
+    population_rows = []
+    state_indices = {
+        state_str: state_idx
+        for state_idx, state_str in enumerate(state_strs)
+    }
+    for expert_idx, (G_by_state, raw) in enumerate(zip(G_by_state_rows, raw_dists)):
+        missing_states = [
+            state_str
+            for state_str in state_strs
             if state_str not in G_by_state
         ]
-        for state_str in state_strs
-    }
-    missing_states = {
-        state_str: expert_indices
-        for state_str, expert_indices in missing_states.items()
-        if expert_indices
-    }
-    if missing_states:
-        for state_str, expert_indices in missing_states.items():
-            missing_experts = [expert_idx + 1 for expert_idx in expert_indices]
-            logger.warning(
-                "Microstate %s at pH %.3f was found by only %d of %d experts "
-                "(missing from experts %s). Population uncertainty is unavailable.",
+        unsupported_states = [
+            state_str
+            for state_str in missing_states
+            if not _state_supported_by_expert(
                 state_str,
-                pH,
-                len(G_by_state_rows) - len(expert_indices),
-                len(G_by_state_rows),
-                missing_experts,
+                combined_indices,
+                raw.index_space,
             )
-        return None
+        ]
+        if unsupported_states:
+            for state_str in unsupported_states:
+                logger.warning(
+                    "Microstate %s at pH %.3f is unsupported by expert %d. "
+                    "Population uncertainty is unavailable.",
+                    state_str,
+                    pH,
+                    expert_idx + 1,
+                )
+            return None
 
-    return np.asarray([
-        calc_populations(np.asarray([G_by_state[state_str] for state_str in state_strs]))
-        for G_by_state in G_by_state_rows
-    ], dtype=np.float64)
+        evaluated_states = [
+            state_str
+            for state_str in state_strs
+            if state_str in G_by_state
+        ]
+        if not evaluated_states:
+            logger.warning(
+                "Expert %d retained no states from the authoritative state space "
+                "at pH %.3f. Population uncertainty is unavailable.",
+                expert_idx + 1,
+                pH,
+            )
+            return None
+
+        if missing_states:
+            logger.debug(
+                "Treating supported states %s pruned by expert %d at pH %.3f "
+                "as zero-population states.",
+                missing_states,
+                expert_idx + 1,
+                pH,
+            )
+
+        evaluated_populations = calc_populations(np.asarray([
+            G_by_state[state_str]
+            for state_str in evaluated_states
+        ]))
+        populations = np.zeros(len(state_strs), dtype=np.float64)
+        for state_str, population in zip(evaluated_states, evaluated_populations):
+            populations[state_indices[state_str]] = population
+        population_rows.append(populations)
+
+    return np.asarray(population_rows, dtype=np.float64)
 
 
 def combine_expert_energies(
@@ -903,13 +960,20 @@ def combine_expert_energies(
             for state_str in fallback_G_by_state
             if state_str in state_sets[0]
         ]
-        _expert_population_rows(fallback_state_strs, G_by_state_rows, pH)
+        expert_state_freqs = _expert_population_rows(
+            fallback_state_strs,
+            G_by_state_rows,
+            raw_dists,
+            combined_indices,
+            pH,
+        )
         return RawMicrostateEnergies(
             index_space=combined_index_space,
             pH=pH,
             state_strs=fallback_state_strs,
             state_vecs=[unpack_vec(state_str) for state_str in fallback_state_strs],
             Gs=np.array([fallback_G_by_state[state_str] for state_str in fallback_state_strs], dtype=np.float64),
+            expert_state_freqs=expert_state_freqs,
         )
 
     aligned_rows = _align_energy_rows(G_by_state_rows, shared_states)
@@ -919,7 +983,13 @@ def combine_expert_energies(
         state_str: unpack_vec(state_str)
         for state_str in combined_states
     }
-    expert_state_freqs = _expert_population_rows(combined_states, aligned_rows, pH)
+    expert_state_freqs = _expert_population_rows(
+        combined_states,
+        aligned_rows,
+        raw_dists,
+        combined_indices,
+        pH,
+    )
 
     weights_arr = _normalized_weights(weights, len(raw_dists))
 
@@ -1166,6 +1236,8 @@ def combine_pkas_macro(
             if q + 1 in qs_sorted:
                 freq1 = freqs_macro[q]
                 freq2 = freqs_macro[q + 1]
+                if freq1 <= 0.0 or freq2 <= 0.0:
+                    continue
                 pka_macro = np.log10(freq2 / freq1) + pH
                 pka_weight = (freq1 * freq2) / (freq1 + freq2)
                 if q in pkas_macro:
