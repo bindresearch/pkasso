@@ -448,7 +448,7 @@ class RawMicrostateEnergies:
     state_strs: list[str]
     state_vecs: list[NDArray[np.int64]]
     Gs: list[float] | NDArray[np.float64]
-    Gs_sigmas: list[float] | NDArray[np.float64] | None = None
+    expert_state_freqs: NDArray[np.float64] | None = None
 
     @property
     def indices(self) -> list[int]:
@@ -490,7 +490,6 @@ class MicrostateDistribution:
     state_vecs: list[NDArray[np.int64]]
     Gs: list[float] | NDArray[np.float64]
     state_freqs: list[float] | NDArray[np.float64]
-    Gs_sigmas: list[float] | NDArray[np.float64] | None = None
     state_freqs_sigmas: list[float] | NDArray[np.float64] | None = None
     state_freq_samples: NDArray[np.float64] | None = None
     state_qs: dict[str, int] | None = None
@@ -535,9 +534,6 @@ class MicrostateDistribution:
         if state_freq_samples_symm is not None:
             self.state_freq_samples = np.asarray(state_freq_samples_symm, dtype=np.float64).T
             self.state_freqs_sigmas = np.std(self.state_freq_samples, axis=0, ddof=1)
-            G_samples = -np.log(np.clip(self.state_freq_samples, np.finfo(float).tiny, 1.0))
-            G_samples -= np.min(G_samples, axis=1, keepdims=True)
-            self.Gs_sigmas = np.std(G_samples, axis=0, ddof=1)
         self.state_vecs = [unpack_vec(state_str) for state_str in self.state_strs]
 
     def assign_macro_props(self) -> None:
@@ -585,6 +581,7 @@ class PHScanDistribution:
     net_charge_sigmas: list[float]
     state_freqs_all: dict[str, NDArray[np.float64]]
     state_freqs_sigmas_all: dict[str, NDArray[np.float64]]
+    state_freqs_expert_max_all: dict[str, NDArray[np.float64]]
     freqs_macro_all: list[dict[int, float]]
     molecules: dict[float, Molecule]
     freqs_macro_samples_all: list[dict[int, NDArray[np.float64]]] = field(default_factory=list)
@@ -763,58 +760,44 @@ def _align_energy_rows(
     return aligned_rows
 
 
-def _estimate_energy_sigmas(
-    union_states: list[str],
-    aligned_rows: list[dict[str, float]],
-    sigma_floor: float = 2.0,
-) -> NDArray[np.float64]:
-    """Estimate per-state free-energy uncertainty from aligned model spread."""
-
-    sigmas_by_state: dict[str, float] = {}
-    shared_sigmas = []
-
-    for state_str in union_states:
-        values = np.array([
-            G_by_state[state_str]
-            for G_by_state in aligned_rows
-            if state_str in G_by_state
-        ], dtype=np.float64)
-        if len(values) > 1:
-            sigma = float(np.std(values, ddof=1))
-            sigmas_by_state[state_str] = sigma
-            shared_sigmas.append(sigma)
-
-    sigma_missing = sigma_floor
-    if shared_sigmas:
-        sigma_missing = max(float(np.median(shared_sigmas)), sigma_floor)
-
-    for state_str in union_states:
-        if state_str not in sigmas_by_state:
-            sigmas_by_state[state_str] = sigma_missing
-
-    return np.array([sigmas_by_state[state_str] for state_str in union_states], dtype=np.float64)
-
-
-def _sample_state_freqs(
-    Gs: NDArray[np.float64],
-    Gs_sigmas: NDArray[np.float64] | None,
-    n_samples: int = 200,
-    seed: int = 1,
+def _expert_population_rows(
+    state_strs: list[str],
+    G_by_state_rows: list[dict[str, float]],
+    pH: float,
 ) -> NDArray[np.float64] | None:
-    """Monte-Carlo sample populations from independent free-energy errors."""
+    """Return comparable expert populations over one complete state space."""
 
-    if Gs_sigmas is None or n_samples < 2:
+    missing_states = {
+        state_str: [
+            expert_idx
+            for expert_idx, G_by_state in enumerate(G_by_state_rows)
+            if state_str not in G_by_state
+        ]
+        for state_str in state_strs
+    }
+    missing_states = {
+        state_str: expert_indices
+        for state_str, expert_indices in missing_states.items()
+        if expert_indices
+    }
+    if missing_states:
+        for state_str, expert_indices in missing_states.items():
+            missing_experts = [expert_idx + 1 for expert_idx in expert_indices]
+            logger.warning(
+                "Microstate %s at pH %.3f was found by only %d of %d experts "
+                "(missing from experts %s). Population uncertainty is unavailable.",
+                state_str,
+                pH,
+                len(G_by_state_rows) - len(expert_indices),
+                len(G_by_state_rows),
+                missing_experts,
+            )
         return None
 
-    sigmas = np.asarray(Gs_sigmas, dtype=np.float64)
-    if sigmas.shape != Gs.shape:
-        raise ValueError(f"Expected {len(Gs)} free-energy sigmas, got {len(sigmas)}.")
-
-    rng = np.random.default_rng(seed)
-    G_samples = rng.normal(loc=Gs, scale=sigmas, size=(n_samples, len(Gs)))
-    G_samples -= np.min(G_samples, axis=1, keepdims=True)
-    weights = np.exp(-G_samples)
-    return weights / np.sum(weights, axis=1, keepdims=True)
+    return np.asarray([
+        calc_populations(np.asarray([G_by_state[state_str] for state_str in state_strs]))
+        for G_by_state in G_by_state_rows
+    ], dtype=np.float64)
 
 
 def combine_expert_energies(
@@ -843,7 +826,6 @@ def combine_expert_energies(
             state_strs=list(raw.state_strs),
             state_vecs=list(raw.state_vecs),
             Gs=np.asarray(raw.Gs, dtype=np.float64),
-            Gs_sigmas=None if raw.Gs_sigmas is None else np.asarray(raw.Gs_sigmas, dtype=np.float64),
         )
 
     reference = raw_dists[0]
@@ -921,13 +903,13 @@ def combine_expert_energies(
             for state_str in fallback_G_by_state
             if state_str in state_sets[0]
         ]
+        _expert_population_rows(fallback_state_strs, G_by_state_rows, pH)
         return RawMicrostateEnergies(
             index_space=combined_index_space,
             pH=pH,
             state_strs=fallback_state_strs,
             state_vecs=[unpack_vec(state_str) for state_str in fallback_state_strs],
             Gs=np.array([fallback_G_by_state[state_str] for state_str in fallback_state_strs], dtype=np.float64),
-            Gs_sigmas=np.full(len(fallback_state_strs), 2.0, dtype=np.float64),
         )
 
     aligned_rows = _align_energy_rows(G_by_state_rows, shared_states)
@@ -937,7 +919,7 @@ def combine_expert_energies(
         state_str: unpack_vec(state_str)
         for state_str in combined_states
     }
-    Gs_sigmas = _estimate_energy_sigmas(combined_states, aligned_rows)
+    expert_state_freqs = _expert_population_rows(combined_states, aligned_rows, pH)
 
     weights_arr = _normalized_weights(weights, len(raw_dists))
 
@@ -985,7 +967,7 @@ def combine_expert_energies(
         state_strs=combined_states,
         state_vecs=[state_vec_by_str[state_str] for state_str in combined_states],
         Gs=Gs,
-        Gs_sigmas=Gs_sigmas,
+        expert_state_freqs=expert_state_freqs,
     )
 
 def mol2hash(mol: Mol) -> str:
@@ -1208,33 +1190,38 @@ def combine_pkas_macro_sigmas(
 ) -> dict[int, float]:
     """Estimate macro-pKa uncertainty from sampled macrostate frequencies."""
 
-    if not freqs_macro_samples_all:
+    if not freqs_macro_samples_all or any(
+        not freqs_macro_samples
+        for freqs_macro_samples in freqs_macro_samples_all
+    ):
         return {}
 
-    n_samples = 0
-    for freqs_macro_samples in freqs_macro_samples_all:
-        if freqs_macro_samples:
-            n_samples = len(next(iter(freqs_macro_samples.values())))
-            break
+    sample_counts = {
+        len(next(iter(freqs_macro_samples.values())))
+        for freqs_macro_samples in freqs_macro_samples_all
+    }
+    if len(sample_counts) != 1:
+        return {}
+    n_samples = sample_counts.pop()
     if n_samples < 2:
         return {}
 
-    pkas_by_q: dict[int, list[float]] = {}
+    pkas_by_expert: list[dict[int, float]] = []
     for sample_idx in range(n_samples):
-        freqs_macro_all = [
+        freqs_macro_expert = [
             {
                 q: float(freq_samples[sample_idx])
                 for q, freq_samples in freqs_macro_samples.items()
             }
             for freqs_macro_samples in freqs_macro_samples_all
         ]
-        for q, pka in combine_pkas_macro(pHs, freqs_macro_all).items():
-            pkas_by_q.setdefault(q, []).append(pka)
+        pkas_by_expert.append(combine_pkas_macro(pHs, freqs_macro_expert))
+
+    shared_qs = set.intersection(*[set(pkas) for pkas in pkas_by_expert])
 
     return {
-        q: float(np.std(pkas, ddof=1))
-        for q, pkas in pkas_by_q.items()
-        if len(pkas) > 1
+        q: float(np.std([pkas[q] for pkas in pkas_by_expert], ddof=1))
+        for q in shared_qs
     }
 
 
@@ -1663,15 +1650,7 @@ class pKasso:
             raise ValueError("Raw microstate distribution contains no finite free energies.")
         Gs = Gs - np.min(Gs[finite])
         state_freqs = calc_populations(Gs)
-        Gs_sigmas = (
-            None
-            if raw_combined.Gs_sigmas is None
-            else np.asarray(raw_combined.Gs_sigmas, dtype=np.float64)
-        )
-        state_freq_samples = _sample_state_freqs(
-            Gs,
-            Gs_sigmas,
-        )
+        state_freq_samples = raw_combined.expert_state_freqs
         state_freqs_sigmas = (
             None
             if state_freq_samples is None
@@ -1685,7 +1664,6 @@ class pKasso:
             state_vecs=list(raw_combined.state_vecs),
             Gs=Gs,
             state_freqs=state_freqs,
-            Gs_sigmas=Gs_sigmas,
             state_freqs_sigmas=state_freqs_sigmas,
             state_freq_samples=state_freq_samples,
         )
@@ -1717,6 +1695,7 @@ class pKasso:
         net_charge_sigmas: list[float] = []
         state_freqs_all: dict[str, NDArray[np.float64]] = {}
         state_freqs_sigmas_all: dict[str, NDArray[np.float64]] = {}
+        state_freqs_expert_max_all: dict[str, NDArray[np.float64]] = {}
         freqs_macro_all: list[dict[int, float]] = []
         freqs_macro_samples_all: list[dict[int, NDArray[np.float64]]] = []
         molecules: dict[float, Molecule] = {}
@@ -1729,26 +1708,36 @@ class pKasso:
             if distribution.net_charge is None or distribution.freqs_macro is None:
                 raise ValueError("Microstate distribution is missing macro properties.")
             net_charges.append(distribution.net_charge)
-            net_charge_sigmas.append(0.0 if distribution.net_charge_sigma is None else distribution.net_charge_sigma)
+            net_charge_sigmas.append(
+                np.nan if distribution.net_charge_sigma is None else distribution.net_charge_sigma
+            )
             freqs_macro_all.append(distribution.freqs_macro)
             freqs_macro_samples_all.append(distribution.freqs_macro_samples or {})
 
             # Add to results for pH scan
             state_freqs_sigmas = (
-                np.zeros(len(distribution.state_freqs), dtype=np.float64)
+                np.full(len(distribution.state_freqs), np.nan, dtype=np.float64)
                 if distribution.state_freqs_sigmas is None
                 else np.asarray(distribution.state_freqs_sigmas, dtype=np.float64)
             )
-            for state_str, state_freq, state_freq_sigma in zip(
+            state_freqs_expert_max = (
+                np.asarray(distribution.state_freqs, dtype=np.float64)
+                if distribution.state_freq_samples is None
+                else np.max(distribution.state_freq_samples, axis=0)
+            )
+            for state_str, state_freq, state_freq_sigma, state_freq_expert_max in zip(
                 distribution.state_strs,
                 distribution.state_freqs,
                 state_freqs_sigmas,
+                state_freqs_expert_max,
             ):
                 if state_str not in state_freqs_all:
                     state_freqs_all[state_str] = np.zeros(len(pHs))
                     state_freqs_sigmas_all[state_str] = np.zeros(len(pHs))
+                    state_freqs_expert_max_all[state_str] = np.zeros(len(pHs))
                 state_freqs_all[state_str][pH_idx] = state_freq
                 state_freqs_sigmas_all[state_str][pH_idx] = state_freq_sigma
+                state_freqs_expert_max_all[state_str][pH_idx] = state_freq_expert_max
 
         return PHScanDistribution(
             pHs=pHs,
@@ -1756,6 +1745,7 @@ class pKasso:
             net_charge_sigmas=net_charge_sigmas,
             state_freqs_all=state_freqs_all,
             state_freqs_sigmas_all=state_freqs_sigmas_all,
+            state_freqs_expert_max_all=state_freqs_expert_max_all,
             freqs_macro_all=freqs_macro_all,
             freqs_macro_samples_all=freqs_macro_samples_all,
             molecules=molecules,
@@ -1802,6 +1792,7 @@ class pKasso:
             ) = self.calc_relevant_states(
                 distribution.state_freqs_all,
                 distribution.state_freqs_sigmas_all,
+                distribution.state_freqs_expert_max_all,
             )
 
         return Scan(
@@ -1825,6 +1816,7 @@ class pKasso:
         self,
         state_freqs_all: dict[str, NDArray[np.float64]],
         state_freqs_sigmas_all: dict[str, NDArray[np.float64]] | None = None,
+        state_freqs_expert_max_all: dict[str, NDArray[np.float64]] | None = None,
         max_states: int = 18,
     ) -> tuple[
         list[str],
@@ -1842,6 +1834,8 @@ class pKasso:
                 state_str: np.zeros_like(sfreqs, dtype=np.float64)
                 for state_str, sfreqs in state_freqs_all.items()
             }
+        if state_freqs_expert_max_all is None:
+            state_freqs_expert_max_all = state_freqs_all
 
         while True:
             state_strs_relevant: list[str] = []
@@ -1857,7 +1851,10 @@ class pKasso:
                 for atom in mol.GetAtoms():
                     atom.SetAtomMapNum(0)
 
-                if np.max(sfreqs) > cutoff:
+                if (
+                    np.max(sfreqs) > cutoff
+                    or np.max(state_freqs_expert_max_all[state_str]) > cutoff
+                ):
                     state_strs_relevant.append(state_str)
                     sfreqs_relevant.append(sfreqs)
                     sfreqs_relevant_sigmas.append(state_freqs_sigmas_all[state_str])

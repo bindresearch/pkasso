@@ -437,7 +437,9 @@ class UnipkaPredictor(Predictor):
     thermodynamic_prediction: ClassVar[ThermodynamicPredictionMode] = "standard_free_energy"
     standard_free_energy_target_mean = UNIPKA_TARGET_MEAN
     # smarts_pattern: ClassVar[Path] = ROOT / "smarts_pattern_unipka.tsv"
-    smarts_pattern: ClassVar[Path] = ROOT / "simple_smarts_pattern.tsv"
+    # smarts_pattern: ClassVar[Path] = ROOT / "simple_smarts_pattern.tsv"
+    smarts_pattern: ClassVar[Path] = ROOT / "smarts_pattern_molgpka.tsv"
+
 
     def __init__(self, mol: Mol) -> None:
         super().__init__(mol)

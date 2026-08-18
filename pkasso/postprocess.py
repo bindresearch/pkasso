@@ -234,7 +234,7 @@ class Scan:
         self,
         highlight_idx: int = 0,
     ) -> Figure_plt:
-        """Plot scan of microstate frequencies for different pH values."""
+        """Plot microstate frequencies and expert-model spread across pH."""
 
         # print(highlight_idx)
 
