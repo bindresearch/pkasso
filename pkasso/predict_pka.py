@@ -515,7 +515,7 @@ class UnipkaPredictor(Predictor):
         smarts_Nccn2 = "Nccn"
         smarts_nnn = "nnn"
         smarts_ncnn = "ncnn"
-        smarts_cnnc = "cnnc"
+        # smarts_cnnc = "cnnc"
         smarts_cNO = "C=NO"
         smarts_NNC = "N-N=C"
         smarts_carbonyl = "[#7]~[#6X3](=[#8])"
@@ -550,7 +550,7 @@ class UnipkaPredictor(Predictor):
                 # aromatic n
                 if atom.GetIsAromatic():
                     for smarts in [
-                        smarts_nnn,smarts_cnnc,
+                        smarts_nnn,#smarts_cnnc,
                     ]:
                         exclude_base_indices = add_exclusion(exclude_base_indices, self.mol, atom, smarts)
                     if not any(neigh.GetAtomicNum() == 7 for neigh in atom.GetNeighbors()):
