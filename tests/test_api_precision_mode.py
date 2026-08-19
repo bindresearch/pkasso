@@ -76,6 +76,7 @@ def test_model_selection_is_passed_to_scan(
     assert captured["inp"] == "C"
     assert captured["model"] == expected_model
     assert captured["cutoff_export"] == 0.0
+    assert "free_energy_cutoff_combined" not in captured
     assert captured["pHs"] == pytest.approx(np.arange(0, 14.05, 0.1))
     if uses_unipka_limits:
         assert captured["total_max_sites"] == 8
@@ -89,12 +90,13 @@ def test_lazy_microstate_selection_controls_output_count(monkeypatch):
     molecule = SimpleNamespace(
         smiles=("C", "[CH3+]", "[CH2-]"),
         mols=("mol-1", "mol-2", "mol-3"),
+        freqs=(0.8, 0.0001, 0.000099),
     )
     calls = []
     scan = SimpleNamespace(molecule_at=lambda ph: calls.append(ph) or molecule)
     state = AppState(scan=scan)
 
-    update_microstate_selection(state, "9.0", "2")
+    update_microstate_selection(state, "9.0", "3")
     chemistry.materialize_microstates(state)
 
     assert calls == [9.0]
@@ -105,7 +107,7 @@ def test_lazy_microstate_selection_controls_output_count(monkeypatch):
     html = render_microstates(state, "/pkasso")
     assert "Predicted states at pH 9.0" in html
     assert "2 exported microstate(s)" in html
-    assert "/pkasso/download/sdf?ph=9.0&amp;nmols_export=2" in html
+    assert "/pkasso/download/sdf?ph=9.0&amp;nmols_export=3" in html
 
 
 def test_scan_results_render_plot_before_closed_lazy_details(monkeypatch):

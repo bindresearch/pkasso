@@ -19,6 +19,8 @@ from ..postprocess import draw_mols
 
 os.environ.setdefault("MPLCONFIGDIR", "/tmp/matplotlib-pkasso")
 
+MIN_MICROSTATE_PROBABILITY = 0.0001
+
 
 class _WarningCollector(logging.Handler):
     def __init__(self, messages: list[str]) -> None:
@@ -111,7 +113,6 @@ def compute_scan(state: AppState) -> None:
                 cutoff_states=CUTOFF_STATES,
                 tautomer_search=state.tautomer_search,
                 free_energy_cutoff_individual=100,
-                free_energy_cutoff_combined=100,
                 pHs=np.arange(0, 14.05, 0.1, dtype=np.float64),
                 **prediction_kwargs(state),
             )
@@ -132,8 +133,17 @@ def materialize_microstates(state: AppState) -> None:
     finally:
         state.warnings = _unique([*state.warnings, *captured_warnings])
 
-    state.smiles_out = list(molecule.smiles[: state.nmols_export])
-    state.mols_out = list(molecule.mols[: state.nmols_export])
+    selected_microstates = [
+        (smiles, mol)
+        for smiles, mol, probability in zip(
+            molecule.smiles,
+            molecule.mols,
+            molecule.freqs,
+        )
+        if probability >= MIN_MICROSTATE_PROBABILITY
+    ][: state.nmols_export]
+    state.smiles_out = [smiles for smiles, _ in selected_microstates]
+    state.mols_out = [mol for _, mol in selected_microstates]
 
 
 def draw_molecule_grid(mols: list[Any], show_probability: bool = True) -> str:

@@ -174,6 +174,12 @@ def test_pkasso_uses_top_level_nthreads_for_runtime_configuration(monkeypatch):
     assert resolved == [({"molgpka": {}}, 3)]
 
 
+def test_default_combined_free_energy_cutoff_is_30():
+    pk = main.pKasso("C")
+
+    assert pk.free_energy_cutoff_combined == 30.0
+
+
 def test_pkasso_rejects_obsolete_device_keyword():
     with pytest.raises(TypeError, match="unexpected keyword argument 'device'"):
         main.pKasso("C", device="cpu")

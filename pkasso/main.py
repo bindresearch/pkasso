@@ -592,7 +592,7 @@ def combine_cluster_distributions(
     cluster_dists: list[RawMicrostateEnergies],
     index_space: ProtonationIndexSpace,
     pH: float,
-    free_energy_cutoff_combined: float = 7.0,
+    free_energy_cutoff_combined: float = 30.0,
     max_states_combined: int = 100,
 ) -> RawMicrostateEnergies:
     """
@@ -1331,7 +1331,7 @@ class pKasso:
     cutoff_states: int = 200
     free_energy_cutoff_individual: float = 10.
     max_states_individual: int = 20
-    free_energy_cutoff_combined: float = 10.
+    free_energy_cutoff_combined: float = 30.0
     max_states_combined: int = 20
     cutoff_export: float = 0.2
     matrix_def: str = "dG"
