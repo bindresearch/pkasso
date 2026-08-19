@@ -185,6 +185,11 @@ def test_pkasso_rejects_obsolete_device_keyword():
         main.pKasso("C", device="cpu")
 
 
+def test_pkasso_rejects_obsolete_expert_combination_keyword():
+    with pytest.raises(TypeError, match="unexpected keyword argument 'expert_combination'"):
+        main.pKasso("C", expert_combination="product_of_experts")
+
+
 # @pytest.mark.parametrize(
 #     ("smiles_raw","net_charge"),
 #     [
@@ -612,7 +617,6 @@ def test_complete_expert_populations_drive_microstate_and_macro_uncertainty():
 
     pk = main.pKasso.__new__(main.pKasso)
     pk.index_space0 = space
-    pk.expert_combination = "product_of_experts"
     pk.expert_weights = None
     pk.construct_mols = lambda *_args: None
 
@@ -654,7 +658,6 @@ def test_supported_pruned_state_keeps_population_uncertainty():
     )
     pk = main.pKasso.__new__(main.pKasso)
     pk.index_space0 = space
-    pk.expert_combination = "product_of_experts"
     pk.expert_weights = None
     pk.construct_mols = lambda *_args: None
 
@@ -696,7 +699,6 @@ def test_unsupported_expert_state_disables_all_population_uncertainty(caplog):
     )
     pk = main.pKasso.__new__(main.pKasso)
     pk.index_space0 = primary_space
-    pk.expert_combination = "product_of_experts"
     pk.expert_weights = None
     pk.construct_mols = lambda *_args: None
 

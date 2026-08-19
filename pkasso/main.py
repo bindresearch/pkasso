@@ -862,10 +862,9 @@ def combine_expert_energies(
     raw_dists: Sequence[RawMicrostateEnergies],
     *,
     index_space: ProtonationIndexSpace | None = None,
-    method: str = "product_of_experts",
     weights: Sequence[float] | None = None,
 ) -> RawMicrostateEnergies:
-    """Combine aligned raw free-energy predictions from multiple experts.
+    """Combine aligned raw free-energy predictions using geometric pooling.
 
     The first expert defines the admissible post-pruning state set. Later
     experts contribute only for states also retained by that reference expert;
@@ -994,38 +993,19 @@ def combine_expert_energies(
 
     weights_arr = _normalized_weights(weights, len(raw_dists))
 
-    if method == "product_of_experts":
-        Gs_list = []
-        for state_str in combined_states:
-            available = [
-                row_idx for row_idx, G_by_state in enumerate(aligned_rows)
-                if state_str in G_by_state
-            ]
-            available_weights = weights_arr[available]
-            available_weights = available_weights / np.sum(available_weights)
-            Gs_list.append(float(np.sum([
-                available_weights[idx] * aligned_rows[row_idx][state_str]
-                for idx, row_idx in enumerate(available)
-            ])))
-        Gs = np.array(Gs_list, dtype=np.float64)
-    elif method == "mixture_of_experts":
-        pops_rows = []
-        for G_by_state in aligned_rows:
-            state_strs = list(G_by_state)
-            pops = calc_populations(np.array([G_by_state[state_str] for state_str in state_strs], dtype=np.float64))
-            pops_rows.append(dict(zip(state_strs, pops)))
-        pops_matrix = np.array([
-            [pops_by_state.get(state_str, 0.0) for state_str in combined_states]
-            for pops_by_state in pops_rows
-        ], dtype=np.float64)
-        mixed_pops = np.sum(weights_arr[:, None] * pops_matrix, axis=0)
-        positive = mixed_pops > 0.0
-        if not np.any(positive):
-            raise ValueError("Mixture of experts produced no positive populations.")
-        Gs = np.full_like(mixed_pops, np.inf, dtype=np.float64)
-        Gs[positive] = -np.log(mixed_pops[positive])
-    else:
-        raise ValueError("expert_combination must be 'product_of_experts' or 'mixture_of_experts'.")
+    Gs_list = []
+    for state_str in combined_states:
+        available = [
+            row_idx for row_idx, G_by_state in enumerate(aligned_rows)
+            if state_str in G_by_state
+        ]
+        available_weights = weights_arr[available]
+        available_weights = available_weights / np.sum(available_weights)
+        Gs_list.append(float(np.sum([
+            available_weights[idx] * aligned_rows[row_idx][state_str]
+            for idx, row_idx in enumerate(available)
+        ])))
+    Gs = np.array(Gs_list, dtype=np.float64)
 
     finite = np.isfinite(Gs)
     if not np.any(finite):
@@ -1316,7 +1296,7 @@ class pKasso:
         Pipeline parameters:
             name, cutoff_states, model,
             free_energy_cutoff_individual, free_energy_cutoff_combined,
-            expert_combination, expert_weights,
+            expert_weights,
             matrix_def, cutoff_export, nthreads
 
         ``model`` is an ordered mapping from predictor names to their options,
@@ -1336,7 +1316,6 @@ class pKasso:
     cutoff_export: float = 0.2
     matrix_def: str = "dG"
     model: ModelInput = field(default_factory=lambda: {"molgpka": {}})
-    expert_combination: str = "product_of_experts"
     expert_weights: Sequence[float] | None = None
     tautomer_search: bool = True
     max_tautomers: int = 20
@@ -1712,7 +1691,6 @@ class pKasso:
         raw_combined = combine_expert_energies(
             raw_dists,
             index_space=index_space,
-            method=self.expert_combination,
             weights=self.expert_weights,
         )
 
