@@ -622,13 +622,13 @@ def test_scan_writes_all_ph_tables_to_txt_out(monkeypatch):
         txt_output = Path("overview.txt").read_text(encoding="utf-8")
 
     assert result.exit_code == 0
-    assert captured["output_molecules_from_scan"] is True
+    assert "output_molecules_from_scan" not in captured
     assert "molecule | pH: 7.0" in txt_output
     assert "molecule | pH: 7.25" in txt_output
     assert txt_output.count("Microstate") == 2
 
 
-def test_scan_uses_common_cutoff_export_default_and_skips_molecule_output_without_txt_out(monkeypatch):
+def test_scan_uses_common_cutoff_export_default(monkeypatch):
     captured = {}
     scan = Scan()
 
@@ -645,5 +645,5 @@ def test_scan_uses_common_cutoff_export_default_and_skips_molecule_output_withou
     assert captured["args"][0] == "C"
     assert captured["name"] == "2014"
     assert captured["cutoff_export"] == 0.2
-    assert captured["output_molecules_from_scan"] is False
+    assert "output_molecules_from_scan" not in captured
     assert scan.exported_macro_pkas.name == "2014_pkas.txt"

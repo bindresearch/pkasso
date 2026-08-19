@@ -665,7 +665,6 @@ def scan(
         matrix_def=matrix_def,
         cutoff_states=cutoff_states,
         cutoff_export=cutoff_export,
-        output_molecules_from_scan=txt_out is not None,
         tautomer_search=tautomer_search,
         max_tautomers=max_tautomers,
         num_confs=num_confs,

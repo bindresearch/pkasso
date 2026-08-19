@@ -573,7 +573,8 @@ class PHScanDistribution:
     This is the scan-level counterpart to MicrostateDistribution: it stores
     numerical pH-scan data produced by the core engine. The public Scan class
     in postprocess.py remains the outward-facing result with plotting and
-    export helpers.
+    export helpers. Finalized per-pH distributions are retained so molecule
+    output can be materialized on demand.
     """
 
     pHs: NDArray[np.float64]
@@ -583,7 +584,7 @@ class PHScanDistribution:
     state_freqs_sigmas_all: dict[str, NDArray[np.float64]]
     state_freqs_expert_max_all: dict[str, NDArray[np.float64]]
     freqs_macro_all: list[dict[int, float]]
-    molecules: dict[float, Molecule]
+    microstate_distributions: dict[float, MicrostateDistribution]
     freqs_macro_samples_all: list[dict[int, NDArray[np.float64]]] = field(default_factory=list)
 
 
@@ -1316,7 +1317,7 @@ class pKasso:
             name, cutoff_states, model,
             free_energy_cutoff_individual, free_energy_cutoff_combined,
             expert_combination, expert_weights,
-            matrix_def, cutoff_export, output_molecules_from_scan, nthreads
+            matrix_def, cutoff_export, nthreads
 
         ``model`` is an ordered mapping from predictor names to their options,
         for example ``{"molgpka": {}, "unipka": {"gpu": True}}``.
@@ -1333,7 +1334,6 @@ class pKasso:
     free_energy_cutoff_combined: float = 10.
     max_states_combined: int = 20
     cutoff_export: float = 0.2
-    output_molecules_from_scan: bool = True
     matrix_def: str = "dG"
     model: ModelInput = field(default_factory=lambda: {"molgpka": {}})
     expert_combination: str = "product_of_experts"
@@ -1770,12 +1770,11 @@ class pKasso:
         state_freqs_expert_max_all: dict[str, NDArray[np.float64]] = {}
         freqs_macro_all: list[dict[int, float]] = []
         freqs_macro_samples_all: list[dict[int, NDArray[np.float64]]] = []
-        molecules: dict[float, Molecule] = {}
+        microstate_distributions: dict[float, MicrostateDistribution] = {}
 
         for pH_idx, pH in enumerate(pHs.flat):
             distribution = self._calc_microstates(float(pH))
-            if self.output_molecules_from_scan:
-                molecules[float(pH)] = self.prep_single_output(distribution)
+            microstate_distributions[float(pH)] = distribution
 
             if distribution.net_charge is None or distribution.freqs_macro is None:
                 raise ValueError("Microstate distribution is missing macro properties.")
@@ -1820,7 +1819,7 @@ class pKasso:
             state_freqs_expert_max_all=state_freqs_expert_max_all,
             freqs_macro_all=freqs_macro_all,
             freqs_macro_samples_all=freqs_macro_samples_all,
-            molecules=molecules,
+            microstate_distributions=microstate_distributions,
         )
 
     def _finalize_scan(self, distribution: PHScanDistribution) -> Scan:
@@ -1881,7 +1880,8 @@ class pKasso:
             sfreqs_not_relevant_sigmas,
             pkas_macro,
             pkas_macro_sigmas,
-            molecules=distribution.molecules,
+            microstate_distributions=distribution.microstate_distributions,
+            _molecule_factory=self.prep_single_output,
         )
 
     def calc_relevant_states(
@@ -1919,7 +1919,7 @@ class pKasso:
             pH_argmaxs: list[int] = []
 
             for state_str, sfreqs in state_freqs_all.items():
-                mol = self.index_space0.mols_lib[state_str]
+                mol = Chem.Mol(self.index_space0.mols_lib[state_str])
                 for atom in mol.GetAtoms():
                     atom.SetAtomMapNum(0)
 

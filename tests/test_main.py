@@ -170,7 +170,6 @@ def test_pkasso_uses_top_level_nthreads_for_runtime_configuration(monkeypatch):
     pk = main.pKasso("C", nthreads=3)
 
     assert pk.nthreads == 3
-    assert pk.output_molecules_from_scan is True
     assert configured == [3]
     assert resolved == [({"molgpka": {}}, 3)]
 
@@ -310,27 +309,8 @@ def test_setup_returns_processed_input_space_when_site_limit_exceeded(monkeypatc
     assert Chem.MolToSmiles(distribution.mols_lib[""]) == Chem.MolToSmiles(pk.mol0)
 
 
-@pytest.mark.parametrize(
-    ("output_molecules_from_scan", "expected_molecules", "expected_prep_calls"),
-    [
-        (
-            True,
-            {
-                7.0: "molecule-7.0",
-                7.5: "molecule-7.5",
-            },
-            [7.0, 7.5],
-        ),
-        (False, {}, []),
-    ],
-)
-def test_scan_optionally_collects_molecule_output_for_each_ph(
-    output_molecules_from_scan,
-    expected_molecules,
-    expected_prep_calls,
-):
+def test_scan_collects_distributions_without_preparing_molecule_output():
     pk = main.pKasso.__new__(main.pKasso)
-    pk.output_molecules_from_scan = output_molecules_from_scan
     prep_calls = []
 
     def calc_microstates(pH):
@@ -355,8 +335,10 @@ def test_scan_optionally_collects_molecule_output_for_each_ph(
 
     distribution = pk._scan_pH(np.array([7.0, 7.5], dtype=np.float64))
 
-    assert distribution.molecules == expected_molecules
-    assert prep_calls == expected_prep_calls
+    assert sorted(distribution.microstate_distributions) == [7.0, 7.5]
+    assert distribution.microstate_distributions[7.0].pH == 7.0
+    assert distribution.microstate_distributions[7.5].pH == 7.5
+    assert prep_calls == []
     assert np.all(np.isnan(distribution.net_charge_sigmas))
 
 

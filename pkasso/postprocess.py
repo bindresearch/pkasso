@@ -1,11 +1,13 @@
 """Postprocessing utilities for pKasso outputs."""
 
+from __future__ import annotations
+
 import copy
 import logging
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any, Callable
 import warnings
 
 import matplotlib.pyplot as plt
@@ -17,6 +19,9 @@ from rdkit import Chem
 from rdkit.Chem import AllChem, Mol
 from rdkit.Chem.Draw import MolsToGridImage, MolDrawOptions
 from .utils import is_jupyter
+
+if TYPE_CHECKING:
+    from .main import MicrostateDistribution
 
 warnings.filterwarnings(
     "ignore",
@@ -164,26 +169,37 @@ class Scan:
     pkas_macro: dict[int, float]
     pkas_macro_sigmas: dict[int, float] = field(default_factory=dict)
     molecules: dict[float, Molecule] = field(default_factory=dict)
+    microstate_distributions: dict[float, MicrostateDistribution] = field(default_factory=dict)
+    _molecule_factory: Callable[[MicrostateDistribution], Molecule] | None = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
 
     def __post_init__(self) -> None:
         self.state_strs_conv = [mol.GetProp("_Name") for mol in self.mols_relevant]
 
     def molecule_at(self, pH: float, tolerance: float = 1e-8) -> Molecule:
-        """Return the molecule output at a scanned pH value."""
+        """Materialize and cache molecule output for a scanned pH value."""
 
         if tolerance < 0:
             raise ValueError("tolerance must be non-negative.")
 
-        pH = float(pH)
-        if pH in self.molecules:
-            return self.molecules[pH]
-
-        if self.molecules:
-            nearest_pH = min(self.molecules, key=lambda candidate: abs(candidate - pH))
-            if abs(nearest_pH - pH) <= tolerance:
+        requested_pH = float(pH)
+        available_pHs = self.molecules.keys() | self.microstate_distributions.keys()
+        if available_pHs:
+            nearest_pH = min(available_pHs, key=lambda candidate: abs(candidate - requested_pH))
+            if abs(nearest_pH - requested_pH) <= tolerance:
+                if nearest_pH not in self.molecules:
+                    if self._molecule_factory is None:
+                        raise RuntimeError("Scan has no molecule materializer.")
+                    distribution = self.microstate_distributions[nearest_pH]
+                    self.molecules[nearest_pH] = self._molecule_factory(distribution)
                 return self.molecules[nearest_pH]
 
-        raise KeyError(f"No molecule output found at pH {pH} within tolerance {tolerance}.")
+        raise KeyError(
+            f"No scanned pH found at {requested_pH} within tolerance {tolerance}."
+        )
 
     def export_macro_pkas(self, file: Path) -> None:
         """Write macro pKas from pooled microstates."""
