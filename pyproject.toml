@@ -65,11 +65,13 @@ pkasso-web = "pkasso.api.app:main"
     "data/*.pth",
     "data/*.tsv",
     "data/*.pt",
+    "data/*.pdf",
     "data/*.txt"]
 "pkasso.api" = [
     "templates/*.html",
     "static/*.css",
     "static/*.js",
+    "static/*.png",
     "static/*.svg",
     "static/*.ico"]
 [tool.setuptools.packages.find]
