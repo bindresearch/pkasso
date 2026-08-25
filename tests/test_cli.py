@@ -352,8 +352,11 @@ def test_explicit_ignored_options_are_rejected(tmp_path):
         ["batch", "--smi", "mols.smi", "--path-out", "individual"],
     )
 
-    assert "--gpu requires --model mixed." in gpu.output
-    assert "--unipka-model-folder requires --model mixed." in model_folder.output
+    assert "--gpu requires --model unipka or --model mixed." in gpu.output
+    assert (
+        "--unipka-model-folder requires --model unipka or --model mixed."
+        in model_folder.output
+    )
     assert "--path-out requires --individual-sdfs." in path_out.output
 
 
@@ -423,6 +426,25 @@ def test_mixed_model_passes_fixed_fold_and_unipka_options(monkeypatch, tmp_path)
         },
     }
     assert captured["nthreads"] == 4
+
+
+def test_unipka_model_accepts_gpu(monkeypatch):
+    captured = {}
+
+    monkeypatch.setattr(cli, "protonate", mock_protonate(captured))
+
+    result = CliRunner().invoke(
+        cli.cli,
+        ["single", "--smiles", "C", "--model", "unipka", "--gpu"],
+    )
+
+    assert result.exit_code == 0
+    assert captured["model"] == {
+        "unipka": {
+            "folds": 1,
+            "gpu": True,
+        },
+    }
 
 
 def test_molgpka_model_receives_top_level_nthreads(monkeypatch):

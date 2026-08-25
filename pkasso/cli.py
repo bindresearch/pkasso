@@ -244,9 +244,11 @@ def _common_option_conflicts(ctx: click.Context) -> None:
 
     if params.get("model") == "molgpka":
         if params.get("gpu") and ctx.get_parameter_source("gpu") == commandline:
-            raise click.UsageError("--gpu requires --model mixed.")
+            raise click.UsageError("--gpu requires --model unipka or --model mixed.")
         if ctx.get_parameter_source("unipka_model_folder") == commandline:
-            raise click.UsageError("--unipka-model-folder requires --model mixed.")
+            raise click.UsageError(
+                "--unipka-model-folder requires --model unipka or --model mixed."
+            )
 
     if params.get("individual_sdfs") is False:
         if ctx.get_parameter_source("path_out") == commandline:
@@ -278,17 +280,20 @@ def _model_kwargs(
     if unipka_model_folder is not None:
         unipka_options["model_dir"] = unipka_model_folder
 
-    return {
-        "model": {
+    if model == "unipka":
+        models = {"unipka": unipka_options}
+    else:
+        models = {
             "molgpka": {},
             "unipka": unipka_options,
-        },
-    }
+        }
+
+    return {"model": models}
 
 COMMON_OPTIONS = [
     click.option(
         "--model",
-        type=click.Choice(["molgpka", "mixed"]),
+        type=click.Choice(["molgpka", "unipka", "mixed"]),
         default="molgpka",
         show_default=True,
         help="pKa model to use; mixed combines MolGpKa with Uni-pKa",
