@@ -110,8 +110,36 @@ def test_scan_molecule_at_supports_exact_and_tolerant_lookup():
     assert scan.molecule_at(7.5) is molecule
     assert scan.molecule_at(7.500000001) is molecule
 
-    with pytest.raises(KeyError, match="No molecule output found"):
+    with pytest.raises(KeyError, match="No scanned pH found"):
         scan.molecule_at(7.6)
 
     with pytest.raises(ValueError, match="non-negative"):
         scan.molecule_at(7.5, tolerance=-1.0)
+
+
+def test_scan_molecule_at_lazily_materializes_and_caches_output():
+    distribution = object()
+    molecule = Molecule("scan", ())
+    calls = []
+    scan = Scan(
+        name="scan",
+        indices=[],
+        state_strs_relevant=[],
+        mols_relevant=[],
+        sfreqs_relevant=[],
+        sfreqs_relevant_sigmas=[],
+        pHs=np.array([7.5], dtype=np.float64),
+        net_charges=np.array([0.0], dtype=np.float64),
+        net_charge_sigmas=np.array([0.0], dtype=np.float64),
+        sfreqs_not_relevant=[],
+        sfreqs_not_relevant_sigmas=[],
+        pkas_macro={},
+        microstate_distributions={7.5: distribution},
+        _molecule_factory=lambda value: calls.append(value) or molecule,
+    )
+
+    assert scan.molecules == {}
+    assert scan.molecule_at(7.500000001) is molecule
+    assert scan.molecule_at(7.5) is molecule
+    assert calls == [distribution]
+    assert scan.molecules == {7.5: molecule}

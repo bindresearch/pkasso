@@ -72,10 +72,11 @@ pkasso batch --help
 pkasso scan --help
 ```
 
-All commands accept `--model molgpka` (the default) or `--model mixed`. The mixed model combines MolGpKa with Uni-pKa.
+All commands accept `--model molgpka` (the default), `--model unipka`, or `--model mixed`. The mixed model combines MolGpKa with Uni-pKa. Uni-pKa and mixed mode also accept `--gpu` for GPU inference.
 
 ```bash
 pkasso single --smiles "CC(=O)O" --model mixed
+pkasso single --smiles "CC(=O)O" --model unipka --gpu
 ```
 
 An additional argument `--unipka-model-folder` (defaults to `~/.local/share/unipkainfer/models`) can be provided to define where the Uni-pKa model checkpoint should be stored. A missing checkpoint is downloaded on first use.

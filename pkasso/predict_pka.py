@@ -156,6 +156,8 @@ class MolgpkaPredictor(Predictor):
 
     _model_cache: ClassVar[dict[type, tuple[GCNNet, GCNNet]]] = {}
 
+    corrections = True
+
     def __init__(self, mol: Mol) -> None:
         super().__init__(mol)
         self.model_base, self.model_acid = self._load_models()
@@ -173,15 +175,21 @@ class MolgpkaPredictor(Predictor):
 
     def pred_acid(self) -> dict[int, float]:
         acid = self._predict_acid_raw()
-        return self._curate_acid(acid)
+        if self.corrections:
+            return self._curate_acid(acid)
+        return acid
 
     def pred_acid_ids(self) -> list[int]:
         acid = self._predict_acid_raw()
-        acid_curated = self._curate_acid(acid)
-        return list(acid_curated.keys())
+        if self.corrections:
+            acid_curated = self._curate_acid(acid)
+            return list(acid_curated.keys())
+        return list(acid.keys())
 
     def exclude_sites(self) -> tuple[list[int], list[int]]:
-        return self._exclude_molgpka_sites()
+        if self.corrections:
+            return self._exclude_molgpka_sites()
+        return [], []
 
     def _exclude_molgpka_sites(self) -> tuple[list[int], list[int]]:
         """
@@ -323,7 +331,7 @@ class MolgpkaPredictor(Predictor):
                         matches = match_smarts(self.mol, smarts)
                         for match in matches:
                             if at_idx in match:
-                                pka += 2.0
+                                pka += 1.0
                                 continue
 
             for _, oh_map_ids in phosphate_groups.items():
@@ -350,12 +358,16 @@ class MolgpkaPredictor(Predictor):
 
     def pred_base(self) -> dict[int, float]:
         base = self._predict_base_raw()
-        return self._curate_base(base)
+        if self.corrections:
+            return self._curate_base(base)
+        return base
 
     def pred_base_ids(self) -> list[int]:
         base = self._predict_base_raw()
-        base_curated = self._curate_base(base)
-        return list(base_curated.keys())
+        if self.corrections:
+            base_curated = self._curate_base(base)
+            return list(base_curated.keys())
+        return list(base.keys())
 
     def _predict_base_raw(self) -> dict[int, float]:
         """Run molgpka base prediction and convert results to atom map indices."""
@@ -437,7 +449,9 @@ class UnipkaPredictor(Predictor):
     thermodynamic_prediction: ClassVar[ThermodynamicPredictionMode] = "standard_free_energy"
     standard_free_energy_target_mean = UNIPKA_TARGET_MEAN
     # smarts_pattern: ClassVar[Path] = ROOT / "smarts_pattern_unipka.tsv"
-    smarts_pattern: ClassVar[Path] = ROOT / "simple_smarts_pattern.tsv"
+    # smarts_pattern: ClassVar[Path] = ROOT / "simple_smarts_pattern.tsv"
+    smarts_pattern: ClassVar[Path] = ROOT / "smarts_pattern_molgpka.tsv"
+
 
     def __init__(self, mol: Mol) -> None:
         super().__init__(mol)
@@ -513,7 +527,7 @@ class UnipkaPredictor(Predictor):
         smarts_Nccn2 = "Nccn"
         smarts_nnn = "nnn"
         smarts_ncnn = "ncnn"
-        smarts_cnnc = "cnnc"
+        # smarts_cnnc = "cnnc"
         smarts_cNO = "C=NO"
         smarts_NNC = "N-N=C"
         smarts_carbonyl = "[#7]~[#6X3](=[#8])"
@@ -548,7 +562,7 @@ class UnipkaPredictor(Predictor):
                 # aromatic n
                 if atom.GetIsAromatic():
                     for smarts in [
-                        smarts_nnn,smarts_cnnc,
+                        smarts_nnn,#smarts_cnnc,
                     ]:
                         exclude_base_indices = add_exclusion(exclude_base_indices, self.mol, atom, smarts)
                     if not any(neigh.GetAtomicNum() == 7 for neigh in atom.GetNeighbors()):
