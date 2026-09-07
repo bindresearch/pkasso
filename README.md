@@ -10,6 +10,11 @@ Protonation microstates describe the unique charge patterns on protonable sites 
 
 *pKasso is under active development. Features, prediction models, and results may change in future releases.*
 
+## Try it quickly with `uvx`
+```sh
+uvx pkasso --smiles 'CCCCNCCCN'
+```
+
 ## Local installation
 
 ### Basic install (MolGpKa)
