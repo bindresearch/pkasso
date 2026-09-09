@@ -14,10 +14,12 @@ from rdkit import Chem
 from .config import CUTOFF_STATES, UNIPKA_MODEL_FOLDER
 from .state import AppState
 
-from ..py_interface import scan_pH, protonate
+from ..py_interface import scan_pH
 from ..postprocess import draw_mols
 
 os.environ.setdefault("MPLCONFIGDIR", "/tmp/matplotlib-pkasso")
+
+MIN_MICROSTATE_PROBABILITY = 0.0001
 
 
 class _WarningCollector(logging.Handler):
@@ -48,23 +50,21 @@ def _unique(messages: list[str]) -> list[str]:
 
 
 def prediction_kwargs(state: AppState) -> dict[str, Any]:
-    if not state.precision_mode:
-        return {}
-
     unipka_options: dict[str, object] = {
-        "folds": (1,),
+        "folds": (2,),
     }
     if UNIPKA_MODEL_FOLDER is not None:
         unipka_options["model_dir"] = UNIPKA_MODEL_FOLDER
 
-    return {
-        "total_max_sites": 8,
-        "nthreads": 0,
-        "model": {
-            "molgpka": {},
-            "unipka": unipka_options,
-        },
+    models = {
+        "molgpka": {"molgpka": {}},
+        "unipka": {"unipka": unipka_options},
+        "mixed": {"molgpka": {}, "unipka": unipka_options},
     }
+    kwargs: dict[str, Any] = {"model": models[state.model]}
+    if state.model in {"unipka", "mixed"}:
+        kwargs.update(total_max_sites=8, nthreads=0)
+    return kwargs
 
 
 def _pyplot() -> Any:
@@ -95,52 +95,55 @@ def figure_to_svg(fig: Any) -> str:
     return buffer.getvalue()
 
 
-def compute_prediction(state: AppState) -> None:
-
-    state.error = None
-    state.warnings.clear()
-    captured_warnings: list[str] = []
-    try:
-        with capture_pkasso_warnings() as captured_warnings:
-            smiles_out, mols_out = protonate(
-                state.smiles,
-                name=state.ligand,
-                pH=state.ph,
-                cutoff_export=0.0,
-                cutoff_states=CUTOFF_STATES,
-                tautomer_search=state.tautomer_search,
-                free_energy_cutoff_individual = 10,
-                free_energy_cutoff_combined = 10,
-                **prediction_kwargs(state),
-            )
-    finally:
-        state.warnings = _unique(captured_warnings)
-    state.smiles_out = list(smiles_out[: state.nmols_export])
-    state.mols_out = list(mols_out[: state.nmols_export])
-    state.scan = None
-    state.scan_figures.clear()
-
-
 def compute_scan(state: AppState) -> None:
 
     state.error = None
     state.warnings.clear()
+    state.scan = None
+    state.smiles_out.clear()
+    state.mols_out.clear()
+    state.scan_figures.clear()
     captured_warnings: list[str] = []
     try:
         with capture_pkasso_warnings() as captured_warnings:
             state.scan = scan_pH(
                 state.smiles,
                 name=state.ligand,
+                cutoff_export=0.0,
                 cutoff_states=CUTOFF_STATES,
                 tautomer_search=state.tautomer_search,
-                free_energy_cutoff_individual = 100,
-                free_energy_cutoff_combined = 100,
-                pHs=np.arange(0, 14.1, 0.25, dtype=np.float64),
+                free_energy_cutoff_individual=100,
+                pHs=np.arange(0, 14.05, 0.1, dtype=np.float64),
                 **prediction_kwargs(state),
             )
     finally:
         state.warnings = _unique(captured_warnings)
-    state.scan_figures.clear()
+
+
+def materialize_microstates(state: AppState) -> None:
+    """Generate and retain the selected single-pH output from the scan."""
+
+    if state.scan is None:
+        raise ValueError("Run a pH scan before selecting microstates.")
+
+    captured_warnings: list[str] = []
+    try:
+        with capture_pkasso_warnings() as captured_warnings:
+            molecule = state.scan.molecule_at(state.ph)
+    finally:
+        state.warnings = _unique([*state.warnings, *captured_warnings])
+
+    selected_microstates = [
+        (smiles, mol)
+        for smiles, mol, probability in zip(
+            molecule.smiles,
+            molecule.mols,
+            molecule.freqs,
+        )
+        if probability >= MIN_MICROSTATE_PROBABILITY
+    ][: state.nmols_export]
+    state.smiles_out = [smiles for smiles, _ in selected_microstates]
+    state.mols_out = [mol for _, mol in selected_microstates]
 
 
 def draw_molecule_grid(mols: list[Any], show_probability: bool = True) -> str:

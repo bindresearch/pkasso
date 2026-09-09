@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pkasso"
-version = "0.6.1"
+version = "0.6.2"
 description = "Prediction of protonation states for small molecules"
 readme = "README.md"
 license = { text = "MIT" }
@@ -65,11 +65,14 @@ pkasso-web = "pkasso.api.app:main"
     "data/*.pth",
     "data/*.tsv",
     "data/*.pt",
+    "data/*.pdf",
+    "data/*.png",
     "data/*.txt"]
 "pkasso.api" = [
     "templates/*.html",
     "static/*.css",
     "static/*.js",
+    "static/*.png",
     "static/*.svg",
     "static/*.ico"]
 [tool.setuptools.packages.find]

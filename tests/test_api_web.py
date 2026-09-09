@@ -10,7 +10,7 @@ WEB_DEPENDENCIES_AVAILABLE = all(
 
 
 @pytest.mark.skipif(not WEB_DEPENDENCIES_AVAILABLE, reason="requires pkasso[webserver]")
-def test_precision_mode_preserves_optional_dependency_error():
+def test_model_selection_preserves_optional_dependency_error():
     from pkasso.api.web import dependency_message
 
     exc = ModuleNotFoundError(
@@ -19,3 +19,18 @@ def test_precision_mode_preserves_optional_dependency_error():
     )
 
     assert dependency_message(exc) == str(exc)
+
+
+@pytest.mark.skipif(not WEB_DEPENDENCIES_AVAILABLE, reason="requires pkasso[webserver]")
+def test_web_routes_expose_scan_submission_and_lazy_microstates():
+    from pkasso.api.web import app
+
+    routes = {
+        (route.path, frozenset(getattr(route, "methods", ()) or ()))
+        for route in app.routes
+    }
+
+    assert ("/predict", frozenset({"POST"})) in routes
+    assert ("/microstates", frozenset({"POST"})) in routes
+    assert ("/scan/plot", frozenset({"GET"})) in routes
+    assert not any(path == "/scan" for path, _ in routes)

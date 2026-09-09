@@ -352,8 +352,11 @@ def test_explicit_ignored_options_are_rejected(tmp_path):
         ["batch", "--smi", "mols.smi", "--path-out", "individual"],
     )
 
-    assert "--gpu requires --model mixed." in gpu.output
-    assert "--unipka-model-folder requires --model mixed." in model_folder.output
+    assert "--gpu requires --model unipka or --model mixed." in gpu.output
+    assert (
+        "--unipka-model-folder requires --model unipka or --model mixed."
+        in model_folder.output
+    )
     assert "--path-out requires --individual-sdfs." in path_out.output
 
 
@@ -423,6 +426,25 @@ def test_mixed_model_passes_fixed_fold_and_unipka_options(monkeypatch, tmp_path)
         },
     }
     assert captured["nthreads"] == 4
+
+
+def test_unipka_model_accepts_gpu(monkeypatch):
+    captured = {}
+
+    monkeypatch.setattr(cli, "protonate", mock_protonate(captured))
+
+    result = CliRunner().invoke(
+        cli.cli,
+        ["single", "--smiles", "C", "--model", "unipka", "--gpu"],
+    )
+
+    assert result.exit_code == 0
+    assert captured["model"] == {
+        "unipka": {
+            "folds": 1,
+            "gpu": True,
+        },
+    }
 
 
 def test_molgpka_model_receives_top_level_nthreads(monkeypatch):
@@ -622,13 +644,13 @@ def test_scan_writes_all_ph_tables_to_txt_out(monkeypatch):
         txt_output = Path("overview.txt").read_text(encoding="utf-8")
 
     assert result.exit_code == 0
-    assert captured["output_molecules_from_scan"] is True
+    assert "output_molecules_from_scan" not in captured
     assert "molecule | pH: 7.0" in txt_output
     assert "molecule | pH: 7.25" in txt_output
     assert txt_output.count("Microstate") == 2
 
 
-def test_scan_uses_common_cutoff_export_default_and_skips_molecule_output_without_txt_out(monkeypatch):
+def test_scan_uses_common_cutoff_export_default(monkeypatch):
     captured = {}
     scan = Scan()
 
@@ -645,5 +667,5 @@ def test_scan_uses_common_cutoff_export_default_and_skips_molecule_output_withou
     assert captured["args"][0] == "C"
     assert captured["name"] == "2014"
     assert captured["cutoff_export"] == 0.2
-    assert captured["output_molecules_from_scan"] is False
+    assert "output_molecules_from_scan" not in captured
     assert scan.exported_macro_pkas.name == "2014_pkas.txt"
