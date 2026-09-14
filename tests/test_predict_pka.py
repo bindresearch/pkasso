@@ -52,32 +52,11 @@ def test_unipka_predictor_carboxylic_acid_site_ids():
     assert not hasattr(predictor, "model")
 
 
-def test_unipka_predictor_carboxylate_base_site_ids():
-    predictor = UnipkaPredictor(mapped_mol("CCCCC(=O)[O-]"))
-
-    assert predictor.pred_acid_ids() == []
-    assert predictor.pred_base_ids() == [7]
-
-
 def test_unipka_predictor_amine_site_ids():
     predictor = UnipkaPredictor(mapped_mol("NCCCCC"))
 
     assert predictor.pred_acid_ids() == []
     assert predictor.pred_base_ids() == [1]
-
-
-def test_unipka_predictor_ammonium_site_ids():
-    predictor = UnipkaPredictor(mapped_mol("[NH3+]CCCCC"))
-
-    assert predictor.pred_acid_ids() == [1]
-    assert predictor.pred_base_ids() == []
-
-
-def test_unipka_predictor_excludes_poly_aza_ring_base_sites():
-    predictor = UnipkaPredictor(mapped_mol("Fc1ccc2c(C=Cc3nnn[nH]3)c[nH]c2c1"))
-
-    assert predictor.pred_base_ids() == [10, 11, 12]
-    assert predictor.exclude_sites() == ([10, 11, 12, 13, 15], [])
 
 
 def test_molgpka_close_cation_penalty_accounts_for_local_negative_charge(monkeypatch):

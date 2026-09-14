@@ -170,14 +170,24 @@ def test_pkasso_uses_top_level_nthreads_for_runtime_configuration(monkeypatch):
     pk = main.pKasso("C", nthreads=3)
 
     assert pk.nthreads == 3
-    assert pk.output_molecules_from_scan is True
     assert configured == [3]
     assert resolved == [({"molgpka": {}}, 3)]
+
+
+def test_default_combined_free_energy_cutoff_is_30():
+    pk = main.pKasso("C")
+
+    assert pk.free_energy_cutoff_combined == 30.0
 
 
 def test_pkasso_rejects_obsolete_device_keyword():
     with pytest.raises(TypeError, match="unexpected keyword argument 'device'"):
         main.pKasso("C", device="cpu")
+
+
+def test_pkasso_rejects_obsolete_expert_combination_keyword():
+    with pytest.raises(TypeError, match="unexpected keyword argument 'expert_combination'"):
+        main.pKasso("C", expert_combination="product_of_experts")
 
 
 # @pytest.mark.parametrize(
@@ -310,27 +320,8 @@ def test_setup_returns_processed_input_space_when_site_limit_exceeded(monkeypatc
     assert Chem.MolToSmiles(distribution.mols_lib[""]) == Chem.MolToSmiles(pk.mol0)
 
 
-@pytest.mark.parametrize(
-    ("output_molecules_from_scan", "expected_molecules", "expected_prep_calls"),
-    [
-        (
-            True,
-            {
-                7.0: "molecule-7.0",
-                7.5: "molecule-7.5",
-            },
-            [7.0, 7.5],
-        ),
-        (False, {}, []),
-    ],
-)
-def test_scan_optionally_collects_molecule_output_for_each_ph(
-    output_molecules_from_scan,
-    expected_molecules,
-    expected_prep_calls,
-):
+def test_scan_collects_distributions_without_preparing_molecule_output():
     pk = main.pKasso.__new__(main.pKasso)
-    pk.output_molecules_from_scan = output_molecules_from_scan
     prep_calls = []
 
     def calc_microstates(pH):
@@ -343,6 +334,7 @@ def test_scan_optionally_collects_molecule_output_for_each_ph(
             state_strs=["1"],
             state_freqs=np.array([1.0], dtype=np.float64),
             state_freqs_sigmas=None,
+            state_freq_samples=None,
         )
 
     def prep_single_output(distribution):
@@ -354,8 +346,11 @@ def test_scan_optionally_collects_molecule_output_for_each_ph(
 
     distribution = pk._scan_pH(np.array([7.0, 7.5], dtype=np.float64))
 
-    assert distribution.molecules == expected_molecules
-    assert prep_calls == expected_prep_calls
+    assert sorted(distribution.microstate_distributions) == [7.0, 7.5]
+    assert distribution.microstate_distributions[7.0].pH == 7.0
+    assert distribution.microstate_distributions[7.5].pH == 7.5
+    assert prep_calls == []
+    assert np.all(np.isnan(distribution.net_charge_sigmas))
 
 
 def test_run_acid_base_calcs_passes_source_mol_to_half_neutralized_predictors():
@@ -526,7 +521,7 @@ def test_screen_clusters_does_not_decouple_phosphates_for_non_molgpka_context(mo
     assert pk.screen_clusters(indices, q_options, context=context) == [list(range(len(indices)))]
 
 
-def test_combine_expert_energies_uses_reference_states_and_aligns_shared_states():
+def test_combine_expert_energies_treats_supported_pruned_state_as_zero(caplog):
     space = main.ProtonationIndexSpace(
         indices=[1, 2],
         q_options=np.array([[1, 1, 0], [1, 1, 0]], dtype=np.int64),
@@ -546,11 +541,19 @@ def test_combine_expert_energies_uses_reference_states_and_aligns_shared_states(
         Gs=np.array([3.0, 5.0, 1.0]),
     )
 
-    combined = main.combine_expert_energies([raw_a, raw_b])
+    with caplog.at_level(logging.DEBUG, logger=main.logger.name):
+        combined = main.combine_expert_energies([raw_a, raw_b])
 
     assert combined.state_strs == ["00", "01", "11"]
     assert combined.Gs.tolist() == pytest.approx([0.0, 3.04742587, 3.0])
-    assert combined.Gs_sigmas.tolist() == pytest.approx([0.06707031, 2.0, 1.34714325])
+    assert combined.expert_state_freqs is not None
+    assert combined.expert_state_freqs[0] == pytest.approx(
+        main.calc_populations(np.array([0.0, 3.0, 2.0]))
+    )
+    expected_second = np.zeros(3)
+    expected_second[[0, 2]] = main.calc_populations(np.array([1.0, 5.0]))
+    assert combined.expert_state_freqs[1] == pytest.approx(expected_second)
+    assert "Treating supported states ['01']" in caplog.text
 
 
 def test_combine_expert_energies_falls_back_to_first_model_without_shared_state(caplog):
@@ -581,7 +584,133 @@ def test_combine_expert_energies_falls_back_to_first_model_without_shared_state(
     assert combined.state_strs == ["0"]
     assert combined.state_vecs[0].tolist() == [0]
     assert combined.Gs.tolist() == pytest.approx([0.0])
-    assert combined.Gs_sigmas.tolist() == pytest.approx([2.0])
+    assert combined.expert_state_freqs is None
+
+
+def test_complete_expert_populations_drive_microstate_and_macro_uncertainty():
+    space = main.ProtonationIndexSpace(
+        indices=[1],
+        q_options=np.array([[1, 1, 0]], dtype=np.int64),
+        mols_lib={
+            "0": Chem.MolFromSmiles("[NH2-]"),
+            "1": Chem.MolFromSmiles("N"),
+        },
+    )
+    raw_a = main.RawMicrostateEnergies(
+        index_space=space,
+        pH=7.0,
+        state_strs=["0", "1"],
+        state_vecs=[np.array([0]), np.array([1])],
+        Gs=np.array([0.0, 2.0]),
+    )
+    raw_b = main.RawMicrostateEnergies(
+        index_space=space,
+        pH=7.0,
+        state_strs=["0", "1"],
+        state_vecs=[np.array([0]), np.array([1])],
+        Gs=np.array([0.0, 1.0]),
+    )
+    expected_expert_freqs = np.array([
+        main.calc_populations(np.array([0.0, 2.0])),
+        main.calc_populations(np.array([0.0, 1.0])),
+    ])
+
+    pk = main.pKasso.__new__(main.pKasso)
+    pk.index_space0 = space
+    pk.expert_weights = None
+    pk.construct_mols = lambda *_args: None
+
+    distribution = pk._finalize_microstates([raw_a, raw_b])
+
+    assert distribution.state_freq_samples == pytest.approx(expected_expert_freqs)
+    assert distribution.state_freqs_sigmas == pytest.approx(
+        np.std(expected_expert_freqs, axis=0, ddof=1)
+    )
+    expert_net_charges = -expected_expert_freqs[:, 0]
+    assert distribution.net_charge_sigma == pytest.approx(
+        np.std(expert_net_charges, ddof=1)
+    )
+    assert distribution.freqs_macro_samples is not None
+
+
+def test_supported_pruned_state_keeps_population_uncertainty():
+    space = main.ProtonationIndexSpace(
+        indices=[1],
+        q_options=np.array([[1, 1, 0]], dtype=np.int64),
+        mols_lib={
+            "0": Chem.MolFromSmiles("[NH2-]"),
+            "1": Chem.MolFromSmiles("N"),
+        },
+    )
+    raw_a = main.RawMicrostateEnergies(
+        index_space=space,
+        pH=7.0,
+        state_strs=["0", "1"],
+        state_vecs=[np.array([0]), np.array([1])],
+        Gs=np.array([0.0, 2.0]),
+    )
+    raw_b = main.RawMicrostateEnergies(
+        index_space=space,
+        pH=7.0,
+        state_strs=["0"],
+        state_vecs=[np.array([0])],
+        Gs=np.array([0.0]),
+    )
+    pk = main.pKasso.__new__(main.pKasso)
+    pk.index_space0 = space
+    pk.expert_weights = None
+    pk.construct_mols = lambda *_args: None
+
+    distribution = pk._finalize_microstates([raw_a, raw_b])
+
+    assert distribution.state_freq_samples is not None
+    assert distribution.state_freq_samples[1] == pytest.approx([1.0, 0.0])
+    assert distribution.state_freqs_sigmas is not None
+    assert distribution.net_charge_sigma is not None
+    assert distribution.freqs_macro_samples is not None
+
+
+def test_unsupported_expert_state_disables_all_population_uncertainty(caplog):
+    primary_space = main.ProtonationIndexSpace(
+        indices=[1],
+        q_options=np.array([[1, 1, 0]], dtype=np.int64),
+        mols_lib={
+            "0": Chem.MolFromSmiles("[NH2-]"),
+            "1": Chem.MolFromSmiles("N"),
+        },
+    )
+    secondary_space = main.ProtonationIndexSpace(
+        indices=[1],
+        q_options=np.array([[0, 1, 0]], dtype=np.int64),
+    )
+    raw_a = main.RawMicrostateEnergies(
+        index_space=primary_space,
+        pH=7.0,
+        state_strs=["0", "1"],
+        state_vecs=[np.array([0]), np.array([1])],
+        Gs=np.array([0.0, 2.0]),
+    )
+    raw_b = main.RawMicrostateEnergies(
+        index_space=secondary_space,
+        pH=7.0,
+        state_strs=["1"],
+        state_vecs=[np.array([1])],
+        Gs=np.array([0.0]),
+    )
+    pk = main.pKasso.__new__(main.pKasso)
+    pk.index_space0 = primary_space
+    pk.expert_weights = None
+    pk.construct_mols = lambda *_args: None
+
+    with caplog.at_level(logging.WARNING, logger=main.logger.name):
+        distribution = pk._finalize_microstates([raw_a, raw_b])
+
+    assert "Microstate 0" in caplog.text
+    assert "unsupported by expert 2" in caplog.text
+    assert distribution.state_freq_samples is None
+    assert distribution.state_freqs_sigmas is None
+    assert distribution.net_charge_sigma is None
+    assert distribution.freqs_macro_samples is None
 
 
 def test_combine_expert_energies_pads_different_index_spaces_with_neutral_state():
@@ -664,6 +793,88 @@ def test_relevant_states_are_named_in_scan_order():
         "2 (+1)",
         "3 (+0)",
     ]
+
+
+def test_state_is_plot_relevant_when_any_expert_population_exceeds_cutoff():
+    pk = main.pKasso("N", tautomer_search=False)
+    pk.index_space0 = main.ProtonationIndexSpace(
+        indices=[],
+        q_options=np.empty((0, 3), dtype=np.int64),
+        mols_lib={
+            "0": Chem.MolFromSmiles("N"),
+            "1": Chem.MolFromSmiles("[NH2-]"),
+        },
+    )
+    state_freqs = {
+        "0": np.array([0.995, 0.995]),
+        "1": np.array([0.005, 0.005]),
+    }
+    expert_max_freqs = {
+        "0": np.array([0.995, 0.8]),
+        "1": np.array([0.005, 0.2]),
+    }
+
+    state_strs, _, _, _, not_relevant, _ = pk.calc_relevant_states(
+        state_freqs,
+        state_freqs_expert_max_all=expert_max_freqs,
+    )
+
+    assert set(state_strs) == {"0", "1"}
+    assert not not_relevant
+
+
+def test_macro_pka_uncertainty_requires_complete_expert_trajectories():
+    pHs = np.array([6.0, 7.0], dtype=np.float64)
+    complete = {
+        0: np.array([0.8, 0.7]),
+        1: np.array([0.2, 0.3]),
+    }
+
+    assert main.combine_pkas_macro_sigmas(pHs, [complete, {}]) == {}
+
+
+def test_macro_pka_uncertainty_uses_complete_expert_trajectories():
+    pHs = np.array([6.0, 7.0], dtype=np.float64)
+    samples = [
+        {
+            0: np.array([0.8, 0.6]),
+            1: np.array([0.2, 0.4]),
+        },
+        {
+            0: np.array([0.4, 0.2]),
+            1: np.array([0.6, 0.8]),
+        },
+    ]
+    expert_pkas = [
+        main.combine_pkas_macro(
+            pHs,
+            [
+                {q: float(freqs[expert_idx]) for q, freqs in sample.items()}
+                for sample in samples
+            ],
+        )[0]
+        for expert_idx in range(2)
+    ]
+
+    sigmas = main.combine_pkas_macro_sigmas(pHs, samples)
+
+    assert sigmas[0] == pytest.approx(np.std(expert_pkas, ddof=1))
+
+
+def test_macro_pka_uncertainty_skips_expert_with_zero_macrostate_population():
+    pHs = np.array([6.0, 7.0], dtype=np.float64)
+    samples = [
+        {
+            0: np.array([0.8, 0.0]),
+            1: np.array([0.2, 1.0]),
+        },
+        {
+            0: np.array([0.4, 0.0]),
+            1: np.array([0.6, 1.0]),
+        },
+    ]
+
+    assert main.combine_pkas_macro_sigmas(pHs, samples) == {}
 
 
 def test_process_cluster_uses_batched_standard_free_energies_for_unipka_path():

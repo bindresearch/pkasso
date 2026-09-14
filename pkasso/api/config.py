@@ -11,8 +11,8 @@ DATA_DIR = API_ROOT / "data"
 FEEDBACK_DIR = Path(os.environ.get("PKASSO_PATH_FEEDBACK", DATA_DIR))
 FEEDBACK_DB = FEEDBACK_DIR / "feedback.sqlite3"
 
-DEFAULT_LIGAND = "mymolecule"
-DEFAULT_SMILES = "Cc1cc(C(C)(C)C)cc(C)c1CC1=NCCN1"
+DEFAULT_LIGAND = "Example"
+DEFAULT_SMILES = "c1cc(C(=O)O)ccc1CNCC(N)C(=O)O"
 CUTOFF_STATES = 200
 _UNIPKA_MODEL_FOLDER = os.environ.get("PKASSO_UNIPKA_MODEL_FOLDER") or os.environ.get(
     "UNIPKA_MODEL_FOLDER"

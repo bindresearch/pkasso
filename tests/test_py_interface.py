@@ -111,7 +111,6 @@ def test_scan_ph_passes_model_mapping_to_pkasso(monkeypatch):
         pHs=[6.0, 7.0],
         model=model,
         nthreads=4,
-        output_molecules_from_scan=False,
     )
 
     assert scan == "scan"
@@ -119,7 +118,6 @@ def test_scan_ph_passes_model_mapping_to_pkasso(monkeypatch):
     assert captured["pHs"].tolist() == [6.0, 7.0]
     assert captured["model"] is model
     assert captured["nthreads"] == 4
-    assert captured["output_molecules_from_scan"] is False
 
 
 def test_python_entry_points_validate_numeric_inputs():
