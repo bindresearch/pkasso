@@ -45,12 +45,12 @@ def test_scan_exposes_uncertainty_curves_and_plots_them():
         pkas_macro_sigmas={0: 0.2},
     )
 
-    fig = scan.plot_scan()
+    fig = scan.plot_scan(fontsize=14)
 
     assert scan.sfreqs_relevant_sigmas[0].tolist() == pytest.approx([0.05, 0.03])
     assert scan.net_charge_sigmas.tolist() == pytest.approx([0.02, 0.04])
     assert scan.pkas_macro_sigmas == {0: 0.2}
-    assert fig is not None
+    assert fig.axes[1].texts[0].get_fontsize() == 14
 
 
 def test_scan_legend_uses_microstate_names():
@@ -79,14 +79,28 @@ def test_scan_legend_uses_microstate_names():
         pkas_macro={},
     )
 
-    legend = scan.plot_scan().axes[0].get_legend()
+    fig = scan.plot_scan(fontsize=14)
+    legend = fig.axes[0].get_legend()
 
     assert legend is not None
     assert legend.get_title().get_text() == "Microstate"
+    assert legend.get_title().get_fontsize() == 12
+    assert all(text.get_fontsize() == 12 for text in legend.get_texts())
     assert [text.get_text() for text in legend.get_texts()] == [
         "1 (+0)",
         "2 (+1)",
     ]
+    assert fig.axes[0].title.get_fontsize() == 14
+    for axis in fig.axes:
+        assert axis.xaxis.label.get_fontsize() == 14
+        assert axis.yaxis.label.get_fontsize() == 14
+        assert all(label.get_fontsize() == 14 for label in axis.get_xticklabels())
+        assert all(label.get_fontsize() == 14 for label in axis.get_yticklabels())
+
+    custom_legend = scan.plot_scan(fontsize=14, legend_fontsize=9).axes[0].get_legend()
+    assert custom_legend is not None
+    assert custom_legend.get_title().get_fontsize() == 9
+    assert all(text.get_fontsize() == 9 for text in custom_legend.get_texts())
 
 
 def test_scan_plot_mols_delegates_to_draw_mols(monkeypatch):
@@ -115,7 +129,7 @@ def test_scan_plot_mols_delegates_to_draw_mols(monkeypatch):
 
     monkeypatch.setattr(postprocess, "draw_mols", fake_draw_mols)
 
-    assert scan.plot_mols(size_x=300, size_y=225, molsPerRow=2) is sentinel
+    assert scan.plot_mols(size_x=300, size_y=225, molsPerRow=2, fontsize=11) is sentinel
     assert calls == [
         (
             scan.mols_relevant,
@@ -123,6 +137,7 @@ def test_scan_plot_mols_delegates_to_draw_mols(monkeypatch):
                 "subImgSize": (300, 225),
                 "max_cols": 2,
                 "show_probability": False,
+                "fontsize": 11,
             },
         )
     ]
