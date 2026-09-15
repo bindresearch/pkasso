@@ -2,6 +2,7 @@ import pytest
 import numpy as np
 from rdkit import Chem
 
+import pkasso.postprocess as postprocess
 from pkasso.postprocess import Molecule, Scan, combine_results
 
 
@@ -86,6 +87,46 @@ def test_scan_legend_uses_microstate_names():
         "1 (+0)",
         "2 (+1)",
     ]
+
+
+def test_scan_plot_mols_delegates_to_draw_mols(monkeypatch):
+    mol = Chem.MolFromSmiles("[CH3:1][OH:2]")
+    mol.SetProp("_Name", "1 (+0)")
+    scan = Scan(
+        name="scan",
+        indices=[1],
+        state_strs_relevant=["1"],
+        mols_relevant=[mol],
+        sfreqs_relevant=[],
+        sfreqs_relevant_sigmas=[],
+        pHs=np.array([], dtype=np.float64),
+        net_charges=np.array([], dtype=np.float64),
+        net_charge_sigmas=np.array([], dtype=np.float64),
+        sfreqs_not_relevant=[],
+        sfreqs_not_relevant_sigmas=[],
+        pkas_macro={},
+    )
+    sentinel = object()
+    calls = []
+
+    def fake_draw_mols(mols, **kwargs):
+        calls.append((mols, kwargs))
+        return sentinel
+
+    monkeypatch.setattr(postprocess, "draw_mols", fake_draw_mols)
+
+    assert scan.plot_mols(size_x=300, size_y=225, molsPerRow=2) is sentinel
+    assert calls == [
+        (
+            scan.mols_relevant,
+            {
+                "subImgSize": (300, 225),
+                "max_cols": 2,
+                "show_probability": False,
+            },
+        )
+    ]
+    assert all(atom.GetAtomMapNum() == 0 for atom in mol.GetAtoms())
 
 
 def test_scan_molecule_at_supports_exact_and_tolerant_lookup():

@@ -35,10 +35,15 @@ logger = logging.getLogger(__name__)
 
 
 def draw_mols(
-    mols: list[Mol] | tuple[Mol], subImgSize: tuple[int, int] = (250, 200), max_cols: int = 4, show_probability: bool = True
+    mols: list[Mol] | tuple[Mol],
+    subImgSize: tuple[int, int] = (250, 200),
+    max_cols: int = 4,
+    show_probability: bool = True,
+    fontsize: int = -1,
 ) -> Any:
     opts = MolDrawOptions()
     opts.backgroundColour = (1, 1, 1, 1)
+    opts.fixedFontSize = fontsize
 
     if show_probability:
         legends = [f"{x.GetProp('_Name')}\n{float(x.GetProp('Probability')) * 100:.2f}" + r"%" for x in mols]
@@ -219,7 +224,13 @@ class Scan:
             else:
                 print(f"pKa{idx + 1} | {q + 1} --> {q} | {pka:.3f} +/- {pka_sigma:.3f}")
 
-    def plot_mols(self, size_x: int = 200, size_y: int = 175, molsPerRow: int = 4) -> Any:
+    def plot_mols(
+            self,
+            size_x: int = 200,
+            size_y: int = 175,
+            molsPerRow: int = 4,
+            fontsize: int = -1
+    ) -> Any:
         """Plot rdkit molecules for relevant states together with state strings.
 
         Returns IPython.core.display.SVG when called from notebook
@@ -227,24 +238,18 @@ class Scan:
 
         """
 
-        opts = MolDrawOptions()
-        opts.backgroundColour = (1, 1, 1, 1)
-
         for mol in self.mols_relevant:
             _ = AllChem.Compute2DCoords(mol)
             for atom in mol.GetAtoms():
                 atom.SetAtomMapNum(0)
 
-        fig_mols = MolsToGridImage(
+        return draw_mols(
             self.mols_relevant,
-            molsPerRow=molsPerRow,
             subImgSize=(size_x, size_y),
-            legends=[x.GetProp("_Name") for x in self.mols_relevant],
-            returnPNG=False,
-            useSVG=True,
-            drawOptions=opts,
+            max_cols=molsPerRow,
+            show_probability=False,
+            fontsize=fontsize,
         )
-        return fig_mols
 
     def plot_scan(
         self,
