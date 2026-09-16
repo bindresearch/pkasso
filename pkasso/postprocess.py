@@ -257,6 +257,7 @@ class Scan:
         show_legend: bool = True,
         fontsize: int = 12,
         legend_fontsize: int | None = None,
+        yticks_net_charge: NDArray[np.float64] | None = None,
     ) -> Figure_plt:
         """Plot microstate frequencies and expert-model spread across pH.
 
@@ -360,6 +361,9 @@ class Scan:
         ax[1].set_ylabel("Net charge", fontsize=fontsize)
 
         ax[1].grid(alpha=0.3)
+
+        if yticks_net_charge is not None:
+            ax[1].set_yticks(yticks_net_charge)
 
         if len(self.pHs) > 1:
             for idx in range(2):
