@@ -125,3 +125,5 @@ Five variants of Uni-pKa were trained (fold 0 to fold 4). The variants have simi
 `nthreads` controls RDKit preprocessing, MolGpKa PyTorch inference, and Uni-pKa preprocessing.
 
 For more examples, see the [jupyter notebook](https://github.com/bindresearch/pkasso/blob/main/example/example.ipynb).
+
+We use heuristic rules to exclude and modify certain prediction results from MolGpKa and Uni-pKa. The full list of exclusions and modifications is in Table S1 in the preprint (to be published) or [csv file](pkasso/data/pka_corrections.csv) for the full list.
