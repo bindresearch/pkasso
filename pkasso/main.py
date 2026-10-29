@@ -1309,7 +1309,7 @@ class pKasso:
 
     # Internal options
     cutoff_states: int = 200
-    free_energy_cutoff_individual: float = 10.
+    free_energy_cutoff_individual: float = 30.
     max_states_individual: int = 20
     free_energy_cutoff_combined: float = 30.0
     max_states_combined: int = 20
