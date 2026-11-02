@@ -2,6 +2,7 @@ import pytest
 import numpy as np
 from rdkit import Chem
 
+import pkasso.postprocess as postprocess
 from pkasso.postprocess import Molecule, Scan, combine_results
 
 
@@ -44,48 +45,53 @@ def test_scan_exposes_uncertainty_curves_and_plots_them():
         pkas_macro_sigmas={0: 0.2},
     )
 
-    fig = scan.plot_scan()
+    fig = scan.plot_scan(fontsize=14)
 
     assert scan.sfreqs_relevant_sigmas[0].tolist() == pytest.approx([0.05, 0.03])
     assert scan.net_charge_sigmas.tolist() == pytest.approx([0.02, 0.04])
     assert scan.pkas_macro_sigmas == {0: 0.2}
-    assert fig is not None
+    assert fig.axes[1].texts[0].get_fontsize() == 14
 
 
-def test_scan_legend_uses_microstate_names():
-    mols = [Chem.MolFromSmiles("C"), Chem.MolFromSmiles("[NH4+]")]
-    for mol, name in zip(mols, ["1 (+0)", "2 (+1)"]):
-        mol.SetProp("_Name", name)
-
+def test_scan_plot_mols_delegates_to_draw_mols(monkeypatch):
+    mol = Chem.MolFromSmiles("[CH3:1][OH:2]")
+    mol.SetProp("_Name", "1 (+0)")
     scan = Scan(
         name="scan",
         indices=[1],
-        state_strs_relevant=["1", "2"],
-        mols_relevant=mols,
-        sfreqs_relevant=[
-            np.array([0.8, 0.2], dtype=np.float64),
-            np.array([0.2, 0.8], dtype=np.float64),
-        ],
-        sfreqs_relevant_sigmas=[
-            np.zeros(2, dtype=np.float64),
-            np.zeros(2, dtype=np.float64),
-        ],
-        pHs=np.array([6.0, 7.0], dtype=np.float64),
-        net_charges=np.array([0.2, 0.8], dtype=np.float64),
-        net_charge_sigmas=np.zeros(2, dtype=np.float64),
+        state_strs_relevant=["1"],
+        mols_relevant=[mol],
+        sfreqs_relevant=[],
+        sfreqs_relevant_sigmas=[],
+        pHs=np.array([], dtype=np.float64),
+        net_charges=np.array([], dtype=np.float64),
+        net_charge_sigmas=np.array([], dtype=np.float64),
         sfreqs_not_relevant=[],
         sfreqs_not_relevant_sigmas=[],
         pkas_macro={},
     )
+    sentinel = object()
+    calls = []
 
-    legend = scan.plot_scan().axes[0].get_legend()
+    def fake_draw_mols(mols, **kwargs):
+        calls.append((mols, kwargs))
+        return sentinel
 
-    assert legend is not None
-    assert legend.get_title().get_text() == "Microstate"
-    assert [text.get_text() for text in legend.get_texts()] == [
-        "1 (+0)",
-        "2 (+1)",
+    monkeypatch.setattr(postprocess, "draw_mols", fake_draw_mols)
+
+    assert scan.plot_mols(size_x=300, size_y=225, molsPerRow=2, fontsize=11) is sentinel
+    assert calls == [
+        (
+            scan.mols_relevant,
+            {
+                "subImgSize": (300, 225),
+                "max_cols": 2,
+                "show_probability": False,
+                "fontsize": 11,
+            },
+        )
     ]
+    assert all(atom.GetAtomMapNum() == 0 for atom in mol.GetAtoms())
 
 
 def test_scan_molecule_at_supports_exact_and_tolerant_lookup():

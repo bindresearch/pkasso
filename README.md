@@ -120,8 +120,10 @@ smiles_out, mols_out = protonate(smiles, model=model, pH=pH, nthreads=8)
 
 (Ensure that molgpka is the first listed predictor in the dictionary.)
 
-Five variants of Uni-pKa were trained (fold 0 to fold 4). The variants have similar accuracy. By default (including the CLI) fold 1 is used. The selected Uni-pKa model fold is downloaded from Hugging Face on first use and cached for later processes. All model checkpoints are cached in the user data directory. Uncomment the `"model_dir"` keyword to manually define the cache folder.
+Five variants of Uni-pKa were trained (fold 0 to fold 4). The variants have similar accuracy. By default (including the CLI) fold 2 is used. The selected Uni-pKa model fold is downloaded from Hugging Face on first use and cached for later processes. All model checkpoints are cached in the user data directory. Uncomment the `"model_dir"` keyword to manually define the cache folder. We have extracted the basic Uni-pKa, Uni-Mol, and Uni-Core functions needed for pKasso(Uni-pKa) inference and split them off the main Uni-pKa and Uni-Core repositories to reduce installation size for pKasso(Uni-pKa). The resulting `unipkainfer` package, published on `PyPI`, is installed automatically if pKasso is installed with Uni-pKa support: `pip install pkasso[unipka]`.
 
 `nthreads` controls RDKit preprocessing, MolGpKa PyTorch inference, and Uni-pKa preprocessing.
 
 For more examples, see the [jupyter notebook](https://github.com/bindresearch/pkasso/blob/main/example/example.ipynb).
+
+We use heuristic rules to exclude and modify certain prediction results from MolGpKa and Uni-pKa. The full list of exclusions and modifications is in Table S1 in the preprint (to be published) or [csv file](pkasso/data/pka_corrections.csv) for the full list.

@@ -35,10 +35,15 @@ logger = logging.getLogger(__name__)
 
 
 def draw_mols(
-    mols: list[Mol] | tuple[Mol], subImgSize: tuple[int, int] = (250, 200), max_cols: int = 4, show_probability: bool = True
+    mols: list[Mol] | tuple[Mol],
+    subImgSize: tuple[int, int] = (250, 200),
+    max_cols: int = 4,
+    show_probability: bool = True,
+    fontsize: int = -1,
 ) -> Any:
     opts = MolDrawOptions()
     opts.backgroundColour = (1, 1, 1, 1)
+    opts.fixedFontSize = fontsize
 
     if show_probability:
         legends = [f"{x.GetProp('_Name')}\n{float(x.GetProp('Probability')) * 100:.2f}" + r"%" for x in mols]
@@ -219,7 +224,13 @@ class Scan:
             else:
                 print(f"pKa{idx + 1} | {q + 1} --> {q} | {pka:.3f} +/- {pka_sigma:.3f}")
 
-    def plot_mols(self, size_x: int = 200, size_y: int = 175, molsPerRow: int = 4) -> Any:
+    def plot_mols(
+            self,
+            size_x: int = 200,
+            size_y: int = 175,
+            molsPerRow: int = 4,
+            fontsize: int = -1
+    ) -> Any:
         """Plot rdkit molecules for relevant states together with state strings.
 
         Returns IPython.core.display.SVG when called from notebook
@@ -227,30 +238,33 @@ class Scan:
 
         """
 
-        opts = MolDrawOptions()
-        opts.backgroundColour = (1, 1, 1, 1)
-
         for mol in self.mols_relevant:
             _ = AllChem.Compute2DCoords(mol)
             for atom in mol.GetAtoms():
                 atom.SetAtomMapNum(0)
 
-        fig_mols = MolsToGridImage(
+        return draw_mols(
             self.mols_relevant,
-            molsPerRow=molsPerRow,
             subImgSize=(size_x, size_y),
-            legends=[x.GetProp("_Name") for x in self.mols_relevant],
-            returnPNG=False,
-            useSVG=True,
-            drawOptions=opts,
+            max_cols=molsPerRow,
+            show_probability=False,
+            fontsize=fontsize,
         )
-        return fig_mols
 
     def plot_scan(
         self,
         highlight_idx: int = 0,
+        show_legend: bool = True,
+        fontsize: int = 12,
+        legend_fontsize: int | None = None,
+        yticks_net_charge: NDArray[np.float64] | None = None,
     ) -> Figure_plt:
-        """Plot microstate frequencies and expert-model spread across pH."""
+        """Plot microstate frequencies and expert-model spread across pH.
+
+        ``fontsize`` controls all plot text except the microstate legend. The
+        legend defaults to four points smaller and can be set independently with
+        ``legend_fontsize``.
+        """
 
         # print(highlight_idx)
 
@@ -266,15 +280,6 @@ class Scan:
         fig_scan, ax = plt.subplots(2, 1, figsize=(820 * px, 600 * px), height_ratios=[0.6, 0.4])
 
         for idx, (sfreq, sfreq_sigma) in enumerate(zip(self.sfreqs_not_relevant, self.sfreqs_not_relevant_sigmas)):
-            # if np.any(sfreq_sigma > 0):
-            #     ax[0].fill_between(
-            #         self.pHs,
-            #         np.clip((sfreq - sfreq_sigma) * 100, 0.0, 100.0),
-            #         np.clip((sfreq + sfreq_sigma) * 100, 0.0, 100.0),
-            #         color="gray",
-            #         alpha=0.08,
-            #         linewidth=0,
-            #     )
             ax[0].plot(self.pHs, sfreq * 100, style, color="gray", lw=1.0, alpha=0.3)
 
         for idx, (state_str, sfreq, sfreq_sigma) in enumerate(
@@ -307,13 +312,25 @@ class Scan:
                     linewidth=0,
                 )
             ax[0].plot(self.pHs, sfreq * 100, style, label=state_str, color=color, alpha=alpha, lw=lw)
-        if len(self.state_strs_conv) > 8:
-            ax[0].legend(title="Microstate", ncol=2, fontsize=8)
-        elif len(self.state_strs_conv) > 1:
-            ax[0].legend(title="Microstate", ncol=1, fontsize=10)
+        if show_legend:
+            resolved_legend_fontsize = fontsize - 4 if legend_fontsize is None else legend_fontsize
+            if len(self.state_strs_conv) > 8:
+                ax[0].legend(
+                    title="Microstate",
+                    ncol=2,
+                    fontsize=resolved_legend_fontsize,
+                    title_fontsize=resolved_legend_fontsize,
+                )
+            elif len(self.state_strs_conv) > 1:
+                ax[0].legend(
+                    title="Microstate",
+                    ncol=1,
+                    fontsize=resolved_legend_fontsize,
+                    title_fontsize=resolved_legend_fontsize,
+                )
 
-        ax[0].set_xlabel("pH", fontsize=12)
-        ax[0].set_ylabel("Probability [%]", fontsize=12)
+        ax[0].set_xlabel("pH", fontsize=fontsize)
+        ax[0].set_ylabel("Probability [%]", fontsize=fontsize)
         ax[0].grid(alpha=0.3)
 
         if np.any(self.net_charge_sigmas > 0):
@@ -338,20 +355,25 @@ class Scan:
             ax[1].plot(self.pHs[x], self.net_charges[x], "o", color=color_rb, markersize=5)
             pka_sigma = self.pkas_macro_sigmas.get(q)
             pka_label = f"{pka:.2f}" if pka_sigma is None else f"{pka:.2f}+/-{pka_sigma:.2f}"
-            ax[1].text(self.pHs[x] + 0.1, self.net_charges[x] + 0.05, pka_label, fontsize=12)
+            ax[1].text(self.pHs[x] + 0.1, self.net_charges[x] + 0.05, pka_label, fontsize=fontsize)
 
-        ax[1].set_xlabel("pH", fontsize=12)
-        ax[1].set_ylabel("Net charge", fontsize=12)
+        ax[1].set_xlabel("pH", fontsize=fontsize)
+        ax[1].set_ylabel("Net charge", fontsize=fontsize)
 
         ax[1].grid(alpha=0.3)
+
+        if yticks_net_charge is not None:
+            ax[1].set_yticks(yticks_net_charge)
 
         if len(self.pHs) > 1:
             for idx in range(2):
                 ax[idx].set(xlim=(self.pHs[0], self.pHs[-1]))
                 ax[idx].set_xticks(np.arange(self.pHs[0], self.pHs[-1] + 0.001, 1))
-                ax[idx].tick_params(axis="both", which="major", labelsize=12)
 
-        ax[0].set_title(self.name)
+        for axis in ax:
+            axis.tick_params(axis="both", which="major", labelsize=fontsize)
+
+        ax[0].set_title(self.name, fontsize=fontsize)
 
         fig_scan.tight_layout()
         plt.close(fig_scan)
