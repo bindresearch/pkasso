@@ -262,7 +262,7 @@ class Scan:
         """Plot microstate frequencies and expert-model spread across pH.
 
         ``fontsize`` controls all plot text except the microstate legend. The
-        legend defaults to two points smaller and can be set independently with
+        legend defaults to four points smaller and can be set independently with
         ``legend_fontsize``.
         """
 

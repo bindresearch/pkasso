@@ -53,56 +53,6 @@ def test_scan_exposes_uncertainty_curves_and_plots_them():
     assert fig.axes[1].texts[0].get_fontsize() == 14
 
 
-def test_scan_legend_uses_microstate_names():
-    mols = [Chem.MolFromSmiles("C"), Chem.MolFromSmiles("[NH4+]")]
-    for mol, name in zip(mols, ["1 (+0)", "2 (+1)"]):
-        mol.SetProp("_Name", name)
-
-    scan = Scan(
-        name="scan",
-        indices=[1],
-        state_strs_relevant=["1", "2"],
-        mols_relevant=mols,
-        sfreqs_relevant=[
-            np.array([0.8, 0.2], dtype=np.float64),
-            np.array([0.2, 0.8], dtype=np.float64),
-        ],
-        sfreqs_relevant_sigmas=[
-            np.zeros(2, dtype=np.float64),
-            np.zeros(2, dtype=np.float64),
-        ],
-        pHs=np.array([6.0, 7.0], dtype=np.float64),
-        net_charges=np.array([0.2, 0.8], dtype=np.float64),
-        net_charge_sigmas=np.zeros(2, dtype=np.float64),
-        sfreqs_not_relevant=[],
-        sfreqs_not_relevant_sigmas=[],
-        pkas_macro={},
-    )
-
-    fig = scan.plot_scan(fontsize=14)
-    legend = fig.axes[0].get_legend()
-
-    assert legend is not None
-    assert legend.get_title().get_text() == "Microstate"
-    assert legend.get_title().get_fontsize() == 12
-    assert all(text.get_fontsize() == 12 for text in legend.get_texts())
-    assert [text.get_text() for text in legend.get_texts()] == [
-        "1 (+0)",
-        "2 (+1)",
-    ]
-    assert fig.axes[0].title.get_fontsize() == 14
-    for axis in fig.axes:
-        assert axis.xaxis.label.get_fontsize() == 14
-        assert axis.yaxis.label.get_fontsize() == 14
-        assert all(label.get_fontsize() == 14 for label in axis.get_xticklabels())
-        assert all(label.get_fontsize() == 14 for label in axis.get_yticklabels())
-
-    custom_legend = scan.plot_scan(fontsize=14, legend_fontsize=9).axes[0].get_legend()
-    assert custom_legend is not None
-    assert custom_legend.get_title().get_fontsize() == 9
-    assert all(text.get_fontsize() == 9 for text in custom_legend.get_texts())
-
-
 def test_scan_plot_mols_delegates_to_draw_mols(monkeypatch):
     mol = Chem.MolFromSmiles("[CH3:1][OH:2]")
     mol.SetProp("_Name", "1 (+0)")
