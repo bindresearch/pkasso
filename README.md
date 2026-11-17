@@ -31,6 +31,12 @@ pip install pkasso
 
 pKasso can be run with a mixed model based on MolGpKa and Uni-pKa. In that case, install `pKasso[unipka]`.
 
+The Uni-pKa models distributed with unipkainfer used for `pKasso[unipka]` were trained using data from:
+
+*Jonathan Zheng, & Lafontant-Joseph, O. (2026). IUPAC/Dissociation-Constants: v2.3d (Versions v2-3d) [Dataset]. Zenodo. https://doi.org/10.5281/zenodo.19112621 (CC BY-NC 4.0 Licence).*
+
+Commercial use of the model weights is not authorised without additional permission from the relevant rights holders. This includes the use of the pKasso(Uni-pKa) and pKasso(mixed) models.
+
 ```
 # Create conda environment
 conda create -n pkasso python=3.12

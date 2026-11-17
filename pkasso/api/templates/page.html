@@ -62,7 +62,7 @@
         </h1>
         <p class="mt-5 max-w-2xl text-base leading-7 text-[color:var(--bind-muted)] sm:text-lg">
           Generate likely protonation microstates, inspect pH-dependent distributions, and export structures for downstream modelling.
-          Choose between MolGpKa, Uni-pKa, or a mixed model for each full pH scan.
+          Choose between MolGpKa, Uni-pKa<sup><a href="#model-licensing" aria-label="Model licensing information">*</a></sup>, or a mixed<sup><a href="#model-licensing" aria-label="Model licensing information">*</a></sup> model for each full pH scan.
         </p>
         <div id="feedback-page-status" class="mt-5 max-w-2xl"></div>
       </div>
@@ -123,8 +123,6 @@
     </form>
   </dialog>
   <script src="{{ root_path }}/static/app.js"></script>
-</body>
-</html>
 <footer class="">
     <div class="vertical-padding-sm flex flex-col gap-10 bg-charcoal text-white">
         <div class="px-10 pt-10">
@@ -141,8 +139,16 @@
                 </span>
             </a>
         </div>
+        <section id="model-licensing" class="model-licensing px-10" aria-labelledby="model-licensing-heading" tabindex="-1">
+            <h2 id="model-licensing-heading" class="font-semibold">* Model licensing</h2>
+            <p>The Uni-pKa and mixed model choices use models trained using data from:</p>
+            <p>Jonathan Zheng, &amp; Lafontant-Joseph, O. (2026). <cite>IUPAC/Dissociation-Constants: v2.3d (Versions v2-3d)</cite> [Dataset]. Zenodo. <a href="https://doi.org/10.5281/zenodo.19112621">https://doi.org/10.5281/zenodo.19112621</a> (<a href="https://creativecommons.org/licenses/by-nc/4.0/">CC BY-NC 4.0 Licence</a>).</p>
+            <p>Commercial use of the model weights is not authorised without additional permission from the relevant rights holders. This includes the use of the pKasso(Uni-pKa) and pKasso(mixed) models.</p>
+        </section>
         <div class="px-10 pb-10 flex flex-col sm:flex-row gap-2 text-16">
             <p>Bind Research Ltd 2026 All rights reserved </p>
         </div>
     </div>
 </footer>
+</body>
+</html>
